@@ -20,7 +20,6 @@ function emptyAgent(seed: string): Form {
     avatar: "",
     identity: "",
     harness: "",
-    cwd: "",
     env: {},
     mcpServerIds: [],
     permissionPolicy: "ask",
@@ -52,7 +51,6 @@ const comparable = (a: Form) =>
     a.avatarShape,
     a.identity,
     a.harness,
-    a.cwd,
     a.env,
     [...a.mcpServerIds].sort(),
     a.permissionPolicy,
@@ -131,10 +129,7 @@ export function AgentEditor(props: {
           <AgentAvatar agent={form} size={28} />
           <div className="editor-title">
             <h2>{agent ? agent.name : form.name.trim() || "新建 Agent"}</h2>
-            <div className="sub">
-              {harness ? harness.name : "未绑定 Harness"}
-              {form.cwd && ` · ${form.cwd}`}
-            </div>
+            <div className="sub">{harness ? harness.name : "未绑定 Harness"}</div>
           </div>
         </div>
         {agent && (
@@ -199,16 +194,6 @@ export function AgentEditor(props: {
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="field">
-                <span className="label">工作目录</span>
-                <input
-                  className="input mono"
-                  value={form.cwd}
-                  onChange={(e) => set("cwd", e.target.value)}
-                  placeholder="~（主目录）；群聊里使用群的共享目录"
-                  spellCheck={false}
-                />
               </label>
               <div className="field">
                 <span className="label">工具授权</span>

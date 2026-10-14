@@ -32,5 +32,11 @@ export function withViewTransition(update: () => void) {
     update();
     return;
   }
-  doc.startViewTransition(() => flushSync(update));
+  const t = doc.startViewTransition(() => flushSync(update)) as {
+    ready?: Promise<void>;
+    finished?: Promise<void>;
+  } | null;
+  // A newer navigation may skip this one (e.g. the first-launch redirect); that is not an error.
+  t?.ready?.catch(() => {});
+  t?.finished?.catch(() => {});
 }

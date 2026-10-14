@@ -29,6 +29,8 @@ export interface HarnessInfo {
 }
 
 export interface Meta {
+  workspacesRoot: string;
+  onboarded: boolean;
   harnesses: HarnessInfo[];
 }
 

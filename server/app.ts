@@ -13,6 +13,7 @@ import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 import { TuantuanMcp } from "./tuantuan-mcp";
+import { createWorkspace, existingFolder, workspacesRoot } from "./workspace";
 
 const AgentInputSchema = z.object({
   name: z
@@ -33,7 +34,6 @@ const AgentInputSchema = z.object({
   avatarShape: z.enum(AVATAR_SHAPES).optional(),
   identity: z.string().max(40000).default(""),
   harness: z.string().max(32).default(""),
-  cwd: z.string().max(1024).default(""),
   env: z
     .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "环境变量名只能包含字母、数字和下划线"), z.string().max(8000))
     .default({}),
@@ -91,6 +91,9 @@ export function createApp(deps: AppDeps) {
   );
   const orchestrator = new Orchestrator(store, host, publish);
   mcp.provider = orchestrator;
+
+  // Every conversation owns a working directory; older rooms without one get a workspace now.
+  for (const r of store.listRooms()) if (!r.cwd) store.updateRoom(r.id, { cwd: createWorkspace(r.name) });
 
   const json = (data: unknown, status = 200) => Response.json(data, { status });
 
@@ -196,8 +199,16 @@ export function createApp(deps: AppDeps) {
     const method = req.method;
     const body = async () => (method === "GET" || method === "DELETE" ? undefined : await req.json());
 
+    // Onboarding shows once: finishing or skipping it is remembered in the database.
+    if (resource === "onboarding" && method === "POST") {
+      store.setSetting("onboarded", true);
+      return json({ onboarded: true });
+    }
+
     if (resource === "meta" && method === "GET")
       return json({
+        onboarded: store.getSetting("onboarded", false),
+        workspacesRoot: workspacesRoot(),
         harnesses: visibleHarnesses().map(({ id, name, install, auth, login, docs, identity }) => ({
           id,
           name,
@@ -254,7 +265,9 @@ export function createApp(deps: AppDeps) {
       if (!id && method === "POST") {
         const r = RoomInputSchema.parse(await body());
         if (r.kind === "dm" && r.agentIds.length !== 1) throw new ValidationError("私聊必须且只能包含 1 个 Agent");
-        return json(store.createRoom(r.name, r.kind, r.agentIds, { mainAgentId: r.mainAgentId, cwd: r.cwd }), 201);
+        // A chosen folder must exist; otherwise the room gets a fresh workspace folder.
+        const cwd = r.cwd?.trim() ? existingFolder(r.cwd) : createWorkspace(r.name);
+        return json(store.createRoom(r.name, r.kind, r.agentIds, { mainAgentId: r.mainAgentId, cwd }), 201);
       }
       const room = id ? store.getRoom(id) : null;
       if (id && !room) return json({ error: "房间不存在" }, 404);
@@ -267,8 +280,8 @@ export function createApp(deps: AppDeps) {
         const g = z
           .object({ mainAgentId: z.string().nullable().optional(), cwd: z.string().max(1024).optional() })
           .parse(await body());
-        if (room.kind !== "group") throw new ValidationError("只有群聊有主 Agent 和共享工作目录");
-        return json(store.updateGroup(room.id, g));
+        if (g.mainAgentId !== undefined && room.kind !== "group") throw new ValidationError("只有群聊有主 Agent");
+        return json(store.updateRoom(room.id, { ...g, cwd: g.cwd === undefined ? undefined : existingFolder(g.cwd) }));
       }
       if (room && sub === "agents" && !subId && method === "PUT") {
         const { agentIds } = z.object({ agentIds: z.array(z.string()) }).parse(await body());

@@ -118,6 +118,12 @@ export const MIGRATIONS: string[] = [
    DELETE FROM room_agents WHERE room_id IN (SELECT room_id FROM device_sessions);
    DELETE FROM rooms WHERE id IN (SELECT room_id FROM device_sessions);
    DROP TABLE device_sessions;`,
+  // Working directories belong to conversations, not agents: a DM without one inherits its agent's old
+  // cwd; rooms still without one get an auto-created workspace at startup (server/app.ts).
+  `UPDATE rooms SET cwd = COALESCE((
+     SELECT a.cwd FROM agents a JOIN room_agents ra ON ra.agent_id = a.id WHERE ra.room_id = rooms.id LIMIT 1), '')
+   WHERE kind = 'dm' AND cwd = '';
+   ALTER TABLE agents DROP COLUMN cwd;`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -133,8 +139,6 @@ export interface Agent {
   identity: string;
   /** Harness id from server/harness.ts; "" = not bound yet (onboarding). */
   harness: string;
-  /** Working directory for private chats; "" = the user's home directory. Groups use the room's cwd. */
-  cwd: string;
   /** Extra env vars for the harness process (e.g. API keys). Never sent to the browser in full. */
   env: Record<string, string>;
   mcpServerIds: string[];
@@ -266,7 +270,6 @@ export class Store {
       avatar_shape: isAvatarShape(a.avatarShape) ? a.avatarShape : defaultAvatar(id).shape,
       identity: a.identity,
       harness: a.harness,
-      cwd: a.cwd,
       env: JSON.stringify(a.env),
       permission_policy: a.permissionPolicy,
       mcp_server_ids: JSON.stringify(a.mcpServerIds),
@@ -278,9 +281,9 @@ export class Store {
     };
     const sql =
       op === "insert"
-        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,cwd,env,permission_policy,mcp_server_ids,tools,skills,model_mode,created_at,updated_at)
-             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$cwd,$env,$permission_policy,$mcp_server_ids,$tools,$skills,$model_mode,$created_at,$updated_at)`
-        : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,identity=$identity,harness=$harness,cwd=$cwd,env=$env,
+        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,tools,skills,model_mode,created_at,updated_at)
+             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$tools,$skills,$model_mode,$created_at,$updated_at)`
+        : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,identity=$identity,harness=$harness,env=$env,
              permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
     try {
       this.db.query(sql).run(params);
@@ -357,10 +360,13 @@ export class Store {
     return this.getRoom(roomId) as Room;
   }
 
-  /** Group settings. The main agent must be a member; it falls back to the first member. */
-  updateGroup(roomId: string, patch: { mainAgentId?: string | null; cwd?: string }): Room {
+  /** Room settings. Changing the directory forgets harness sessions (they live in the old one). The main agent must be a member; it falls back to the first member. */
+  updateRoom(roomId: string, patch: { mainAgentId?: string | null; cwd?: string }): Room {
     this.db.transaction(() => {
-      if (patch.cwd !== undefined) this.db.query("UPDATE rooms SET cwd = ? WHERE id = ?").run(patch.cwd, roomId);
+      if (patch.cwd !== undefined && patch.cwd !== this.getRoom(roomId)?.cwd) {
+        this.db.query("UPDATE rooms SET cwd = ? WHERE id = ?").run(patch.cwd, roomId);
+        this.db.query("DELETE FROM acp_sessions WHERE room_id = ?").run(roomId);
+      }
       if (patch.mainAgentId !== undefined) this.setMainTx(roomId, patch.mainAgentId);
     })();
     return this.getRoom(roomId) as Room;
@@ -501,7 +507,6 @@ function toAgent(r: Row): Agent {
     avatarShape: r.avatar_shape as AvatarShape,
     identity: r.identity as string,
     harness: r.harness as string,
-    cwd: r.cwd as string,
     env: JSON.parse(r.env as string),
     mcpServerIds: JSON.parse(r.mcp_server_ids as string),
     permissionPolicy: r.permission_policy as PermissionPolicy,

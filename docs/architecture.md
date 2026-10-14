@@ -14,13 +14,13 @@
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件 |
 | `server/harness.ts` | Harness 注册表（Claude Code / Codex / Grok Build / OpenCode / mock）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖 |
 | `server/acp.ts` | `AcpProcess`：`Bun.spawn` 一个 Harness，用 SDK 的 `ndJsonStream` 建连接、`initialize`；处理 agent 发来的 `fs/*`（限制在 cwd 内）、`terminal/*`、`session/request_permission`；保留 stderr 末尾用于报错 |
-| `server/host.ts` | `HarnessHost`：按「Agent + cwd」复用进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；权限请求挂起直到用户回答 |
+| `server/host.ts` | `HarnessHost`：按「Agent + 会话工作目录」复用进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；权限请求挂起直到用户回答 |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
 | `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
 | `server/orchestrator.ts` | 房间队列、触发（私聊 / @ / @所有人 / 主 Agent）、单个 Agent 回合（拼 prompt + 身份文档 → host.prompt → 推送 update → 持久化时间线）、取消 |
 | `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
 | `server/store.ts` | SQLite 迁移与读写 |
-| `web/src/Harness.tsx` / `Setup.tsx` | 时间线渲染（工具卡片、diff、终端、计划）、权限弹窗、会话栏；新手引导页 |
+| `web/src/Harness.tsx` / `Setup.tsx` | 时间线渲染（工具卡片、diff、终端、计划）、权限弹窗、会话栏；新手引导（仅首次）/ Harness 管理页 |
 | `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
@@ -34,7 +34,7 @@
 
 | 状态 | 所有者 | 说明 |
 | --- | --- | --- |
-| Agent（Harness、cwd、env、权限策略、身份文档、MCP 服务器）、房间（主 Agent、cwd）、消息（含时间线 JSON）、ACP 会话映射、设置（Harness 路径覆盖） | SQLite（`Store`） | 唯一权威来源 |
+| Agent（Harness、env、权限策略、身份文档、MCP 服务器）、房间（主 Agent、工作目录）、消息（含时间线 JSON）、ACP 会话映射、设置（Harness 路径覆盖、`onboarded`） | SQLite（`Store`） | 唯一权威来源 |
 | Harness 进程、挂起的权限请求、终端输出 | `HarnessHost` 内存 | 进程退出即丢失；重启后用 `acp_sessions` 里的 sessionId resume / load |
 | ACP session 自身的对话历史 | Harness | 团团不重放 Harness 的历史（load 时的回放 update 被忽略），只显示自己存的消息 |
 | 模型、Key、登录 | Harness | 团团不保存凭据 |
@@ -63,7 +63,7 @@
 
 ## 取舍
 
-- **每个 Agent 一个进程**：会话隔离清楚、可分别设置 env 和 cwd；代价是内存。同一 Agent 在不同 cwd（不同群）会各开一个进程。
+- **每个 Agent 一个进程**：会话隔离清楚、可分别设置 env 和 cwd；代价是内存。同一 Agent 在不同会话（不同工作目录）会各开一个进程。
 - **身份文档不落盘**：不改用户仓库；拒绝了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 方案，因为它们会把登录态也换掉，每个 Agent 要各自登录。
 - **fs / terminal 限制在 cwd**：只约束经过团团的请求；Harness 自己的内置工具按它自己的沙箱与权限运行。
 - **未做鉴权 / 多用户**：仅适合本机。

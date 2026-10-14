@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AcpProcess } from "../server/acp";
@@ -7,7 +7,7 @@ import { serve } from "../server/app";
 import type { SessionView } from "../server/host";
 import type { RoomEvent } from "../server/orchestrator";
 import type { Agent, Message, Room } from "../server/store";
-import { agentInput, until } from "./helpers";
+import { agentInput, until, WORKSPACES } from "./helpers";
 
 const { app, server } = serve({ dbPath: ":memory:" }, 0);
 const base = `http://localhost:${server.port}`;
@@ -62,14 +62,54 @@ beforeAll(async () => {
   await new Promise((r) => ws.addEventListener("open", r, { once: true }));
 });
 
+describe("onboarding", () => {
+  test("shows until finished or skipped, then stays done", async () => {
+    expect((await api<{ onboarded: boolean }>("GET", "/api/meta")).data.onboarded).toBe(false);
+    expect((await api("POST", "/api/onboarding")).status).toBe(200);
+    expect((await api<{ onboarded: boolean }>("GET", "/api/meta")).data.onboarded).toBe(true);
+  });
+});
+
+describe("room working directories", () => {
+  test("each room gets its own folder under the workspaces root, created on disk with a unique name", async () => {
+    const a = await createAgent("WsBot");
+    const r1 = await createRoom("产品 研发/群", "group", [a.id]);
+    const r2 = await createRoom("产品 研发/群", "group", [a.id]);
+    const d = await createRoom("与 WsBot 私聊", "dm", [a.id]);
+    expect(r1.cwd).toBe(join(WORKSPACES, "产品-研发-群"));
+    expect(r2.cwd).toBe(join(WORKSPACES, "产品-研发-群-2"));
+    for (const r of [r1, r2, d]) expect(existsSync(r.cwd)).toBe(true);
+  });
+
+  test("a chosen folder must exist; changing it (DMs too) forgets the harness session", async () => {
+    const a = await createAgent("WsBot2");
+    const bad = await api<{ error: string }>("POST", "/api/rooms", {
+      name: "x",
+      kind: "dm",
+      agentIds: [a.id],
+      cwd: "/no/such/dir",
+    });
+    expect(bad.status).toBe(400);
+    const d = await createRoom("x", "dm", [a.id]);
+    await say(d.id, "hi");
+    expect(app.store.getAcpSession(d.id, a.id)).toBeTruthy();
+    const other = mkdtempSync(join(tmpdir(), "tuantuan-pick-"));
+    const r = await api<Room>("PATCH", `/api/rooms/${d.id}`, { cwd: other });
+    expect(r.data.cwd).toBe(other);
+    expect(app.store.getAcpSession(d.id, a.id)).toBeFalsy();
+    expect((await api("PATCH", `/api/rooms/${d.id}`, { mainAgentId: a.id })).status).toBe(400);
+  });
+});
+
 describe("ACP harness integration (mock ACP agent)", () => {
   let dmAgent: Agent;
   let dm: Room;
   const cwd = mkdtempSync(join(tmpdir(), "tuantuan-cwd-"));
 
   test("DM: reply streams as ACP updates and is persisted with its timeline; session exposes config + commands", async () => {
-    dmAgent = await createAgent("Coder", { cwd, identity: "你说话简洁。" });
-    dm = await createRoom("私聊", "dm", [dmAgent.id]);
+    dmAgent = await createAgent("Coder", { identity: "你说话简洁。" });
+    dm = await createRoom("私聊", "dm", [dmAgent.id], { cwd });
+    expect(dm.cwd).toBe(cwd);
     await watch(dm.id);
     const ms = await say(dm.id, "你好");
     const reply = ms.at(-1) as Message;
@@ -96,7 +136,7 @@ describe("ACP harness integration (mock ACP agent)", () => {
     expect(reply.timeline?.plan?.map((e) => e.status)).toEqual(["completed", "completed", "completed"]);
   });
 
-  test("permission: allow writes the file inside the agent cwd; reject leaves it alone", async () => {
+  test("permission: allow writes the file inside the room folder; reject leaves it alone", async () => {
     await Bun.write(join(cwd, "mock-edit.txt"), "hello\n");
     const before = events.length;
     await api("POST", `/api/rooms/${dm.id}/messages`, { content: "/edit" });

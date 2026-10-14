@@ -69,7 +69,19 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const section = route[0] === "a" ? "agents" : route[0] === "setup" ? "setup" : "rooms";
+  const section =
+    route[0] === "a" ? "agents" : route[0] === "setup" ? "setup" : route[0] === "harness" ? "harness" : "rooms";
+  // 新手引导 opens by itself on first launch only; once finished or skipped it is gone for good.
+  const onboarded = meta?.onboarded;
+  useEffect(() => {
+    if (onboarded === false && route[0] !== "setup") go("setup");
+    if (onboarded && route[0] === "setup") go("harness");
+  }, [onboarded, route, go]);
+  const finishOnboarding = async () => {
+    await api("POST", "/api/onboarding");
+    await reload();
+    go("c");
+  };
   const detailId = route[1] ?? null;
   const roomId = section === "rooms" && detailId && detailId !== "new" ? detailId : null;
 
@@ -85,12 +97,12 @@ export function App() {
   }, []);
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
-  const mobileView = section === "setup" || detailId ? "main" : "list";
+  const mobileView = section === "setup" || section === "harness" || detailId ? "main" : "list";
   const harnessName = (id: string) => meta?.harnesses.find((h) => h.id === id)?.name ?? id;
 
   if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
-    <div className={`shell ${section === "setup" ? "no-list" : ""}`} data-mobile={mobileView}>
+    <div className={`shell ${section === "setup" || section === "harness" ? "no-list" : ""}`} data-mobile={mobileView}>
       <nav className="rail" aria-label="主导航">
         <div className="logo" title="团团 Tuantuan">
           <BrandMark size={32} />
@@ -104,9 +116,9 @@ export function App() {
         <RailButton icon={<Bot size={20} />} label="Agents" current={section === "agents"} onClick={() => go("a")} />
         <RailButton
           icon={<PlugZap size={20} />}
-          label="引导"
-          current={section === "setup"}
-          onClick={() => go("setup")}
+          label="Harness"
+          current={section === "harness"}
+          onClick={() => go("harness")}
         />
         <div className="spacer" />
         <button
@@ -233,6 +245,7 @@ export function App() {
         {section === "rooms" && detailId === "new" && (
           <NewRoom
             agents={agents}
+            workspacesRoot={meta?.workspacesRoot ?? ""}
             onBack={() => go("c")}
             onCreated={async (r) => {
               await reload();
@@ -257,7 +270,10 @@ export function App() {
             }}
           />
         )}
-        {section === "setup" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
+        {section === "setup" && meta && !meta.onboarded && (
+          <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} onFinish={finishOnboarding} />
+        )}
+        {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
         {section === "agents" && !detailId && loaded && (
           <div className="empty">
             <div className="empty-icon">
@@ -408,8 +424,8 @@ function Welcome({
     {
       done: agents.some((a) => a.harness),
       title: "接入 Harness，绑定到 Agent",
-      cta: "新手引导",
-      path: "setup",
+      cta: "Harness 管理",
+      path: "harness",
     },
     {
       done: rooms.length > 0,

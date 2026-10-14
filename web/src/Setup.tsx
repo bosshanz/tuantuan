@@ -22,7 +22,7 @@ interface TestResult {
 }
 
 /**
- * 新手引导: find the harness CLIs on this machine, show how to install / log in, check the ACP
+ * 新手引导 (first launch, with onFinish) and Harness 管理 (afterwards): find the harness CLIs on this machine, show how to install / log in, check the ACP
  * handshake, and bind harnesses to agents. Tuantuan never runs installers or logins itself.
  */
 export function SetupPage(props: {
@@ -30,6 +30,8 @@ export function SetupPage(props: {
   agents: Agent[];
   onAgentsChange: () => Promise<void>;
   go: (p: string) => void;
+  /** Onboarding mode: 跳过 / 完成 call this. */
+  onFinish?: () => Promise<void>;
 }) {
   const [list, setList] = useState<HarnessStatus[] | null>(null);
   const [tests, setTests] = useState<Record<string, TestResult | "running">>({});
@@ -87,9 +89,14 @@ export function SetupPage(props: {
       <header className="main-head">
         <PlugZap size={18} />
         <div className="title">
-          <h2>新手引导</h2>
+          <h2>{props.onFinish ? "新手引导" : "Harness 管理"}</h2>
           <div className="sub">接入编码 Agent（Harness），再把它们分给团团里的 Agent</div>
         </div>
+        {props.onFinish && (
+          <button type="button" className="btn ghost sm" onClick={() => void props.onFinish?.()}>
+            跳过
+          </button>
+        )}
         <button type="button" className="btn ghost sm" onClick={() => void refresh()}>
           <RefreshCw size={14} />
           重新检测
@@ -232,6 +239,13 @@ export function SetupPage(props: {
               ))}
             </div>
           </section>
+          {props.onFinish && (
+            <div>
+              <button type="button" className="btn primary" onClick={() => void props.onFinish?.()}>
+                完成
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>

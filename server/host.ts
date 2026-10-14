@@ -7,6 +7,7 @@ import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./h
 import type { Agent, Room, Store } from "./store";
 import { ValidationError } from "./store";
 import type { TuantuanMcp } from "./tuantuan-mcp";
+import { expandHome } from "./workspace";
 
 /** Live, per-(room, agent) view of the harness session the UI needs: pickers, slash commands, usage. */
 export interface SessionView {
@@ -89,10 +90,9 @@ export class HarnessHost {
     return this.slots.get(`${roomId}|${agentId}`)?.replay ?? [];
   }
 
-  /** Working directory an agent uses in this room: the group's shared cwd, else the agent's own. */
-  cwdFor(room: Room, agent: Agent): string {
-    const raw = room.kind === "group" ? room.cwd || agent.cwd : agent.cwd;
-    return resolve(raw ? raw.replace(/^~(?=$|\/)/, homedir()) : homedir());
+  /** Working directory for this conversation: the room's own folder (shared by every agent in it). */
+  cwdFor(room: Room, _agent?: Agent): string {
+    return room.cwd ? expandHome(room.cwd) : homedir();
   }
 
   view(roomId: string, agentId: string): SessionView | null {

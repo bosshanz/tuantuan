@@ -281,7 +281,7 @@ export function ChatView(props: {
               {primary && !primary.harness && (
                 <p className="muted">
                   {primary.name} 还没有绑定 Harness，<a href={`#/a/${primary.id}`}>去设置</a>或
-                  <a href="#/setup">打开新手引导</a>。
+                  <a href="#/harness">管理 Harness</a>。
                 </p>
               )}
               {room.kind === "group" && members.length > 0 && (
@@ -400,52 +400,55 @@ export function ChatView(props: {
             // biome-ignore lint/a11y/useKeyWithClickEvents: see above
             <div className="scrim" data-state={panelPresence.state} onClick={() => setPanel(false)} />
           )}
-          <aside className="details" data-state={panelPresence.state} aria-label="详情面板">
-            <div className="details-head">
-              {selectedMsg && (
-                <button
-                  type="button"
-                  className="btn ghost icon"
-                  aria-label="返回会话信息"
-                  title="返回会话信息"
-                  onClick={() => setSelected(null)}
-                >
-                  <ChevronLeft size={16} />
-                </button>
-              )}
-              <h3>{selectedMsg ? "回复详情" : "会话信息"}</h3>
-              <div className="details-actions">
-                <button
-                  type="button"
-                  className="btn ghost icon"
-                  aria-label="关闭详情面板"
-                  onClick={() => setPanel(false)}
-                >
-                  <X size={16} />
-                </button>
+          {/* The slot reserves the panel's column and resizes in step with the slide, so the chat never jumps. */}
+          <div className="details-slot" data-state={panelPresence.state}>
+            <aside className="details" data-state={panelPresence.state} aria-label="详情面板">
+              <div className="details-head">
+                {selectedMsg && (
+                  <button
+                    type="button"
+                    className="btn ghost icon"
+                    aria-label="返回会话信息"
+                    title="返回会话信息"
+                    onClick={() => setSelected(null)}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                )}
+                <h3>{selectedMsg ? "回复详情" : "会话信息"}</h3>
+                <div className="details-actions">
+                  <button
+                    type="button"
+                    className="btn ghost icon"
+                    aria-label="关闭详情面板"
+                    onClick={() => setPanel(false)}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="details-body">
-              {selectedMsg ? (
-                <MessageDetails
-                  m={selectedMsg}
-                  agent={agentById.get(selectedMsg.senderId ?? "")}
-                  harnessName={props.harnessName}
-                />
-              ) : (
-                <RoomInfo
-                  room={room}
-                  agents={agents}
-                  members={members}
-                  messages={messages}
-                  sessions={sessions}
-                  harnessName={props.harnessName}
-                  onRoomChange={props.onRoomChange}
-                  onDeleted={props.onDeleted}
-                />
-              )}
-            </div>
-          </aside>
+              <div className="details-body">
+                {selectedMsg ? (
+                  <MessageDetails
+                    m={selectedMsg}
+                    agent={agentById.get(selectedMsg.senderId ?? "")}
+                    harnessName={props.harnessName}
+                  />
+                ) : (
+                  <RoomInfo
+                    room={room}
+                    agents={agents}
+                    members={members}
+                    messages={messages}
+                    sessions={sessions}
+                    harnessName={props.harnessName}
+                    onRoomChange={props.onRoomChange}
+                    onDeleted={props.onDeleted}
+                  />
+                )}
+              </div>
+            </aside>
+          </div>
         </>
       )}
     </div>
@@ -818,9 +821,9 @@ function RoomInfo(props: {
         )}
         {error && <div className="error-text">{error}</div>}
       </section>
-      {room.kind === "group" && (
-        <section className="d-section">
-          <h4>群设置</h4>
+      <section className="d-section">
+        <h4>设置</h4>
+        {room.kind === "group" && (
           <label className="field">
             <span className="label">主 Agent（没有 @ 时由它回复）</span>
             <select
@@ -836,19 +839,19 @@ function RoomInfo(props: {
               ))}
             </select>
           </label>
-          <label className="field">
-            <span className="label">共享工作目录</span>
-            <input
-              className="input mono"
-              value={cwd}
-              placeholder="~（主目录）"
-              onChange={(e) => setCwd(e.target.value)}
-              onBlur={() => cwd !== room.cwd && void patch({ cwd })}
-              spellCheck={false}
-            />
-          </label>
-        </section>
-      )}
+        )}
+        <label className="field">
+          <span className="label">工作目录</span>
+          <input
+            className="input mono"
+            aria-label="工作目录"
+            value={cwd}
+            onChange={(e) => setCwd(e.target.value)}
+            onBlur={() => cwd.trim() && cwd !== room.cwd && void patch({ cwd })}
+            spellCheck={false}
+          />
+        </label>
+      </section>
       {props.members.map((a) =>
         a.harness ? (
           <SessionSection key={a.id} room={room} agent={a} view={props.sessions[a.id]} solo={room.kind === "dm"} />

@@ -187,7 +187,7 @@ describe("session/load replay", () => {
     const r1 = await room("r1", "dm", [a.id]);
     await say(r1.id, "外部历史");
     const s1 = (await api<{ sessionId: string }>("GET", `/api/rooms/${r1.id}/agents/${a.id}/session`)).data.sessionId;
-    const r2 = await room("r2", "dm", [a.id]);
+    const r2 = await room("r2", "dm", [a.id], { cwd: r1.cwd }); // same folder → the harness lists r1's session
     await say(r2.id, "本地消息");
     const list = (await api<{ sessionId: string }[]>("GET", `/api/rooms/${r2.id}/agents/${a.id}/history`)).data;
     expect(list.map((x) => x.sessionId)).toContain(s1);

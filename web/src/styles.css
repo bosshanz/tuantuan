@@ -737,13 +737,26 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .overlay[data-state="closing"] .palette { animation: t-pop-out var(--dur-1) var(--ease-in) forwards; }
 
 /* right panel slides; narrow screens use a bottom sheet */
-.details { animation: t-panel-in var(--dur-3) var(--ease-out); }
-.details[data-state="closing"] { animation: t-panel-out var(--dur-2) var(--ease-in) forwards; pointer-events: none; }
+/* Wide screens: the slot's width and the panel's slide share one duration and easing per direction —
+   open 220ms ease-out, close 160ms ease-in (faster). The panel itself only moves transform/opacity. */
+.details-slot { display: flex; flex-shrink: 0; width: 340px; overflow: hidden; justify-content: flex-start;
+  animation: t-slot-in var(--dur-3) var(--ease-out); }
+.details-slot .details { flex: none; }
+.details-slot[data-state="closing"] { animation: t-slot-out 160ms var(--ease-in) forwards; }
+@keyframes t-slot-in { from { width: 0; } }
+@keyframes t-slot-out { to { width: 0; } }
+@keyframes t-panel-slide-in { from { opacity: 0.4; transform: translateX(40%); } }
+@keyframes t-panel-slide-out { to { opacity: 0.4; transform: translateX(40%); } }
+.details { animation: t-panel-slide-in var(--dur-3) var(--ease-out); will-change: transform, opacity; }
+.details[data-state="closing"] { animation: t-panel-slide-out 160ms var(--ease-in) forwards; pointer-events: none; }
 .scrim { animation: t-fade-in var(--dur-2) var(--ease-out); }
 .scrim[data-state="closing"] { animation: t-fade-out var(--dur-2) var(--ease-in) forwards; }
+@media (max-width: 1180px) {
+  .details-slot { display: contents; animation: none; }
+}
 @media (max-width: 760px) {
   .details { animation: t-sheet-in var(--dur-3) var(--ease-out); }
-  .details[data-state="closing"] { animation: t-sheet-out var(--dur-2) var(--ease-in) forwards; }
+  .details[data-state="closing"] { animation: t-sheet-out 160ms var(--ease-in) forwards; }
 }
 
 /* new messages and status notes */
@@ -905,3 +918,10 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
   gap: 6px;
   margin-top: 6px;
 }
+
+/* form pages (新建会话): even rhythm between field groups, actions set apart at the bottom */
+.page-inner.form-page { gap: var(--s5); }
+.form-page .field { gap: var(--s2); }
+.form-page > .row:first-child { gap: var(--s3); }
+.form-actions { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s2); padding-top: var(--s5); border-top: 1px solid var(--border); }
+.form-hint { font-size: var(--fs-xs); color: var(--text-3); }

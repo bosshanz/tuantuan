@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentInput } from "../server/store";
@@ -9,6 +9,9 @@ process.env.TUANTUAN_MOCK_HARNESS = "1";
 export const MOCK_AUTH_FILE = join(tmpdir(), `tuantuan-mock-auth-${process.pid}`);
 process.env.MOCK_AGENT_AUTH_FILE = MOCK_AUTH_FILE;
 writeFileSync(MOCK_AUTH_FILE, "ok");
+// Auto-created room folders go to a throwaway root, never ~/Tuantuan.
+export const WORKSPACES = mkdtempSync(join(tmpdir(), "tuantuan-ws-"));
+process.env.TUANTUAN_WORKSPACES = WORKSPACES;
 
 /** Agent bound to the mock ACP harness. */
 export function agentInput(name: string, extra: Partial<AgentInput> = {}): AgentInput {
@@ -18,7 +21,6 @@ export function agentInput(name: string, extra: Partial<AgentInput> = {}): Agent
     avatar: name.slice(0, 1),
     identity: "",
     harness: "mock",
-    cwd: "",
     env: {},
     mcpServerIds: [],
     permissionPolicy: "ask",

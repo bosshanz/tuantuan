@@ -1,15 +1,18 @@
 import { ChevronLeft, Hash, MessageCircle } from "lucide-react";
 import { useState } from "react";
+import { workspaceSlug } from "../../shared/workspace";
 import { type Agent, api, type Room } from "./api";
 import { PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
 export function NewRoom({
   agents,
+  workspacesRoot,
   onCreated,
   onBack,
 }: {
   agents: Agent[];
+  workspacesRoot: string;
   onCreated: (r: Room) => void;
   onBack: () => void;
 }) {
@@ -18,6 +21,7 @@ export function NewRoom({
   const [selected, setSelected] = useState<string[]>([]);
   const [main, setMain] = useState<string>("");
   const [cwd, setCwd] = useState("");
+  const [pick, setPick] = useState(false);
   // The main agent must be a member: default to the first one picked.
   const mainId = selected.includes(main) ? main : (selected[0] ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -31,13 +35,13 @@ export function NewRoom({
     try {
       const roomName = name.trim() || (kind === "dm" && dmAgent ? `与 ${dmAgent.name} 私聊` : "");
       onCreated(
-        await api<Room>(
-          "POST",
-          "/api/rooms",
-          kind === "group"
-            ? { name: roomName, kind, agentIds: selected, mainAgentId: mainId || null, cwd: cwd.trim() }
-            : { name: roomName, kind, agentIds: selected },
-        ),
+        await api<Room>("POST", "/api/rooms", {
+          name: roomName,
+          kind,
+          agentIds: selected,
+          ...(kind === "group" && { mainAgentId: mainId || null }),
+          ...(pick && { cwd: cwd.trim() }),
+        }),
       );
     } catch (err) {
       setError((err as Error).message);
@@ -57,12 +61,12 @@ export function NewRoom({
         </div>
       </header>
       <form className="page" onSubmit={submit}>
-        <div className="page-inner" style={{ maxWidth: 600 }}>
+        <div className="page-inner form-page" style={{ maxWidth: 600 }}>
           <div className="row wrap-sm">
             {(
               [
-                ["group", <Hash key="g" size={18} />, "群聊", "把多个 Agent 拉进来，@ 谁谁回答"],
-                ["dm", <MessageCircle key="d" size={18} />, "私聊", "和一个 Agent 一对一，无需 @"],
+                ["group", <Hash key="g" size={18} />, "群聊", "多个 Agent，@ 点名"],
+                ["dm", <MessageCircle key="d" size={18} />, "私聊", "一对一"],
               ] as const
             ).map(([k, icon, title, sub]) => (
               <label key={k} className="radio-card grow">
@@ -86,7 +90,7 @@ export function NewRoom({
             ))}
           </div>
           <label className="field">
-            <span className="label">名称{kind === "dm" && <span className="muted">（可留空）</span>}</span>
+            <span className="label">名称{kind === "dm" && <span className="muted">（可选）</span>}</span>
             <input
               className="input"
               value={name}
@@ -123,9 +127,7 @@ export function NewRoom({
           {kind === "group" && (
             <>
               <label className="field">
-                <span className="label">
-                  主 Agent <span className="muted">（没人被 @ 时由它回复）</span>
-                </span>
+                <span className="label">主 Agent</span>
                 <select
                   className="select"
                   aria-label="主 Agent"
@@ -141,40 +143,49 @@ export function NewRoom({
                   ))}
                 </select>
               </label>
-              <label className="field">
-                <span className="label">
-                  共享工作目录 <span className="muted">（群里所有 Agent 在这里读写；留空则用各自的目录）</span>
-                </span>
-                <input
-                  className="input"
-                  aria-label="共享工作目录"
-                  value={cwd}
-                  onChange={(e) => setCwd(e.target.value)}
-                  maxLength={1024}
-                  placeholder="例如：~/code/my-project"
-                  spellCheck={false}
-                />
-              </label>
             </>
           )}
+          <div className="field">
+            <span className="label">工作目录</span>
+            <fieldset className="segmented" aria-label="工作目录">
+              <button type="button" aria-pressed={!pick} onClick={() => setPick(false)}>
+                自动创建
+              </button>
+              <button type="button" aria-pressed={pick} onClick={() => setPick(true)}>
+                选择已有
+              </button>
+            </fieldset>
+            {pick ? (
+              <input
+                className="input mono"
+                aria-label="文件夹路径"
+                value={cwd}
+                onChange={(e) => setCwd(e.target.value)}
+                maxLength={1024}
+                placeholder="~/code/my-project"
+                spellCheck={false}
+              />
+            ) : (
+              <span className="muted mono" style={{ fontSize: 12 }}>
+                {workspacesRoot}/
+                {workspaceSlug(name.trim() || (kind === "dm" && dmAgent ? `与 ${dmAgent.name} 私聊` : ""))}
+              </span>
+            )}
+          </div>
           {error && (
             <div className="form-error" role="alert">
               {error}
             </div>
           )}
-          <div>
+          <div className="form-actions">
             <button
               type="submit"
               className="btn primary"
-              disabled={saving || (kind === "dm" ? selected.length !== 1 : name.trim() === "")}
+              disabled={saving || (pick && !cwd.trim()) || (kind === "dm" ? selected.length !== 1 : name.trim() === "")}
             >
               {saving ? "创建中…" : "创建会话"}
             </button>
-            {kind === "group" && name.trim() === "" && (
-              <span className="muted" style={{ marginLeft: 12, fontSize: 12 }}>
-                请填写群名
-              </span>
-            )}
+            {kind === "group" && name.trim() === "" && <span className="form-hint">请填写群名</span>}
           </div>
         </div>
       </form>

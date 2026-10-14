@@ -54,13 +54,32 @@ describe("Store", () => {
     }
   });
 
+  test("migration 8: an agent's old cwd moves onto its DMs that have none, then the column is dropped", () => {
+    const path = join(tmpdir(), `agent-hub-m8-${Date.now()}.db`);
+    try {
+      const db = new Database(path);
+      for (const m of MIGRATIONS.slice(0, 7)) db.exec(m);
+      db.exec("PRAGMA user_version = 7");
+      db.exec(`INSERT INTO agents (id,name,color,avatar,identity,tools,skills,model_mode,created_at,updated_at,cwd) VALUES ('a1','A','#000000','A','','[]','[]','auto',0,0,'/srv/a');
+        INSERT INTO rooms (id,name,kind,created_at,cwd) VALUES ('d1','dm','dm',0,''),('d2','dm2','dm',0,'/keep'),('g','g','group',0,'');
+        INSERT INTO room_agents VALUES ('d1','a1'),('d2','a1'),('g','a1');`);
+      db.close();
+      const s = new Store(path);
+      expect([s.getRoom("d1")?.cwd, s.getRoom("d2")?.cwd, s.getRoom("g")?.cwd]).toEqual(["/srv/a", "/keep", ""]);
+      expect(s.getAgent("a1")).not.toHaveProperty("cwd");
+      s.db.close();
+    } finally {
+      for (const f of [path, `${path}-wal`, `${path}-shm`]) rmSync(f, { force: true });
+    }
+  });
+
   test("group main agent must be a member and follows membership changes", () => {
     const s = new Store(":memory:");
     const a = s.createAgent(agentInput("A"));
     const b = s.createAgent(agentInput("B"));
     const g = s.createRoom("g", "group", [a.id, b.id], { mainAgentId: b.id });
     expect(g.mainAgentId).toBe(b.id);
-    expect(s.updateGroup(g.id, { mainAgentId: "nope" }).mainAgentId).toBe(a.id);
+    expect(s.updateRoom(g.id, { mainAgentId: "nope" }).mainAgentId).toBe(a.id);
     expect(s.setRoomAgents(g.id, [b.id]).mainAgentId).toBe(b.id);
   });
 

@@ -31,15 +31,15 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 打开 http://localhost:5173 ：
 
-1. 左侧「引导」（`#/setup`）检测本机已安装的 Harness，显示版本、安装命令和登录方式，可以填绝对路径覆盖、点「测试」做 ACP 握手。
-2. 「Agents → + 新建」创建 Agent：选 Harness、工作目录（cwd）、权限策略、身份文档、MCP 服务器和环境变量。
-3. 「会话 → + 新建」建群聊或私聊。群聊在详情面板里设置**主 Agent**和**共享工作目录**。
+1. 首次启动自动打开「新手引导」（只出现一次，完成或跳过后记在数据库里）；之后在左侧「Harness」（`#/harness`）管理：检测本机已安装的 Harness，显示版本、安装命令和登录方式，可以填绝对路径覆盖、点「测试」做 ACP 握手。
+2. 「Agents → + 新建」创建 Agent：选 Harness、权限策略、身份文档、MCP 服务器和环境变量。
+3. 「会话 → + 新建」建群聊或私聊。每个会话有自己的**工作目录**：默认自动创建在 `~/Tuantuan/<会话名>`（环境变量 `TUANTUAN_WORKSPACES` 可改根目录），也可选已有文件夹；之后在详情面板修改。群聊还可设**主 Agent**。
 
 生产方式：`bun run build && bun start`（API 同时托管 `web/dist`，访问 http://localhost:8787）。
 
 ## 安装和登录 Harness
 
-团团从你的登录 shell 读取 PATH（桌面应用也能找到 npm / brew / curl 装的命令），也可以在「引导」页给每个 Harness 填绝对路径。
+团团从你的登录 shell 读取 PATH（桌面应用也能找到 npm / brew / curl 装的命令），也可以在「Harness」页给每个 Harness 填绝对路径。
 
 | Harness | 安装 | 登录 |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 | Grok Build | `curl -fsSL https://x.ai/cli/install.sh \| bash` | `grok login`，或设置 `XAI_API_KEY` |
 | OpenCode | `npm i -g opencode-ai` 或 `brew install anomalyco/tap/opencode` | `opencode auth login`（自带免费模型时可不登录） |
 
-「引导」页的「握手测试」会报告是否已登录。未登录时，如果 Harness 通过 ACP 声明了自带的登录流程（如 Codex 的 ChatGPT / API Key、Grok 的 grok.com、OpenCode 的 opencode-login），点「用「…」登录」由 Harness 自己完成（可能会打开浏览器），完成后自动重新检测；否则复制旁边的登录命令到终端执行，再点「重新检测」。所有 Agent 共用同一份 Harness 登录。
+「Harness」页的「握手测试」会报告是否已登录。未登录时，如果 Harness 通过 ACP 声明了自带的登录流程（如 Codex 的 ChatGPT / API Key、Grok 的 grok.com、OpenCode 的 opencode-login），点「用「…」登录」由 Harness 自己完成（可能会打开浏览器），完成后自动重新检测；否则复制旁边的登录命令到终端执行，再点「重新检测」。所有 Agent 共用同一份 Harness 登录。
 
 > Claude Code 的适配器没有声明登录方式，而且未登录时也能建会话，所以「已登录」只代表握手和建会话成功；真正发消息时没登录会提示去终端运行 `claude` 登录。
 
@@ -62,7 +62,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 | 不 @ 任何人 | 群的**主 Agent** |
 | `@所有人`（或 `@all` / `@everyone`） | 每个成员按顺序各回复一次 |
 
-- 建群时选择主 Agent 和共享工作目录（之后可在详情面板修改）；群里所有 Agent 在这个目录里工作。
+- 建群时选择主 Agent；群里所有 Agent 在群的工作目录里工作。
 - **群聊转述**：Agent 每次被叫到时，收到的是它上次发言之后群里的新消息（最多 30 条、约 8000 字，超出时保留最新的并注明省略了几条）。
 - **交接**：团团给群里每个 Agent 的会话注入一个名为 `tuantuan` 的 MCP 服务器，提供 `handoff(agent, task)` 和 `list_members`。Agent 调用 `handoff` 后，对方在这条回复结束后接手并收到 task；界面上显示「交接给 @X」卡片，接手方显示「接 @Y 的交接」。正文里写 `@名字` 不会触发对方。
   - 只能交给群里的其他成员；同一条消息里已在排队的不重复触发；`@所有人` 这一轮已经回复过的不会再被交接触发。
@@ -72,7 +72,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 ## 私聊
 
 - 流式回复、思考过程、工具卡片（文件 diff、终端输出）、计划清单、用量。
-- 权限请求弹窗：允许一次 / 总是允许 / 拒绝。文件读写和终端只能在 Agent 的工作目录内。
+- 权限请求弹窗：允许一次 / 总是允许 / 拒绝。文件读写和终端只能在会话的工作目录内。
 - Harness 提供的配置项（模式、模型、推理强度等）和斜杠命令（输入 `/` 弹出）。
 - 粘贴或拖入图片（Harness 支持时）、随时停止、会话列表（切换 / 恢复历史会话 / 新会话）。
 - 切换到 Harness 里的历史会话时用 `session/load`，Harness 回放的历史中团团没显示过的轮次（按用户消息去重）以只读方式显示在消息列表顶部。
@@ -88,6 +88,10 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 ## 界面
 
 ![Agent 编辑](docs/screenshots/agent-editor.png)
+
+![新建群聊：工作目录自动创建](docs/screenshots/new-group.png)
+
+![新建私聊：选择已有文件夹](docs/screenshots/new-dm.png)
 
 - 现代简洁风格：干净的中性底色（浅色近白 / 深色石墨），品牌色是 Logo 里的番茄珊瑚红，只用在关键动作和状态上；Agent 头像用鲜亮的彩色区分。字体为 Plus Jakarta Sans（已自托管）+ 苹方，浅色/深色跟随系统。
 - Agent 头像是 SVG Bot（13 种轮廓 × 13 种颜色），默认按 Agent id 生成，在编辑页点击头像修改。头像会根据状态变表情（思考、说话、难过、惊讶、休眠），开启「减少动态效果」时静止。预览全部表情：`/#/dev/avatars`。
@@ -105,8 +109,8 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 
 | 现象 | 原因与处理 |
 | --- | --- |
-| 「引导」页显示未安装 | 在终端里 `which <命令>` 确认已安装；GUI 启动时找不到的话，在「引导」页填绝对路径。 |
-| 发消息后提示 Authentication required | 该 Harness 没登录：按「引导」页的登录方式在终端登录后重试。 |
+| 「Harness」页显示未安装 | 在终端里 `which <命令>` 确认已安装；GUI 启动时找不到的话，在「Harness」页填绝对路径。 |
+| 发消息后提示 Authentication required | 该 Harness 没登录：按「Harness」页的登录方式在终端登录后重试。 |
 | Agent 想改文件但没反应 | 正在等你在权限弹窗里选择；或者目标路径在工作目录之外（会被拒绝）。 |
 | e2e 找不到浏览器 | 设置 `CHROME_PATH` 指向本机 Chrome。 |
 

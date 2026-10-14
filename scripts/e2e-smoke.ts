@@ -1,7 +1,7 @@
 // Browser smoke test against the built UI + real server + the mock ACP harness (server/mock-agent.ts).
 // Needs `bun run build` first and a Chrome/Chromium binary (CHROME_PATH, default /usr/bin/google-chrome).
 // SHOTS_DIR=<dir> also saves screenshots of the main screens.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
@@ -13,6 +13,8 @@ const authFile = join(tmpdir(), `tuantuan-e2e-auth-${Date.now()}`);
 process.env.MOCK_AGENT_AUTH_FILE = authFile;
 const dbPath = join(tmpdir(), `agent-hub-e2e-${Date.now()}.db`);
 const cwd = mkdtempSync(join(tmpdir(), "tuantuan-e2e-cwd-"));
+const workspaces = mkdtempSync(join(tmpdir(), "tuantuan-e2e-ws-"));
+process.env.TUANTUAN_WORKSPACES = workspaces;
 writeFileSync(join(cwd, "mock-edit.txt"), "hello\n");
 const shotsDir = process.env.SHOTS_DIR;
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });
@@ -31,20 +33,30 @@ try {
 
   // Onboarding: the mock harness is detected, the handshake shows it logged out, and its own
   // (agent-driven) login method logs in; the re-test then reports logged in.
-  await page.getByRole("button", { name: "引导", exact: true }).click();
+  // First launch opens 新手引导 by itself.
+  await page.getByRole("heading", { name: "新手引导" }).waitFor();
   const mockRow = page.locator(".harness-row", { hasText: "Mock（测试）" });
   await mockRow.getByRole("button", { name: "握手测试" }).click();
   await mockRow.getByText(/ACP v1 · Mock.*未登录/).waitFor();
   await mockRow.getByRole("button", { name: "用「Mock 登录」登录" }).click();
   await mockRow.getByText(/ACP v1 · Mock.*已登录/).waitFor();
   await shot("setup");
+  // Finishing is remembered server-side: after a reload it never opens again; Harness 管理 stays in the rail.
+  await page.getByRole("button", { name: "完成", exact: true }).click();
+  await page.locator(".rail").getByRole("button", { name: "会话", exact: true }).waitFor();
+  if (!app.store.getSetting("onboarded", false)) throw new Error("onboarding not persisted");
+  await page.goto(`http://localhost:${server.port}/#/setup`);
+  await page.locator(".rail .dot.ok").waitFor();
+  await page.waitForFunction(() => location.hash === "#/harness");
+  await page.getByRole("heading", { name: "Harness 管理" }).waitFor();
+  if ((await page.getByRole("button", { name: "完成", exact: true }).count()) !== 0)
+    throw new Error("onboarding shown again");
 
   const createAgent = async (name: string, identity: string) => {
     await page.getByRole("button", { name: "Agents", exact: true }).click();
     await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
     await page.getByLabel("名称").fill(name);
     await page.getByLabel("Harness", { exact: true }).selectOption({ label: "Mock（测试）" });
-    await page.getByLabel("工作目录").fill(cwd);
     await page.getByLabel("身份文档").fill(identity);
     await page.getByRole("button", { name: "创建 Agent" }).click();
     await page.getByText("所有修改已保存").waitFor();
@@ -60,14 +72,16 @@ try {
     page.locator(".pick", { has: page.locator(".pick-name", { hasText: new RegExp(`^${name}$`) }) }).locator("input");
   await pick("Alice").check();
   await pick("Bob").check();
-  // Main agent and shared working directory are chosen when creating the group.
+  // The main agent is chosen when creating the group; its folder is auto-created by default.
   await page.getByLabel("主 Agent").selectOption({ label: "Bob" });
-  await page.getByLabel("共享工作目录").fill(cwd);
+  await page.getByText(`${workspaces}/冒烟群`).waitFor();
+  await shot("new-group");
   await page.getByRole("button", { name: "创建会话" }).click();
   await page.getByRole("heading", { name: "冒烟群" }).waitFor();
   const group = app.store.listRooms().find((r) => r.name === "冒烟群");
   const bobId = app.store.listAgents().find((a) => a.name === "Bob")?.id;
-  if (group?.mainAgentId !== bobId || group?.cwd !== cwd) throw new Error("new group lost main agent / cwd");
+  if (group?.mainAgentId !== bobId || group?.cwd !== join(workspaces, "冒烟群") || !existsSync(group.cwd))
+    throw new Error("new group lost main agent / auto folder");
 
   // Group: no @ -> the main agent (Bob) answers; @Alice -> Alice.
   const input = page.getByLabel("消息输入框");
@@ -85,10 +99,14 @@ try {
   await page.getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
   await shot("group");
 
-  // Private chat with Bob: every ACP capability the mock harness exercises.
-  await page.getByRole("button", { name: "Agents", exact: true }).click();
-  await page.locator(".list-item", { hasText: "Bob" }).first().click();
-  await page.getByRole("button", { name: /私聊/ }).click();
+  // Private chat with Bob in an existing folder: every ACP capability the mock harness exercises.
+  await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
+  await page.locator(".radio-card", { hasText: "私聊" }).click();
+  await pick("Bob").check();
+  await page.getByRole("button", { name: "选择已有" }).click();
+  await page.getByLabel("文件夹路径").fill(cwd);
+  await shot("new-dm");
+  await page.getByRole("button", { name: "创建会话" }).click();
   await page.getByLabel("模型").waitFor(); // session config options (mode / model / reasoning)
   await input.fill("/pl");
   await page.locator(".slash-pop").getByText("/plan").waitFor();
@@ -285,7 +303,7 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → new group with main agent + cwd → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
+    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → onboarding once → new group with main agent + auto folder → DM in a chosen folder → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
   );
 } catch (e) {
   failed = true;
@@ -295,6 +313,7 @@ try {
   app.host.shutdown();
   server.stop(true);
   rmSync(cwd, { recursive: true, force: true });
+  rmSync(workspaces, { recursive: true, force: true });
   rmSync(dbPath, { force: true });
   rmSync(authFile, { force: true });
   rmSync(`${dbPath}-wal`, { force: true });

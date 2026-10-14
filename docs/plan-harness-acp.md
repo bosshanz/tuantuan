@@ -5,7 +5,7 @@
 ## 0. Andy 的决定（2026-10-14）
 1. 桌面框架：**Electrobun**。
 2. 群聊不 @ 时：每个群指定一个**主 Agent**，由它回复。
-3. 群内所有 Agent **共用一个工作目录**（群的工作目录）。
+3. 工作目录**属于会话**（群聊或私聊），不属于 Agent；群内所有 Agent 共用它。
 4. 机器人房间绑定一个**编码 Harness** Agent。
 5. **不做内置简易 Harness**；改为「新手引导」：检测 / 安装 / 登录各 Harness，并绑定到 Agent 与机器人。测试与 e2e 用 mock ACP Agent。
 6. 团团维护每个 Agent 独立的**身份文档**（类似 AGENTS.md / CLAUDE.md，在团团里编辑），以不侵入用户仓库的方式交给 Harness（见 §3.4），兜底为会话首条 prompt 前置。
