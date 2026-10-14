@@ -50,7 +50,7 @@ try {
   await input.press("Enter");
   await page.locator(".handoff", { hasText: "请你来接手" }).first().waitFor();
   await page.getByText(/我是 Bob（mock\//).waitFor();
-  await page.getByText("Agent 接力 · 第 1 跳").waitFor();
+  await page.getByText("接 Alice 的交接").waitFor();
   const routingCount = await page.locator('[data-shot="expand"]').count();
   if (routingCount !== 2) throw new Error(`expected 2 routing chips, got ${routingCount}`);
   await page.locator('[data-shot="expand"]').first().click();

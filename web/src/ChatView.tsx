@@ -5,10 +5,10 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  CircleSlash,
   CircleStop,
   Loader2,
   PanelRight,
-  Route,
   Trash2,
   Users,
   Wrench,
@@ -55,8 +55,27 @@ export function ChatView(props: {
   const [sendError, setSendError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const wide = useMediaQuery("(min-width: 1181px)");
-  const [panel, setPanel] = useState<boolean>(wide);
+  const [panel, setPanel] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  // For relayed replies: who handed the work over (from the giver's handoff tool call).
+  const handoffFrom = useMemo(() => {
+    const out = new Map<string, string>();
+    messages.forEach((m, i) => {
+      if (m.senderKind !== "agent" || m.hop < 2) return;
+      for (let j = i - 1; j >= 0; j--) {
+        const g = messages[j] as Message;
+        if (g.runId !== m.runId) break;
+        const hit = g.toolCalls.some(
+          (c) => c.name === "handoff" && (safeJson(c.arguments) as { agent?: string }).agent === m.senderName,
+        );
+        if (hit) {
+          out.set(m.id, g.senderName);
+          break;
+        }
+      }
+    });
+    return out;
+  }, [messages]);
   const members = useMemo(
     () => room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a),
     [room.agentIds, agents],
@@ -248,6 +267,7 @@ export function ChatView(props: {
                     mentionNames={mentionNames}
                     selected={selected === m.id && panel}
                     onDetails={() => openDetails(m.id)}
+                    handoffFrom={handoffFrom.get(m.id)}
                   />
                 ))}
               </div>
@@ -285,6 +305,7 @@ export function ChatView(props: {
             onChange={setDraft}
             onSubmit={() => void send()}
             members={room.kind === "group" ? members : []}
+            interrupts={room.kind === "group" && running}
             placeholder={
               room.kind === "group"
                 ? `发消息到 ${room.name}，不 @ 时按话题自动选一个 Agent`
@@ -328,6 +349,8 @@ export function ChatView(props: {
                   room={room}
                   agents={agents}
                   members={members}
+                  messages={messages}
+                  routing={routing}
                   onRoomChange={props.onRoomChange}
                   onDeleted={props.onDeleted}
                 />
@@ -369,6 +392,7 @@ function MessageItem(props: {
   mentionNames: string[];
   selected: boolean;
   onDetails: () => void;
+  handoffFrom?: string;
 }) {
   const { m, routing: d } = props;
   const streaming = m.status === "streaming";
@@ -438,45 +462,39 @@ function MessageItem(props: {
         const args = safeJson(c.arguments) as { agent?: string; task?: string };
         return (
           <div key={c.id} className="handoff" data-status={c.status}>
-            <ArrowRightLeft size={13} />
-            <span>
-              交接给 <b>@{args.agent ?? "?"}</b>：{args.task ?? ""}
-              {c.status === "error" && <span className="error-text">（失败：{c.error}）</span>}
-            </span>
+            <div className="handoff-label">
+              <ArrowRightLeft size={12} />
+              {c.status === "error" ? "交接失败" : "交接给"} <b>{args.agent ?? "?"}</b>
+            </div>
+            <div className="handoff-task">{c.status === "error" ? c.error : args.task}</div>
           </div>
         );
       })}
-      {(m.senderKind === "agent" || m.hop >= 2) && (
+      {m.senderKind === "agent" && (m.status === "cancelled" || d) && (
         <div className="msg-meta">
           {m.status === "cancelled" && (
-            <span className="badge warn">{m.error === "被新消息打断" ? "被新消息打断" : "已停止"}</span>
-          )}
-          {d?.plan.selection && m.hop === 1 && (
-            <span className="badge" title={d.plan.selection.reason}>
-              路由选择 · 按话题
+            <span className="state-tag">
+              <CircleSlash size={11} />
+              {m.error === "被新消息打断" ? "被新消息打断" : "已停止"}
             </span>
           )}
-          {m.hop >= 2 && <span className="badge accent">Agent 接力 · 第 {m.hop - 1} 跳</span>}
           {d && (
             <button
               type="button"
-              className="chip-btn"
+              className="trace"
               aria-pressed={props.selected}
               onClick={props.onDetails}
               data-shot="expand"
-              title="查看路由与工具详情"
+              title="查看回复详情：为什么是它、用了哪个模型、工具调用"
             >
-              <Route size={11} />
-              <span>
-                {d.plan.mode === "pinned"
-                  ? "固定"
-                  : d.plan.classification
-                    ? `${TYPE_LABEL[d.plan.classification.taskType]}·${DIFF_LABEL[d.plan.classification.difficulty]}`
-                    : "路由"}
-                {" → "}
-                {d.chosenModel ?? (d.attempts.length ? "全部失败" : "选择中…")}
-              </span>
-              {fellBack && <span style={{ color: "var(--warn)" }}>· 已回退</span>}
+              {m.hop >= 2 ? (
+                <span>接 {props.handoffFrom ?? "其他 Agent"} 的交接</span>
+              ) : d.plan.selection ? (
+                <span>按话题选中</span>
+              ) : null}
+              <span className="model">{d.chosenModel ?? (d.attempts.length ? "模型全部失败" : "选择模型中…")}</span>
+              {fellBack && <span className="warn">已回退</span>}
+              <ChevronRight size={11} className="chev" />
             </button>
           )}
         </div>
@@ -678,12 +696,30 @@ function RoomInfo(props: {
   room: Room;
   agents: Agent[];
   members: Agent[];
+  messages: Message[];
+  routing: Record<string, RoutingDecision>;
   onRoomChange: () => Promise<void>;
   onDeleted: () => void;
 }) {
   const { room } = props;
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const replyCount = new Map<string, number>();
+  const stats = { replies: 0, picked: 0, handoffs: 0, fallbacks: 0, failed: 0, models: [] as [string, number][] };
+  const byModel = new Map<string, number>();
+  for (const m of props.messages) {
+    if (m.senderKind !== "agent") continue;
+    stats.replies++;
+    if (m.senderId) replyCount.set(m.senderId, (replyCount.get(m.senderId) ?? 0) + 1);
+    if (m.status === "error") stats.failed++;
+    stats.handoffs += m.toolCalls.filter((c) => c.name === "handoff" && c.status === "ok").length;
+    const d = props.routing[m.id];
+    if (!d) continue;
+    if (d.plan.selection) stats.picked++;
+    if (d.attempts.some((a) => !a.ok)) stats.fallbacks++;
+    if (d.chosenModel) byModel.set(d.chosenModel, (byModel.get(d.chosenModel) ?? 0) + 1);
+  }
+  stats.models = [...byModel].sort((a, b) => b[1] - a[1]);
   const toggle = async (id: string) => {
     const next = room.agentIds.includes(id) ? room.agentIds.filter((x) => x !== id) : [...room.agentIds, id];
     try {
@@ -725,25 +761,76 @@ function RoomInfo(props: {
         ) : (
           <>
             {props.members.length === 0 && <p className="muted">没有 Agent 成员。</p>}
-            {props.members.map((a) => (
-              <div key={a.id} className="member-row">
-                <AgentAvatar agent={a} size={24} />
-                <span className="grow">{a.name}</span>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  {a.modelMode === "auto" ? "Auto" : a.pinnedModel}
-                </span>
-              </div>
-            ))}
+            {props.members.map((a) => {
+              const n = replyCount.get(a.id) ?? 0;
+              return (
+                <a key={a.id} className="member-row" href={`#/a/${a.id}`} title="编辑这个 Agent">
+                  <AgentAvatar agent={a} size={32} />
+                  <span className="member-body">
+                    <span className="member-name">{a.name}</span>
+                    <span className="member-sub">
+                      {a.modelMode === "auto" ? "Auto 路由" : `固定 ${a.pinnedModel}`}
+                      {a.tools.length > 0 && ` · ${a.tools.length} 工具`}
+                      {a.skills.length > 0 && ` · ${a.skills.length} Skills`}
+                    </span>
+                  </span>
+                  {n > 0 && (
+                    <span className="member-count" title="本会话回复数">
+                      {n}
+                    </span>
+                  )}
+                </a>
+              );
+            })}
           </>
         )}
         {error && <div className="error-text">{error}</div>}
       </section>
-      <section className="d-section">
-        <h4>提示</h4>
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          点击 Agent 回复下方的路由标签，可以在这里查看模型选择理由、回退和工具调用。
-        </p>
-      </section>
+      {room.kind === "group" && (
+        <section className="d-section">
+          <h4>谁会回复</h4>
+          <ul className="rules">
+            <li>
+              <b>@名字</b> 只有被 @ 的 Agent 回复
+            </li>
+            <li>
+              <b>不 @</b> 按话题自动选一个 Agent
+            </li>
+            <li>
+              <b>@所有人</b> 每个 Agent 各回复一次
+            </li>
+            <li>
+              <b>交接</b> Agent 可以把任务交给另一个 Agent
+            </li>
+            <li>
+              <b>打断</b> 回复中发新消息会停止当前回复
+            </li>
+          </ul>
+        </section>
+      )}
+      {stats.replies > 0 && (
+        <section className="d-section">
+          <h4>本会话模型使用</h4>
+          <div className="usage">
+            {stats.models.map(([id, n]) => (
+              <div key={id} className="usage-row">
+                <code>{id}</code>
+                <span className="usage-bar">
+                  <i style={{ width: `${(n / stats.replies) * 100}%` }} />
+                </span>
+                <span className="usage-n">{n}</span>
+              </div>
+            ))}
+          </div>
+          <p className="d-note">
+            {stats.replies} 条回复
+            {stats.picked > 0 && ` · ${stats.picked} 条按话题选中`}
+            {stats.handoffs > 0 && ` · ${stats.handoffs} 次交接`}
+            {stats.fallbacks > 0 && ` · ${stats.fallbacks} 条发生模型回退`}
+            {stats.failed > 0 && ` · ${stats.failed} 条失败`}
+          </p>
+        </section>
+      )}
       <section className="d-section" style={{ marginTop: "auto" }}>
         <button
           type="button"
@@ -768,6 +855,8 @@ function Composer(props: {
   onChange: (v: string) => void;
   onSubmit: () => void;
   members: Agent[];
+  /** Group chain running: sending will interrupt it. */
+  interrupts: boolean;
   placeholder: string;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -861,19 +950,23 @@ function Composer(props: {
         }}
       />
       <div className="composer-foot">
-        <span className="hint">
-          <span>
-            <kbd>Enter</kbd> 发送
-          </span>
-          <span>
-            <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行
-          </span>
-          {props.members.length > 0 && (
+        {props.members.length > 0 && props.value.trim() ? (
+          <Recipients text={props.value} members={props.members} interrupts={props.interrupts} />
+        ) : (
+          <span className="hint">
             <span>
-              <kbd>@</kbd> 提及 Agent
+              <kbd>Enter</kbd> 发送
             </span>
-          )}
-        </span>
+            <span>
+              <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行
+            </span>
+            {props.members.length > 0 && (
+              <span>
+                <kbd>@</kbd> 提及 Agent
+              </span>
+            )}
+          </span>
+        )}
         <button
           type="button"
           className="send-btn"
@@ -894,4 +987,34 @@ function safeJson(text: string): unknown {
   } catch {
     return {};
   }
+}
+
+const EVERYONE_RE = /(^|[^\w.])@(所有人|all|everyone)(?![\w\u4e00-\u9fff])/i;
+
+/** Live preview of who will answer the draft, mirroring the server's group rules. */
+function Recipients(props: { text: string; members: Agent[]; interrupts: boolean }) {
+  const lower = props.text.toLowerCase();
+  const named = props.members.filter((a) => lower.includes(`@${a.name.toLowerCase()}`));
+  const everyone = EVERYONE_RE.test(props.text);
+  return (
+    <span className="recipients" aria-live="polite">
+      <span className="label">回复</span>
+      {everyone ? (
+        <span className="rcpt">
+          <Users size={12} />
+          所有人 · {props.members.length}
+        </span>
+      ) : named.length > 0 ? (
+        named.map((a) => (
+          <span key={a.id} className="rcpt">
+            <AgentAvatar agent={a} size={14} />
+            {a.name}
+          </span>
+        ))
+      ) : (
+        <span className="rcpt auto">按话题自动选一位</span>
+      )}
+      {props.interrupts && <span className="interrupt-note">发送会打断当前回复</span>}
+    </span>
+  );
 }
