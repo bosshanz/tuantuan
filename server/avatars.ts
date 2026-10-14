@@ -35,22 +35,39 @@ export const SHAPE_LABEL: Record<AvatarShape, string> = {
   hex: "六边形",
 };
 
-/** Muted pigments first (the default set), then a few brighter inks. */
+/** Vivid modern colours; the first ten are the default set. */
 export const AVATAR_COLORS = [
-  "#2f4a6d",
-  "#2f6b6b",
-  "#3d6b4f",
-  "#6f7a3a",
-  "#b0812a",
-  "#b0432a",
-  "#a8476b",
-  "#6d3f5b",
-  "#7a5a3c",
-  "#4f5d63",
-  "#2a2722",
-  "#2f7de1",
-  "#e0662e",
+  "#3d7bfa",
+  "#13a594",
+  "#2bb06a",
+  "#86b51c",
+  "#f5a30f",
+  "#f2553c",
+  "#ee4f97",
+  "#9a5bea",
+  "#ff7a1f",
+  "#22a6dc",
+  "#3a3a3c",
+  "#a86b45",
+  "#64748b",
 ] as const;
+
+/** Paper & ink era palette → the vivid palette (same hue family), used by migration 5. */
+export const LEGACY_AVATAR_COLORS: Record<string, string> = {
+  "#2f4a6d": "#3d7bfa",
+  "#2f6b6b": "#13a594",
+  "#3d6b4f": "#2bb06a",
+  "#6f7a3a": "#86b51c",
+  "#b0812a": "#f5a30f",
+  "#b0432a": "#f2553c",
+  "#a8476b": "#ee4f97",
+  "#6d3f5b": "#9a5bea",
+  "#7a5a3c": "#ff7a1f",
+  "#4f5d63": "#22a6dc",
+  "#2a2722": "#3a3a3c",
+  "#2f7de1": "#3d7bfa",
+  "#e0662e": "#ff7a1f",
+};
 const DEFAULT_COLOR_COUNT = 10;
 
 /** FNV-1a: stable across runtimes, good enough to spread ids over a dozen buckets. */

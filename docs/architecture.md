@@ -26,7 +26,7 @@
 | `server/store.ts` | SQLite 迁移与读写 |
 | `server/device.ts` / `server/device-protocol.ts` | `/device` 设备协议：DeviceHub 管理设备连接、会话房间、由房间事件推导的会话状态、带 ack 超时的表情/动作下发（见 [device-protocol.md](device-protocol.md)） |
 | `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
-| `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），纸墨主题 token 在 `styles.css` |
+| `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/BrandMark.tsx` | 团团 Logo（导航栏，眨眼 + 悬停互看）；favicon 在 `web/public/` |
 | `web/src/robot/*` | 虚拟桌面机器人：设备客户端（协议 v1）、Web Speech 封装、SVG 脸部与动作 |
@@ -51,6 +51,7 @@
 | 1–2 | 初始表、路由决策与设备会话 |
 | 3 | 合并网页机器人会话：删除旧的空 `web-robot-%` 设备会话，每个 Agent 保留最新一个并改为固定 id `web-robot` |
 | 4 | `agents.avatar_shape`；启动时为空值的 Agent 补上确定性默认轮廓 |
+| 5 | 视觉更新：把纸墨时期的低饱和头像颜色映射到新的鲜亮色板（同色系，见 `LEGACY_AVATAR_COLORS`），自定义颜色不变 |
 
 头像动画只用 CSS transform：≥32px 完整动画、更小只眨眼；`prefers-reduced-motion` 全部关闭；离屏（IntersectionObserver）和标签页隐藏（`html[data-tab-hidden]`）时暂停。
 

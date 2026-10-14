@@ -80,9 +80,9 @@ describe("HTTP + WS integration (mock provider)", () => {
     const put = await api<Agent>("PUT", `/api/agents/${r.data.id}`, {
       ...agentBody("AvatarDefault"),
       avatarShape: "hex",
-      color: "#2f4a6d",
+      color: "#3d7bfa",
     });
-    expect(put.data).toMatchObject({ avatarShape: "hex", color: "#2f4a6d" });
+    expect(put.data).toMatchObject({ avatarShape: "hex", color: "#3d7bfa" });
     const listed = (await api<Agent[]>("GET", "/api/agents")).data.find((a) => a.id === r.data.id);
     expect(listed?.avatarShape).toBe("hex");
     const bad = await api("PUT", `/api/agents/${r.data.id}`, {

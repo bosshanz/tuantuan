@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import "@fontsource-variable/newsreader/opsz.css";
+import "@fontsource-variable/plus-jakarta-sans/wght.css";
 import "./styles.css";
 
 // Pause decorative avatar motion while the tab is hidden.

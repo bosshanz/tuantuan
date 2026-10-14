@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { AVATAR_COLORS, AVATAR_SHAPES, defaultAvatar } from "../server/avatars";
+import { AVATAR_COLORS, AVATAR_SHAPES, defaultAvatar, LEGACY_AVATAR_COLORS } from "../server/avatars";
+import { Store } from "../server/store";
 
 describe("default agent avatars", () => {
   test("are deterministic per id and always valid", () => {
@@ -16,5 +17,26 @@ describe("default agent avatars", () => {
     const ids = Array.from({ length: 400 }, () => crypto.randomUUID());
     expect(new Set(ids.map((id) => defaultAvatar(id).shape)).size).toBe(AVATAR_SHAPES.length);
     expect(new Set(ids.map((id) => defaultAvatar(id).color)).size).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe("palette migration", () => {
+  test("legacy colours all map into the vivid palette", () => {
+    for (const c of Object.values(LEGACY_AVATAR_COLORS)) expect(AVATAR_COLORS).toContain(c as never);
+  });
+  test("migration 5 recolours paper & ink defaults and leaves custom colours alone", () => {
+    const path = `/tmp/tt-palette-${Date.now()}.db`;
+    const s1 = new Store(path);
+    s1.db.exec(
+      "INSERT INTO agents (id,name,color,avatar,system_prompt,tools,skills,model_mode,pinned_model,created_at,updated_at,avatar_shape) VALUES ('a','A','#2F4A6D','A','','[]','[]','auto',NULL,0,0,'orb'),('b','B','#123456','B','','[]','[]','auto',NULL,0,0,'orb'); PRAGMA user_version = 4",
+    );
+    s1.db.close();
+    const s2 = new Store(path);
+    const rows = s2.db.query("SELECT id, color FROM agents ORDER BY id").all();
+    expect(rows).toEqual([
+      { id: "a", color: "#3d7bfa" },
+      { id: "b", color: "#123456" },
+    ]);
+    s2.db.close();
   });
 });

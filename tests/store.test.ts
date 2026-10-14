@@ -23,7 +23,7 @@ describe("Store", () => {
       s1.db.close();
       const s2 = new Store(path);
       expect(s2.getMessage(m.id)).toMatchObject({ status: "interrupted", error: "服务重启，回复中断" });
-      expect(s2.db.query("PRAGMA user_version").get()).toEqual({ user_version: 4 });
+      expect(s2.db.query("PRAGMA user_version").get()).toEqual({ user_version: 5 });
       s2.db.close();
     } finally {
       for (const f of [path, `${path}-wal`, `${path}-shm`]) rmSync(f, { force: true });

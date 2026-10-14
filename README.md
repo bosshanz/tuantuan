@@ -153,7 +153,7 @@ cp .env.example .env                                     # 填入对应的 API K
 
 ![Agent 编辑（深色）](docs/screenshots/agent-editor-dark.png)
 
-- 纸与墨风格：暖白纸色、墨色文字、朱红强调；标题衬线体（Newsreader，已自托管），浅色/深色跟随系统。
+- 现代简洁风格：干净的中性底色（浅色近白 / 深色石墨），品牌色是 Logo 里的番茄珊瑚红，只用在关键动作和状态上；Agent 头像用鲜亮的彩色区分。字体为 Plus Jakarta Sans（已自托管）+ 苹方，浅色/深色跟随系统。
 - Agent 头像是 SVG Bot（13 种轮廓 × 13 种颜色），默认按 Agent id 生成，在编辑页点击头像修改。头像会根据状态变表情（思考、说话、难过、惊讶、休眠），开启「减少动态效果」时静止。预览全部表情：`/#/dev/avatars`。
 
 ## 桌面机器人
