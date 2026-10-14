@@ -102,9 +102,25 @@ describe("HTTP + WS integration (mock provider)", () => {
     });
   });
 
-  test("a group message without @ triggers nobody", async () => {
-    const { messages } = await say(room.id, "大家好");
-    expect(messages.at(-1)?.senderKind).toBe("human");
+  test("a group message without @ goes to ONE agent picked by topic (mock picker is deterministic)", async () => {
+    const { messages, routing } = await say(room.id, "大家好");
+    const turn = messages.slice(messages.findLastIndex((m) => m.senderKind === "human"));
+    // No keyword overlap → first member (Alice); Alice's scripted reply hands off to Bob explicitly.
+    expect(turn.filter((m) => m.senderKind === "agent").map((m) => [m.senderName, m.hop])).toEqual([
+      ["Alice", 1],
+      ["Bob", 2],
+    ]);
+    const alice = turn.find((m) => m.senderName === "Alice") as Message;
+    const sel = routing.find((d) => d.messageId === alice.id)?.plan.selection;
+    expect(sel).toMatchObject({ agentName: "Alice", by: "llm" });
+    expect(sel?.reason).toContain("mock/small");
+    const bob = turn.find((m) => m.senderName === "Bob") as Message;
+    expect(routing.find((d) => d.messageId === bob.id)?.plan.selection).toBeUndefined();
+  });
+
+  test("@所有人 is reserved and cannot be an agent name", async () => {
+    expect((await api("POST", "/api/agents", agentBody("所有人"))).status).toBe(400);
+    expect((await api("POST", "/api/agents", agentBody("ALL"))).status).toBe(400);
   });
 
   test("hop limit stops an A<->B loop and says so", async () => {

@@ -1,7 +1,8 @@
 import type { AppConfig } from "./config";
 import type { ChatMessage } from "./llm";
 import type { McpConnections } from "./mcp";
-import { parseMentions } from "./mentions";
+import { mentionsEveryone, parseMentions } from "./mentions";
+import { pickResponder, type Selection } from "./picker";
 import { type Attempt, planRoute, type RoutingPlan } from "./router";
 import { type Skill, skillCatalogPrompt } from "./skills";
 import type { Agent, Message, RoutingDecision, Store } from "./store";
@@ -25,7 +26,10 @@ export interface RoomState {
 interface Trigger {
   agentId: string;
   hop: number;
+  selection?: Selection;
 }
+
+const INTERJECTION = "被新消息打断";
 
 interface RoomRuntime {
   queue: Message[];
@@ -71,6 +75,10 @@ export class Orchestrator {
     });
     this.publish(roomId, { type: "message", message: msg });
     const rt = this.runtime(roomId);
+    // Group interjection: a new human message stops the running chain (in-flight reply and
+    // pending hops) so the conversation follows the user. DMs keep queueing in order.
+    if (room.kind === "group" && rt.active && !rt.active.abort.signal.aborted)
+      rt.active.abort.abort(new DOMException(INTERJECTION, "AbortError"));
     rt.queue.push(msg);
     if (!rt.active && rt.queue.length === 1) rt.idle = this.drain(roomId, rt);
     this.publishState(roomId);
@@ -135,22 +143,44 @@ export class Orchestrator {
         .filter((a): a is Agent => a !== null);
 
     let initial: string[];
+    let fanOut = false;
+    let selection: Selection | undefined;
     if (room.kind === "dm") {
       initial = room.agentIds.slice(0, 1);
       if (initial.length === 0) {
         this.system(room.id, human.id, 0, "该私聊的 Agent 已被删除，消息不会得到回复。");
         return;
       }
+    } else if (mentionsEveryone(human.content)) {
+      fanOut = true;
+      initial = members().map((m) => m.id);
     } else {
       initial = parseMentions(human.content, members());
+      if (initial.length === 0) {
+        const pool = members();
+        if (pool.length === 0) {
+          this.system(room.id, human.id, 0, "群里还没有 Agent，消息不会得到回复。");
+          return;
+        }
+        try {
+          selection = await pickResponder(this.config, human.content, pool, signal);
+        } catch (e) {
+          if (signal.aborted) return;
+          throw e;
+        }
+        initial = [selection.agentId];
+      }
     }
 
-    const queue: Trigger[] = initial.map((agentId) => ({ agentId, hop: 1 }));
+    const queue: Trigger[] = initial.map((agentId) => ({ agentId, hop: 1, selection }));
+    const replied = new Set<string>();
     const maxHops = this.config.limits.maxAgentHops;
     let agentHops = 0;
     while (queue.length > 0) {
-      if (signal.aborted) return;
+      if (signal.aborted) return this.noteInterjection(room.id, human.id, signal, queue);
       const t = queue.shift() as Trigger;
+      // In an @所有人 turn every member answers once; hand-offs to someone who already answered are skipped.
+      if (fanOut && replied.has(t.agentId)) continue;
       if (t.hop >= 2) {
         if (agentHops >= maxHops) {
           const skipped = [t, ...queue].map((x) => this.store.getAgent(x.agentId)?.name ?? x.agentId);
@@ -166,17 +196,26 @@ export class Orchestrator {
       }
       const agent = this.store.getAgent(t.agentId);
       if (!agent) continue;
-      const reply = await this.runAgentTurn(agent, human, t.hop, members(), signal);
+      replied.add(agent.id);
+      const reply = await this.runAgentTurn(agent, human, t.hop, members(), signal, t.selection);
       if (reply.status !== "done") {
-        if (reply.status === "cancelled") return;
+        if (reply.status === "cancelled") return this.noteInterjection(room.id, human.id, signal, queue);
         continue;
       }
       // Agents trigger other room members they @; never themselves.
       const others = members().filter((m) => m.id !== agent.id);
       // An agent already waiting in the queue is not queued twice (e.g. human @A @B, then A @B).
       for (const id of parseMentions(reply.content, others))
-        if (!queue.some((q) => q.agentId === id)) queue.push({ agentId: id, hop: t.hop + 1 });
+        if (!queue.some((q) => q.agentId === id) && !(fanOut && replied.has(id)))
+          queue.push({ agentId: id, hop: t.hop + 1 });
     }
+  }
+
+  /** After an interjection, says which pending hand-offs were dropped (silent for user cancel, which reports itself). */
+  private noteInterjection(roomId: string, runId: string, signal: AbortSignal, pending: Trigger[]) {
+    if ((signal.reason as Error | undefined)?.message !== INTERJECTION || pending.length === 0) return;
+    const names = pending.map((x) => `@${this.store.getAgent(x.agentId)?.name ?? x.agentId}`);
+    this.system(roomId, runId, 0, `${INTERJECTION}，未执行的触发：${names.join("、")}`);
   }
 
   private async runAgentTurn(
@@ -185,6 +224,7 @@ export class Orchestrator {
     hop: number,
     members: Agent[],
     signal: AbortSignal,
+    selection?: Selection,
   ): Promise<Message> {
     const { limits } = this.config;
     const history = this.store.recentMessages(human.roomId, limits.contextMessages);
@@ -244,6 +284,7 @@ export class Orchestrator {
         signal,
       );
       if (warnings.length > 0) plan.reason += `；工具警告：${warnings.join("；")}`;
+      if (selection) plan.selection = selection;
       this.publish(human.roomId, {
         type: "routing",
         roomId: human.roomId,
@@ -273,7 +314,7 @@ export class Orchestrator {
         return finish("error", `达到最大工具迭代次数（${limits.maxToolIterations}），回复未完成`);
       return finish("done", null);
     } catch (e) {
-      if (signal.aborted) return finish("cancelled", "用户取消");
+      if (signal.aborted) return finish("cancelled", (signal.reason as Error | undefined)?.message || "用户取消");
       return finish("error", (e as Error).message);
     }
   }

@@ -485,3 +485,4 @@ kbd.combo { gap: 3px; }
 /* emoji avatars: same tile as letters, glyph scaled to sit optically centred */
 .avatar.emoji { font-size: calc(var(--size) * 0.56); font-weight: 400; }
 .search-trigger { display: flex; align-items: center; justify-content: space-between; text-align: left; color: var(--text-3); height: 32px; }
+.pop-item .pop-hint { margin-left: auto; font-size: 11px; }

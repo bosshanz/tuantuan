@@ -2,6 +2,7 @@ import { type Classification, classifyByRules, type TaskSignals } from "./classi
 import { type AppConfig, DIFFICULTIES, type Difficulty, type ModelConfig, TASK_TYPES, type TaskType } from "./config";
 import { callDecisionModel, decisionTaskType } from "./decision";
 import { type ChatRequest, type ChatResult, chat, ProviderError } from "./llm";
+import type { Selection } from "./picker";
 
 export interface DecisionTrace {
   model: string;
@@ -31,6 +32,8 @@ export interface ClassifierOutcome extends Classification {
 
 export interface RoutingPlan {
   mode: "auto" | "pinned";
+  /** Present when a group message @'d nobody and a picker chose this agent by topic. */
+  selection?: Selection;
   signals: Omit<TaskSignals, "text"> & { textPreview: string };
   classification?: ClassifierOutcome;
   /** Ordered model ids to try. */

@@ -88,6 +88,16 @@ export async function callDecisionModel(
   signal?: AbortSignal,
   env: Record<string, string | undefined> = process.env,
 ): Promise<DecisionAnswer> {
+  return parseDecisionResponse(await postSystemOne(cfg, buildDecisionRequest(cfg, s), signal, env));
+}
+
+/** POSTs one systemone request with the configured timeout; returns the parsed JSON body. */
+export async function postSystemOne(
+  cfg: DecisionConfig,
+  request: unknown,
+  signal?: AbortSignal,
+  env: Record<string, string | undefined> = process.env,
+): Promise<unknown> {
   const timeout = AbortSignal.timeout(cfg.timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let res: Response;
@@ -95,7 +105,7 @@ export async function callDecisionModel(
     res = await fetch(cfg.endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${env[cfg.apiKeyEnv] ?? ""}` },
-      body: JSON.stringify(buildDecisionRequest(cfg, s)),
+      body: JSON.stringify(request),
       signal: combined,
     });
   } catch (e) {
@@ -112,13 +122,11 @@ export async function callDecisionModel(
     throw new DecisionError(`决策模型响应读取失败：${(e as Error).message}`, "network");
   }
   if (!res.ok) throw new DecisionError(`决策模型 HTTP ${res.status}：${text.slice(0, 200)}`, "http");
-  let body: unknown;
   try {
-    body = JSON.parse(text);
+    return JSON.parse(text);
   } catch {
     throw new DecisionError(`决策模型返回的不是 JSON：${text.slice(0, 120)}`, "malformed");
   }
-  return parseDecisionResponse(body);
 }
 
 /** Maps a choice to a router task type; "other" or unknown names yield undefined (treated as no answer). */

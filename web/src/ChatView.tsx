@@ -9,6 +9,7 @@ import {
   PanelRight,
   Route,
   Trash2,
+  Users,
   Wrench,
   X,
 } from "lucide-react";
@@ -16,6 +17,13 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { type Agent, api, type Message, type Room, type RoomState, type RoutingDecision, type WsEvent } from "./api";
 import { PickList } from "./PickList";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
+
+const SELECT_LABEL: Record<string, string> = {
+  systemone: "没有 @，由决策模型按话题选择",
+  llm: "没有 @，由 LLM 按话题选择",
+  rules: "没有 @，按关键词规则选择",
+  only: "没有 @，群里只有这一个 Agent",
+};
 
 const TYPE_LABEL: Record<string, string> = {
   chat: "闲聊",
@@ -53,7 +61,7 @@ export function ChatView(props: {
     [room.agentIds, agents],
   );
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
-  const mentionNames = useMemo(() => agents.map((a) => a.name), [agents]);
+  const mentionNames = useMemo(() => [...agents.map((a) => a.name), "所有人", "all", "everyone"], [agents]);
 
   useEffect(() => {
     let alive = true;
@@ -194,7 +202,7 @@ export function ChatView(props: {
               </h2>
               <p style={{ fontSize: 13 }}>
                 {room.kind === "group"
-                  ? "只有被 @ 的 Agent 会回复；它们也可以互相 @ 接力。"
+                  ? "@ 谁谁回复，@所有人 每个 Agent 各回复一次；不 @ 时按话题自动选一个 Agent。回复中发新消息会打断当前回复。"
                   : "私聊中每条消息都会交给这个 Agent。"}
               </p>
               {room.kind === "group" && members.length > 0 && (
@@ -278,7 +286,7 @@ export function ChatView(props: {
             members={room.kind === "group" ? members : []}
             placeholder={
               room.kind === "group"
-                ? `发消息到 ${room.name}，用 @ 指定 Agent`
+                ? `发消息到 ${room.name}，不 @ 时按话题自动选一个 Agent`
                 : `发消息给 ${members[0]?.name ?? "Agent"}`
             }
           />
@@ -425,7 +433,14 @@ function MessageItem(props: {
       )}
       {(m.senderKind === "agent" || m.hop >= 2) && (
         <div className="msg-meta">
-          {m.status === "cancelled" && <span className="badge warn">已停止</span>}
+          {m.status === "cancelled" && (
+            <span className="badge warn">{m.error === "被新消息打断" ? "被新消息打断" : "已停止"}</span>
+          )}
+          {d?.plan.selection && m.hop === 1 && (
+            <span className="badge" title={d.plan.selection.reason}>
+              路由选择 · 按话题
+            </span>
+          )}
           {m.hop >= 2 && <span className="badge accent">Agent 接力 · 第 {m.hop - 1} 跳</span>}
           {d && (
             <button
@@ -496,6 +511,23 @@ function MessageDetails({ m, d }: { m: Message; d?: RoutingDecision }) {
           <p className="muted">这条消息没有路由记录。</p>
         ) : (
           <dl className="kv">
+            {d.plan.selection && (
+              <>
+                <dt>回复人</dt>
+                <dd>
+                  {d.plan.selection.agentName}
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    {SELECT_LABEL[d.plan.selection.by]}
+                    {d.plan.selection.confidence !== undefined && ` · 置信度 ${d.plan.selection.confidence.toFixed(2)}`}
+                    {" · "}
+                    {d.plan.selection.reason}
+                  </div>
+                  {d.plan.selection.fallbackReason && (
+                    <div className="warn-text">{d.plan.selection.fallbackReason}</div>
+                  )}
+                </dd>
+              </>
+            )}
             <dt>策略</dt>
             <dd>{d.plan.mode === "pinned" ? "固定模型（不回退）" : "Auto 路由"}</dd>
             {c && (
@@ -714,6 +746,8 @@ function RoomInfo(props: {
   );
 }
 
+const EVERYONE = { id: "__everyone", name: "所有人" } as const;
+
 function Composer(props: {
   value: string;
   onChange: (v: string) => void;
@@ -726,9 +760,13 @@ function Composer(props: {
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const query = /(?:^|\s)@([^\s@]*)$/.exec(props.value.slice(0, caret));
-  const options =
+  const q = (query?.[1] ?? "").toLowerCase();
+  // "所有人" is offered first in groups with 2+ agents; it matches 所有人 / all / everyone.
+  const everyone =
+    props.members.length > 1 && ["所有人", "all", "everyone"].some((n) => n.startsWith(q) || n.includes(q));
+  const options: (Agent | typeof EVERYONE)[] =
     query && !dismissed
-      ? props.members.filter((a) => a.name.toLowerCase().includes((query[1] ?? "").toLowerCase()))
+      ? [...(everyone ? [EVERYONE] : []), ...props.members.filter((a) => a.name.toLowerCase().includes(q))]
       : [];
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resize on value change
@@ -739,7 +777,7 @@ function Composer(props: {
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [props.value]);
 
-  const pick = (a: Agent) => {
+  const pick = (a: Pick<Agent, "name">) => {
     const before = props.value.slice(0, caret).replace(/@[^\s@]*$/, `@${a.name} `);
     props.onChange(before + props.value.slice(caret));
     setCaret(before.length);
@@ -766,8 +804,15 @@ function Composer(props: {
                 pick(a);
               }}
             >
-              <AgentAvatar agent={a} size={22} />
+              {a === EVERYONE ? (
+                <span className="room-icon" style={{ ["--size" as string]: "22px" }}>
+                  <Users size={13} />
+                </span>
+              ) : (
+                <AgentAvatar agent={a as Agent} size={22} />
+              )}
               <span>{a.name}</span>
+              {a === EVERYONE && <span className="muted pop-hint">每个 Agent 各回复一次</span>}
             </button>
           ))}
         </div>

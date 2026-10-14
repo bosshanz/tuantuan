@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { AppConfig } from "./config";
 import { type DeviceConn, DeviceHub } from "./device";
 import { McpConnections } from "./mcp";
+import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import type { SkillLoadResult } from "./skills";
 import { type AgentInput, Store, ValidationError } from "./store";
@@ -16,7 +17,11 @@ const AgentInputSchema = z.object({
     .trim()
     .min(1, "名称不能为空")
     .max(32, "名称最多 32 个字符")
-    .refine((s) => !/[@\s`]/.test(s), "名称不能包含 @、空白或反引号（名称用于 @ 提及）"),
+    .refine((s) => !/[@\s`]/.test(s), "名称不能包含 @、空白或反引号（名称用于 @ 提及）")
+    .refine(
+      (s) => !(EVERYONE_NAMES as readonly string[]).includes(s.toLowerCase()),
+      `名称不能是 ${EVERYONE_NAMES.join(" / ")}（保留给 @所有人）`,
+    ),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "颜色格式应为 #RRGGBB"),
   avatar: z.string().trim().min(1).max(4),
   systemPrompt: z.string().max(20000),

@@ -11,12 +11,33 @@ export interface Mentionable {
  * Returns ids in first-mention order without duplicates.
  */
 export function parseMentions(text: string, candidates: Mentionable[]): string[] {
-  const clean = text
+  const clean = stripQuoted(text);
+  const sorted = [...candidates].sort((a, b) => b.name.length - a.name.length);
+  return scan(clean, sorted);
+}
+
+/** Names that mean "every member" when a human writes them, e.g. "@所有人". */
+export const EVERYONE_NAMES = ["所有人", "all", "everyone"] as const;
+
+/** True when the text @s everyone (outside code/quotes). Only meaningful for human messages. */
+export function mentionsEveryone(text: string): boolean {
+  return (
+    scan(
+      stripQuoted(text),
+      EVERYONE_NAMES.map((n) => ({ id: n, name: n })),
+    ).length > 0
+  );
+}
+
+function stripQuoted(text: string): string {
+  return text
     .replace(/```[\s\S]*?(```|$)/g, " ")
     .replace(/`[^`\n]*`/g, " ")
     .replace(/^[ \t]*>.*$/gm, " ")
     .replace(/^[ \t]*\[[^\]\n]{1,64}\][:：].*$/gm, " ");
-  const sorted = [...candidates].sort((a, b) => b.name.length - a.name.length);
+}
+
+function scan(clean: string, sorted: Mentionable[]): string[] {
   const found: string[] = [];
   for (let i = clean.indexOf("@"); i >= 0; i = clean.indexOf("@", i + 1)) {
     const prev = clean[i - 1];

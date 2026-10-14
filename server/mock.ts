@@ -1,6 +1,7 @@
 import { classifyByRules, type TaskSignals } from "./classify";
 import type { ModelConfig } from "./config";
 import { type ChatRequest, type ChatResult, ProviderError, type ToolCall } from "./llm";
+import { pickByRules } from "./picker";
 
 /**
  * Deterministic fake LLM so the whole product runs and is testable without API keys.
@@ -19,7 +20,18 @@ export async function mockChat(model: ModelConfig, req: ChatRequest): Promise<Ch
   }
 
   if (req.json) {
-    const signals = JSON.parse(lastUser) as TaskSignals;
+    const parsed = JSON.parse(lastUser) as TaskSignals & { candidates?: { name: string; profile: string }[] };
+    if (parsed.candidates) {
+      const pick = pickByRules(
+        parsed.text,
+        parsed.candidates.map((c) => ({ id: c.name, name: c.name, systemPrompt: c.profile })),
+      );
+      return {
+        content: JSON.stringify({ agent: pick.agentName, reason: `mock 选择器（${pick.reason}）` }),
+        toolCalls: [],
+      };
+    }
+    const signals = parsed;
     const c = classifyByRules(signals);
     return {
       content: JSON.stringify({ task_type: c.taskType, difficulty: c.difficulty, reason: "mock 分类器" }),

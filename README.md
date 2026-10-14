@@ -18,7 +18,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173），默认 mock
 
 1. 左侧「Agents → + 新建」创建 Agent（名称用于 @，不能含空格）。
 2. 「会话 → + 新建」建一个群聊并拉入 Agent，或与单个 Agent 私聊。
-3. 群聊里输入 `@名字` 触发对应 Agent；私聊每条消息都交给该 Agent。
+3. 群聊里输入 `@名字` 触发对应 Agent，`@所有人` 让每个 Agent 各回复一次，不 @ 时按话题自动选一个 Agent 回复；回复过程中发新消息会打断当前回复。私聊每条消息都交给该 Agent。
 
 生产方式：`bun run build && bun start`（API 同时托管 `web/dist`，访问 http://localhost:8787）。
 
