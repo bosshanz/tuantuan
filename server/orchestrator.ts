@@ -173,7 +173,9 @@ export class Orchestrator {
       }
       // Agents trigger other room members they @; never themselves.
       const others = members().filter((m) => m.id !== agent.id);
-      for (const id of parseMentions(reply.content, others)) queue.push({ agentId: id, hop: t.hop + 1 });
+      // An agent already waiting in the queue is not queued twice (e.g. human @A @B, then A @B).
+      for (const id of parseMentions(reply.content, others))
+        if (!queue.some((q) => q.agentId === id)) queue.push({ agentId: id, hop: t.hop + 1 });
     }
   }
 
@@ -307,7 +309,7 @@ export function buildSystemPrompt(
         ? "你正在和用户私聊。"
         : `你在一个群聊中，消息以「[发言者]: 内容」的形式给出。${
             others.length > 0
-              ? `群里的其他 Agent：${others.join("、")}。需要他们协助时，在回复中写 @名字 即可触发对方；不需要时不要 @。`
+              ? `群里的其他 Agent：${others.join("、")}。在回复中写 @名字 会让对方立刻接着回复，所以只在你确实要把任务交给某人时才 @ 他；提到、感谢或引用别人时直接写名字，不要加 @。不要 @ 用户，不要在回复开头写「[名字]:」。`
               : ""
           }`,
     agent.systemPrompt,

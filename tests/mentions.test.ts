@@ -30,3 +30,16 @@ describe("parseMentions", () => {
     expect(parseMentions("@Carol hi", agents)).toEqual([]);
   });
 });
+
+describe("mentions in quotes and echoed transcript lines", () => {
+  const people = [
+    { id: "a", name: "Alice" },
+    { id: "b", name: "Bob" },
+  ];
+  test("blockquotes and [name]: lines are not hand-offs", () => {
+    expect(parseMentions("> @Alice 说过\n[Andy]: @Bob 你好\n[Andy]：@Bob\n正文", people)).toEqual([]);
+  });
+  test("a mention after the quote still counts", () => {
+    expect(parseMentions("> @Alice 说过\n@Bob 请你接手", people)).toEqual(["b"]);
+  });
+});
