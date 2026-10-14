@@ -11,7 +11,7 @@
 
 团团不自带模型：每个 Agent 绑定一个本机的编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode），团团通过 [ACP（Agent Client Protocol）](https://agentclientprotocol.com) 驱动它。Agent 可以在 **群聊** 中被 @，也可以私聊，完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。还带一个用语音对话的虚拟桌面机器人。
 
-![群聊](docs/screenshots/group-chat.png)
+![群聊：主 Agent 用 handoff 把任务交给 Alice](docs/screenshots/group-chat.png)
 
 - 模型、Key 和登录全部由 Harness 自己管理，团团不保存任何凭据。
 - 不装任何 CLI 也能体验：`TUANTUAN_MOCK_HARNESS=1` 启用内置 mock ACP agent。
@@ -48,7 +48,9 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 | Grok Build | `curl -fsSL https://x.ai/cli/install.sh \| bash` | `grok login`，或设置 `XAI_API_KEY` |
 | OpenCode | `npm i -g opencode-ai` 或 `brew install anomalyco/tap/opencode` | `opencode auth login`（自带免费模型时可不登录） |
 
-登录在终端里完成，团团目前只显示提示，不代替你登录。所有 Agent 共用同一份 Harness 登录。
+「引导」页的「握手测试」会报告是否已登录。未登录时，如果 Harness 通过 ACP 声明了自带的登录流程（如 Codex 的 ChatGPT / API Key、Grok 的 grok.com、OpenCode 的 opencode-login），点「用「…」登录」由 Harness 自己完成（可能会打开浏览器），完成后自动重新检测；否则复制旁边的登录命令到终端执行，再点「重新检测」。所有 Agent 共用同一份 Harness 登录。
+
+> Claude Code 的适配器没有声明登录方式，而且未登录时也能建会话，所以「已登录」只代表握手和建会话成功；真正发消息时没登录会提示去终端运行 `claude` 登录。
 
 **身份文档**：每个 Agent 的身份文档保存在团团里，不写进你的仓库。Claude Code 通过 `_meta.systemPrompt.append`、Grok 通过 `_meta.rules`、Codex 通过进程环境 `CODEX_CONFIG` 的 `developer_instructions` 传递；其他 Harness 在会话第一条消息前附加。
 
@@ -60,8 +62,12 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 | 不 @ 任何人 | 群的**主 Agent** |
 | `@所有人`（或 `@all` / `@everyone`） | 每个成员按顺序各回复一次 |
 
-- 群里所有 Agent 共用群的工作目录；Agent 收到的是它上次发言之后的群聊记录。
-- Agent 之间的交接（handoff）在 M2 实现，目前未启用。
+- 建群时选择主 Agent 和共享工作目录（之后可在详情面板修改）；群里所有 Agent 在这个目录里工作。
+- **群聊转述**：Agent 每次被叫到时，收到的是它上次发言之后群里的新消息（最多 30 条、约 8000 字，超出时保留最新的并注明省略了几条）。
+- **交接**：团团给群里每个 Agent 的会话注入一个名为 `tuantuan` 的 MCP 服务器，提供 `handoff(agent, task)` 和 `list_members`。Agent 调用 `handoff` 后，对方在这条回复结束后接手并收到 task；界面上显示「交接给 @X」卡片，接手方显示「接 @Y 的交接」。正文里写 `@名字` 不会触发对方。
+  - 只能交给群里的其他成员；同一条消息里已在排队的不重复触发；`@所有人` 这一轮已经回复过的不会再被交接触发。
+  - 每条人类消息最多 5 次交接，超出时停止并提示。新消息会打断当前回复并丢弃未执行的交接。
+  - 传输：Harness 声明支持 HTTP MCP 时直接连团团的 `/mcp/<token>`，否则用 stdio 中转（`server/mcp-shim.ts`）。token 随机生成、只在内存里，每个「会话 + Agent」一个。
 
 ## 私聊
 
@@ -69,10 +75,11 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 - 权限请求弹窗：允许一次 / 总是允许 / 拒绝。文件读写和终端只能在 Agent 的工作目录内。
 - Harness 提供的配置项（模式、模型、推理强度等）和斜杠命令（输入 `/` 弹出）。
 - 粘贴或拖入图片（Harness 支持时）、随时停止、会话列表（切换 / 恢复历史会话 / 新会话）。
+- 切换到 Harness 里的历史会话时用 `session/load`，Harness 回放的历史中团团没显示过的轮次（按用户消息去重）以只读方式显示在消息列表顶部。
 
 ## 用 mock 演示
 
-`TUANTUAN_MOCK_HARNESS=1 bun dev` 后可以选「Mock」Harness。它回复「收到：…」，并支持 `/plan`（计划）、`/edit`（权限请求 + diff）、`/run`（终端）、`/slow`（慢回复，用于测试停止）。
+`TUANTUAN_MOCK_HARNESS=1 bun dev` 后可以选「Mock」Harness。它回复「收到：…」，并支持 `/plan`（计划）、`/edit`（权限请求 + diff）、`/run`（终端）、`/slow`（慢回复，用于测试停止）；群聊里 `/handoff 名字 任务`、`/members`；机器人里 `/express happy`、`/act dance`、`/say 一句话`。
 
 ## 环境变量
 
@@ -80,7 +87,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 界面
 
-![Agent 编辑（深色）](docs/screenshots/agent-editor-dark.png)
+![Agent 编辑](docs/screenshots/agent-editor.png)
 
 - 现代简洁风格：干净的中性底色（浅色近白 / 深色石墨），品牌色是 Logo 里的番茄珊瑚红，只用在关键动作和状态上；Agent 头像用鲜亮的彩色区分。字体为 Plus Jakarta Sans（已自托管）+ 苹方，浅色/深色跟随系统。
 - Agent 头像是 SVG Bot（13 种轮廓 × 13 种颜色），默认按 Agent id 生成，在编辑页点击头像修改。头像会根据状态变表情（思考、说话、难过、惊讶、休眠），开启「减少动态效果」时静止。预览全部表情：`/#/dev/avatars`。
@@ -91,7 +98,8 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 - 先选要绑定的 Agent；脸部会显示待机、聆听、思考、说话、开心、难过/出错、惊讶等表情。
 - 按住说话或打开免提（需要支持 Web Speech 的浏览器，推荐 Chrome；Safari 支持有限），回复用 zh-CN 朗读；不支持语音时用文字输入。说话时可以直接打断。
-- 机器人绑定一个用 Harness 的 Agent；表情 / 动作工具（`robot_express` / `robot_action`）将在 M2 以 MCP 形式提供。
+- 只能选择 Harness 已安装的 Agent。
+- 机器人会话里，Agent 通过 `tuantuan` MCP 服务器得到 `set_expression`、`play_action`、`speak` 三个工具：前两个映射到设备协议的表情 / 动作（等设备确认，失败如实返回），`speak` 指定这次要朗读的一两句话。不调用 `speak` 时，机器人朗读回复的简短版本（去掉代码和 Markdown，约 160 字以内）。
 - 对话保存为聊天列表里「桌面机器人」分组下的会话，每个 Agent 一个（重复打开不会新增），也可以在网页里接着聊。
 - 真实硬件可按 [docs/device-protocol.md](docs/device-protocol.md) 接入。
 

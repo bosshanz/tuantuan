@@ -18,12 +18,12 @@
 | `ack` | `id, ok, error?` | 对 `expression` / `action` 指令的执行回执 |
 
 ## 服务端 → 设备
-`welcome{protocol, sessionId, roomId, agent}`、`session.state{state: idle|thinking|replying}`、`utterance.accepted{id}`、`reply.start` / `reply.delta{text}` / `reply.end{status, text, error?}`、`expression{id, name, durationMs}`、`action{id, name}`、`interrupt.result{cancelled}`、`error{code, message}`。
+`welcome{protocol, sessionId, roomId, agent}`、`session.state{state: idle|thinking|replying}`、`utterance.accepted{id}`、`reply.start` / `reply.delta{text}` / `reply.end{status, text, spoken?, error?}`（`spoken`：要朗读的文本，即 Agent 用 `speak` 指定的话，否则是回复去掉代码和 Markdown 后的简短版本；旧设备可忽略，继续读 `text`）、`expression{id, name, durationMs}`、`action{id, name}`、`interrupt.result{cancelled}`、`error{code, message}`。
 
 错误码：`invalid_message`（JSON 或 schema 不合法，发送后以 1008 关闭）、`not_ready`、`unknown_agent`（连接不关闭）、`busy`。
 
 ## Agent 控制身体
-绑定到设备的房间是 dm 房间，没有 `handoff` 工具，也不做群聊的按话题选择。Agent 会额外获得两个内置工具：`robot_express(name: neutral|happy|sad|surprised)` 和 `robot_action(name: nod|shake_head|tilt|wave|look_around|dance)`。工具会把指令下发给设备，并**等待设备 ack**（默认 3000 ms，可通过 `deviceAckTimeoutMs` 配置）。设备离线、不支持该能力、返回失败或超时，工具结果都会如实报告失败，不会假装成功。
+绑定到设备的房间是 dm 房间，没有 `handoff` 工具。团团在 Agent 的 ACP 会话里注入 `tuantuan` MCP 服务器，提供三个工具：`set_expression(expression: neutral|happy|sad|surprised)`、`play_action(action: nod|shake_head|tilt|wave|look_around|dance)` 和 `speak(text)`。前两个把指令下发给设备，并**等待设备 ack**（默认 3000 ms，可通过 `deviceAckTimeoutMs` 配置）；设备离线、不支持该能力、返回失败或超时，工具结果都会如实报告失败，不会假装成功。`speak` 决定 `reply.end.spoken`。
 
 ## 决策
 - 使用独立的 `/device` 端点，不复用 UI 的 `/ws`：两者的身份模型和背压需求不同，设备协议需要版本号和 ack。
