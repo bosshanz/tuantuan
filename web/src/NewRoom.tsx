@@ -1,46 +1,42 @@
-import { ChevronLeft, Hash, MessageCircle } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { useState } from "react";
-import { workspaceRel } from "../../shared/workspace";
-import { type Agent, api, type Room } from "./api";
+import { type Agent, api, type Project, type Room } from "./api";
 import { PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
 export function NewRoom({
   agents,
-  workspacesRoot,
+  projects,
+  projectId,
   onCreated,
   onBack,
 }: {
   agents: Agent[];
-  workspacesRoot: string;
+  projects: Project[];
+  projectId: string;
   onCreated: (r: Room) => void;
   onBack: () => void;
 }) {
-  const [kind, setKind] = useState<"group" | "dm">("group");
+  const [project, setProject] = useState(projectId);
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [main, setMain] = useState<string>("");
-  const [cwd, setCwd] = useState("");
-  const [pick, setPick] = useState(false);
-  // The main agent must be a member: default to the first one picked.
   const mainId = selected.includes(main) ? main : (selected[0] ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const dmAgent = agents.find((a) => a.id === selected[0]);
+  const autoName = selected.map((id) => agents.find((a) => a.id === id)?.name ?? "").join("、");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError(null);
     try {
-      const roomName = name.trim() || (kind === "dm" && dmAgent ? `与 ${dmAgent.name} 私聊` : "");
       onCreated(
         await api<Room>("POST", "/api/rooms", {
-          name: roomName,
-          kind,
+          name: (name.trim() || autoName).slice(0, 64),
           agentIds: selected,
-          ...(kind === "group" && { mainAgentId: mainId || null }),
-          ...(pick && { cwd: cwd.trim() }),
+          mainAgentId: mainId || null,
+          projectId: project,
         }),
       );
     } catch (err) {
@@ -62,51 +58,35 @@ export function NewRoom({
       </header>
       <form className="page" onSubmit={submit}>
         <div className="page-inner form-page" style={{ maxWidth: 600 }}>
-          <div className="row wrap-sm">
-            {(
-              [
-                ["group", <Hash key="g" size={18} />, "群聊", "多个 Agent，@ 点名"],
-                ["dm", <MessageCircle key="d" size={18} />, "私聊", "一对一"],
-              ] as const
-            ).map(([k, icon, title, sub]) => (
-              <label key={k} className="radio-card grow">
-                <input
-                  type="radio"
-                  name="kind"
-                  checked={kind === k}
-                  onChange={() => {
-                    setKind(k);
-                    setSelected((s) => (k === "dm" ? s.slice(0, 1) : s));
-                  }}
-                />
-                <span>
-                  <span className="rc-title" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    {icon}
-                    {title}
-                  </span>
-                  <span className="rc-sub">{sub}</span>
-                </span>
-              </label>
-            ))}
-          </div>
           <label className="field">
-            <span className="label">名称{kind === "dm" && <span className="muted">（可选）</span>}</span>
+            <span className="label">项目</span>
+            <select className="select" aria-label="项目" value={project} onChange={(e) => setProject(e.target.value)}>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span className="label">
+              名称<span className="muted">（可选）</span>
+            </span>
             <input
               className="input"
+              aria-label="会话名称"
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={64}
-              placeholder={kind === "dm" ? (dmAgent ? `与 ${dmAgent.name} 私聊` : "与 … 私聊") : "例如：产品研发群"}
+              placeholder={autoName || "会话名称"}
             />
           </label>
           <div className="field">
-            <span className="label">
-              {kind === "group" ? `成员 Agent（已选 ${selected.length}）` : "选择一个 Agent"}
-            </span>
+            <span className="label">Agent（已选 {selected.length}）</span>
             <PickList
-              mode={kind === "dm" ? "single" : "multi"}
+              mode="multi"
               searchPlaceholder="搜索 Agent"
-              emptyText="还没有 Agent，请先创建。"
+              emptyText="还没有 Agent"
               groups={[
                 {
                   items: agents.map((a) => ({
@@ -119,56 +99,28 @@ export function NewRoom({
                 },
               ]}
               selected={selected}
-              onToggle={(id) =>
-                setSelected((s) => (kind === "dm" ? [id] : s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
-              }
+              onToggle={(id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))}
             />
           </div>
-          {kind === "group" && (
-            <label className="field">
-              <span className="label">主 Agent</span>
-              <select
-                className="select"
-                aria-label="主 Agent"
-                value={mainId}
-                disabled={selected.length === 0}
-                onChange={(e) => setMain(e.target.value)}
-              >
-                {selected.length === 0 && <option value="">先选择成员</option>}
-                {selected.map((id) => (
-                  <option key={id} value={id}>
-                    {agents.find((a) => a.id === id)?.name ?? id}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <div className="field">
-            <span className="label">工作目录</span>
-            <fieldset className="segmented" aria-label="工作目录">
-              <button type="button" aria-pressed={!pick} onClick={() => setPick(false)}>
-                自动创建
-              </button>
-              <button type="button" aria-pressed={pick} onClick={() => setPick(true)}>
-                选择已有
-              </button>
-            </fieldset>
-            {pick ? (
-              <input
-                className="input mono"
-                aria-label="文件夹路径"
-                value={cwd}
-                onChange={(e) => setCwd(e.target.value)}
-                maxLength={1024}
-                placeholder="~/code/my-project"
-                spellCheck={false}
-              />
-            ) : (
-              <span className="muted mono" style={{ fontSize: 12 }}>
-                {workspacesRoot}/
-                {workspaceRel(kind, name.trim() || (dmAgent ? `与 ${dmAgent.name} 私聊` : ""), dmAgent?.name)}
-              </span>
-            )}
+          <div className={`collapse${selected.length > 1 ? " open" : ""}`}>
+            <div>
+              <label className="field">
+                <span className="label">主 Agent</span>
+                <select
+                  className="select"
+                  aria-label="主 Agent"
+                  value={mainId}
+                  onChange={(e) => setMain(e.target.value)}
+                  tabIndex={selected.length > 1 ? 0 : -1}
+                >
+                  {selected.map((id) => (
+                    <option key={id} value={id}>
+                      {agents.find((a) => a.id === id)?.name ?? id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
           {error && (
             <div className="form-error" role="alert">
@@ -176,14 +128,9 @@ export function NewRoom({
             </div>
           )}
           <div className="form-actions">
-            <button
-              type="submit"
-              className="btn primary"
-              disabled={saving || (pick && !cwd.trim()) || (kind === "dm" ? selected.length !== 1 : name.trim() === "")}
-            >
+            <button type="submit" className="btn primary" disabled={saving || selected.length === 0}>
               {saving ? "创建中…" : "创建会话"}
             </button>
-            {kind === "group" && name.trim() === "" && <span className="form-hint">请填写群名</span>}
           </div>
         </div>
       </form>

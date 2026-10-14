@@ -3,7 +3,16 @@ import type { CustomFormat } from "../../server/custom";
 import type { HarnessStatus } from "../../server/harness";
 import type { PermissionAsk, SessionView } from "../../server/host";
 import type { RoomEvent, RoomState } from "../../server/orchestrator";
-import type { Agent, AgentInput, CustomInput, CustomPublic, McpServer, Message, Room } from "../../server/store";
+import type {
+  Agent,
+  AgentInput,
+  CustomInput,
+  CustomPublic,
+  McpServer,
+  Message,
+  Project,
+  Room,
+} from "../../server/store";
 
 export type {
   Agent,
@@ -15,6 +24,7 @@ export type {
   McpServer,
   Message,
   PermissionAsk,
+  Project,
   Room,
   RoomEvent,
   RoomState,

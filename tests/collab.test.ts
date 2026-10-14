@@ -23,8 +23,8 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<{ s
 }
 const agent = async (name: string, extra: Parameters<typeof agentInput>[1] = {}) =>
   (await api<Agent>("POST", "/api/agents", agentInput(name, extra))).data;
-const room = async (name: string, kind: "group" | "dm", agentIds: string[], extra = {}) =>
-  (await api<Room>("POST", "/api/rooms", { name, kind, agentIds, ...extra })).data;
+const room = async (name: string, agentIds: string[], extra = {}) =>
+  (await api<Room>("POST", "/api/rooms", { name, agentIds, ...extra })).data;
 async function say(roomId: string, content: string) {
   expect((await api("POST", `/api/rooms/${roomId}/messages`, { senderName: "Andy", content })).status).toBe(201);
   await app.orchestrator.idle(roomId);
@@ -43,7 +43,7 @@ describe("handoff through Tuantuan's MCP server", () => {
       const env: Record<string, string> = transport === "http" ? { MOCK_AGENT_MCP_HTTP: "1" } : {};
       const a = await agent(`A_${transport}`, { env });
       const b = await agent(`B_${transport}`, { env });
-      const g = await room("交接", "group", [a.id, b.id], { mainAgentId: a.id });
+      const g = await room("交接", [a.id, b.id], { mainAgentId: a.id });
       const before = Date.now();
       const ms = await say(g.id, `/handoff ${b.name} 写个测试`);
       const [, ra, rb] = ms;
@@ -68,7 +68,7 @@ describe("handoff through Tuantuan's MCP server", () => {
   test("only other members: unknown name and self are refused; nothing else triggers", async () => {
     const a = await agent("Solo");
     const b = await agent("Other");
-    const g = await room("g", "group", [a.id, b.id], { mainAgentId: a.id });
+    const g = await room("g", [a.id, b.id], { mainAgentId: a.id });
     let ms = await say(g.id, "/handoff Nobody 做事");
     expect(ms).toHaveLength(2);
     const t = tools(ms[1])[0];
@@ -82,7 +82,7 @@ describe("handoff through Tuantuan's MCP server", () => {
   test("list_members names everyone and the main agent", async () => {
     const a = await agent("Lead");
     const b = await agent("Dev");
-    const g = await room("g", "group", [a.id, b.id], { mainAgentId: a.id });
+    const g = await room("g", [a.id, b.id], { mainAgentId: a.id });
     const ms = await say(g.id, "/members");
     expect(ms.at(-1)?.content).toContain("@Lead（你）（主 Agent）");
     expect(ms.at(-1)?.content).toContain("@Dev");
@@ -91,7 +91,7 @@ describe("handoff through Tuantuan's MCP server", () => {
   test("ping-pong hand-offs stop at the hop limit with a notice", async () => {
     const p = await agent("Ping", { identity: "[[handoff:Pong 该你了]]" });
     const q = await agent("Pong", { identity: "[[handoff:Ping 该你了]]" });
-    const g = await room("loop", "group", [p.id, q.id], { mainAgentId: p.id });
+    const g = await room("loop", [p.id, q.id], { mainAgentId: p.id });
     const ms = await say(g.id, "开始");
     const replies = ms.filter((m) => m.senderKind === "agent");
     expect(replies).toHaveLength(1 + MAX_AGENT_HOPS);
@@ -103,7 +103,7 @@ describe("handoff through Tuantuan's MCP server", () => {
   test("@所有人 round: a hand-off to someone who already answered does not trigger them again", async () => {
     const a = await agent("First", { identity: "[[handoff:Second 再看看]]" });
     const b = await agent("Second");
-    const g = await room("all", "group", [a.id, b.id]);
+    const g = await room("all", [a.id, b.id]);
     const ms = await say(g.id, "@所有人 报到");
     expect(ms.filter((m) => m.senderKind === "agent").map((m) => m.senderName)).toEqual(["First", "Second"]);
   });
@@ -111,7 +111,7 @@ describe("handoff through Tuantuan's MCP server", () => {
   test("a new message interrupts the chain and drops pending hand-offs", async () => {
     const a = await agent("Slowpoke");
     const b = await agent("Waiter");
-    const g = await room("int", "group", [a.id, b.id], { mainAgentId: a.id });
+    const g = await room("int", [a.id, b.id], { mainAgentId: a.id });
     await api("POST", `/api/rooms/${g.id}/messages`, { senderName: "Andy", content: "/slow" });
     await until(() => app.orchestrator.state(g.id).activeRunId);
     await Bun.sleep(300);
@@ -123,7 +123,7 @@ describe("handoff through Tuantuan's MCP server", () => {
 
   test("DMs get no Tuantuan tools", async () => {
     const a = await agent("Lonely");
-    const d = await room("dm", "dm", [a.id]);
+    const d = await room("dm", [a.id]);
     const ms = await say(d.id, "/members");
     expect(JSON.stringify(tools(ms.at(-1))[0]?.content)).toContain("没有 tuantuan MCP 服务");
   });
@@ -140,16 +140,16 @@ describe("handoff through Tuantuan's MCP server", () => {
   });
 });
 
-describe("group relay (群聊转述)", () => {
+describe("group relay (会话转述)", () => {
   test("only what the agent has not seen, newest kept under the size cap", async () => {
     const a = await agent("Reader");
     const b = await agent("Talker");
-    const g = await room("relay", "group", [a.id, b.id], { mainAgentId: b.id });
+    const g = await room("relay", [a.id, b.id], { mainAgentId: b.id });
     await say(g.id, "@Reader 第一句");
     for (let i = 0; i < 6; i++) await say(g.id, `${"长".repeat(2500)}${i}`);
     const ms = await say(g.id, "@Reader 最后");
     const t = thought(ms.at(-1));
-    expect(t).toContain("你上次发言之后，群里的新消息（更早的");
+    expect(t).toContain("你上次发言之后，会话里的新消息（更早的");
     expect(t).not.toContain("第一句");
     expect(t).toContain("（已截断）");
     expect(t).toContain("[Talker（Agent）]");
@@ -184,10 +184,10 @@ describe("onboarding auth", () => {
 describe("session/load replay", () => {
   test("history the harness replays shows up, minus turns the room already has", async () => {
     const a = await agent("Historian");
-    const r1 = await room("r1", "dm", [a.id]);
+    const r1 = await room("r1", [a.id]);
     await say(r1.id, "外部历史");
     const s1 = (await api<{ sessionId: string }>("GET", `/api/rooms/${r1.id}/agents/${a.id}/session`)).data.sessionId;
-    const r2 = await room("r2", "dm", [a.id], { cwd: r1.cwd }); // same folder → the harness lists r1's session
+    const r2 = await room("r2", [a.id], { projectId: r1.projectId }); // same project folder → the harness lists r1's session
     await say(r2.id, "本地消息");
     const list = (await api<{ sessionId: string }[]>("GET", `/api/rooms/${r2.id}/agents/${a.id}/history`)).data;
     expect(list.map((x) => x.sessionId)).toContain(s1);

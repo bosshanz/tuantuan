@@ -6,7 +6,7 @@ import { AcpProcess } from "../server/acp";
 import { serve } from "../server/app";
 import type { SessionView } from "../server/host";
 import type { RoomEvent } from "../server/orchestrator";
-import type { Agent, Message, Room } from "../server/store";
+import type { Agent, Message, Project, Room } from "../server/store";
 import { agentInput, until, WORKSPACES } from "./helpers";
 
 const { app, server } = serve({ dbPath: ":memory:" }, 0);
@@ -31,8 +31,10 @@ async function createAgent(name: string, extra: Parameters<typeof agentInput>[1]
   return r.data;
 }
 
-async function createRoom(name: string, kind: "group" | "dm", agentIds: string[], extra = {}): Promise<Room> {
-  const r = await api<Room>("POST", "/api/rooms", { name, kind, agentIds, ...extra });
+async function createRoom(name: string, agentIds: string[], extra: { cwd?: string; [k: string]: unknown } = {}) {
+  const { cwd, ...rest } = extra;
+  const projectId = cwd ? (await api<Project>("POST", "/api/projects", { name, cwd })).data.id : undefined;
+  const r = await api<Room>("POST", "/api/rooms", { name, agentIds, projectId, ...rest });
   expect(r.status).toBe(201);
   return r.data;
 }
@@ -126,11 +128,11 @@ describe("BYOK agent", () => {
       });
       expect(t.data).toMatchObject({ ok: true, reply: "byok 回复" });
 
-      const dmRoom = await createRoom("byok-dm", "dm", [r.data.id]);
+      const dmRoom = await createRoom("byok-dm", [r.data.id]);
       expect((await say(dmRoom.id, "你好")).at(-1)?.content).toBe("byok 回复");
 
       const mate = await createAgent("Mate");
-      const g = await createRoom("byok-g", "group", [r.data.id, mate.id], { mainAgentId: r.data.id });
+      const g = await createRoom("byok-g", [r.data.id, mate.id], { mainAgentId: r.data.id });
       const ms = await say(g.id, "开始");
       expect(ms.some((m) => m.senderName === "Mate" && m.status === "done")).toBe(true);
       expect(round).toBeGreaterThan(2);
@@ -148,50 +150,78 @@ describe("onboarding", () => {
   });
 });
 
-describe("room working directories", () => {
-  test("each room gets its own folder under the workspaces root, created on disk with a unique name", async () => {
+describe("projects", () => {
+  test("conversations default to 草稿; new projects get their own folder or an existing one", async () => {
     const a = await createAgent("WsBot");
-    const r1 = await createRoom("产品 研发/群", "group", [a.id]);
-    const r2 = await createRoom("产品 研发/群", "group", [a.id]);
-    const d = await createRoom("与 WsBot 私聊", "dm", [a.id]);
-    expect(r1.cwd).toBe(join(WORKSPACES, "groups", "产品-研发-群"));
-    expect(r2.cwd).toBe(join(WORKSPACES, "groups", "产品-研发-群-2"));
-    expect(d.cwd).toBe(join(WORKSPACES, "dm", "WsBot"));
-    for (const r of [r1, r2, d]) expect(existsSync(r.cwd)).toBe(true);
+    const d = await createRoom("草稿会话", [a.id]);
+    expect(d.projectId).toBe("drafts");
+    expect(d.cwd).toBe(join(WORKSPACES, "drafts"));
+    expect(d.kind).toBe("dm");
+    const p1 = (await api<Project>("POST", "/api/projects", { name: "产品 研发/x" })).data;
+    const p2 = (await api<Project>("POST", "/api/projects", { name: "产品 研发/x" })).data;
+    expect(p1.cwd).toBe(join(WORKSPACES, "产品-研发-x"));
+    expect(p2.cwd).toBe(join(WORKSPACES, "产品-研发-x-2"));
+    for (const p of [p1, p2]) expect(existsSync(p.cwd)).toBe(true);
+    const own = mkdtempSync(join(tmpdir(), "tuantuan-own-"));
+    const p3 = (await api<Project>("POST", "/api/projects", { name: "own", cwd: own })).data;
+    expect(p3.cwd).toBe(own);
+    expect((await api("POST", "/api/projects", { name: "bad", cwd: "/no/such/dir" })).status).toBe(400);
+    const b = await createAgent("WsBot-b");
+    const g = await createRoom("双人", [a.id, b.id], { projectId: p3.id, mainAgentId: b.id });
+    expect(g).toMatchObject({ kind: "group", cwd: own, mainAgentId: b.id });
+    expect((await api("DELETE", "/api/projects/drafts")).status).toBe(400);
   });
 
-  test("old flat auto-folders move to dm/ or groups/ only when empty and outside sessions", async () => {
-    const { migrateAutoWorkspace } = await import("../server/workspace");
-    const { mkdirSync, writeFileSync } = await import("node:fs");
-    const empty = join(WORKSPACES, "与-Old-私聊");
-    mkdirSync(empty, { recursive: true });
-    expect(migrateAutoWorkspace(empty, "dm", "与 Old 私聊", "Old")).toBe(join(WORKSPACES, "dm", "Old"));
-    expect(existsSync(empty)).toBe(false);
-    const used = join(WORKSPACES, "旧群");
-    mkdirSync(used, { recursive: true });
-    writeFileSync(join(used, "a.txt"), "x");
-    expect(migrateAutoWorkspace(used, "group", "旧群")).toBe(used);
-    const outside = mkdtempSync(join(tmpdir(), "tuantuan-own-"));
-    expect(migrateAutoWorkspace(outside, "group", "x")).toBe(outside);
-  });
-
-  test("a chosen folder must exist; changing it (DMs too) forgets the harness session", async () => {
+  test("changing a project's folder resets its conversations' harness sessions", async () => {
     const a = await createAgent("WsBot2");
-    const bad = await api<{ error: string }>("POST", "/api/rooms", {
-      name: "x",
-      kind: "dm",
-      agentIds: [a.id],
-      cwd: "/no/such/dir",
-    });
-    expect(bad.status).toBe(400);
-    const d = await createRoom("x", "dm", [a.id]);
+    const p = (await api<Project>("POST", "/api/projects", { name: "reset" })).data;
+    const d = await createRoom("x", [a.id], { projectId: p.id });
     await say(d.id, "hi");
     expect(app.store.getAcpSession(d.id, a.id)).toBeTruthy();
+    expect((await api("PATCH", `/api/projects/${p.id}`, { name: "renamed" })).status).toBe(200);
+    expect(app.store.getAcpSession(d.id, a.id)).toBeTruthy();
     const other = mkdtempSync(join(tmpdir(), "tuantuan-pick-"));
-    const r = await api<Room>("PATCH", `/api/rooms/${d.id}`, { cwd: other });
-    expect(r.data.cwd).toBe(other);
+    const r = await api<Project>("PATCH", `/api/projects/${p.id}`, { cwd: other });
+    expect(r.data).toMatchObject({ name: "renamed", cwd: other });
+    expect(app.store.getRoom(d.id)?.cwd).toBe(other);
     expect(app.store.getAcpSession(d.id, a.id)).toBeFalsy();
-    expect((await api("PATCH", `/api/rooms/${d.id}`, { mainAgentId: a.id })).status).toBe(400);
+  });
+
+  test("legacy rooms become projects by folder and keep their sessions", async () => {
+    const { Store } = await import("../server/store");
+    const { ensureDrafts, migrateRoomsToProjects } = await import("../server/workspace");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const s = new Store(":memory:");
+    ensureDrafts(s);
+    const x = s.createAgent(agentInput("X"));
+    const y = s.createAgent(agentInput("Y"));
+    const shared = mkdtempSync(join(tmpdir(), "tuantuan-legacy-"));
+    const emptyDm = join(WORKSPACES, "dm", "X");
+    const usedDm = join(WORKSPACES, "dm", "Y");
+    const group = join(WORKSPACES, "groups", "老群");
+    for (const d of [emptyDm, usedDm, group]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(usedDm, "a.txt"), "x");
+    const legacy = (name: string, ids: string[], cwd: string) => {
+      const r = s.createRoom(name, ids);
+      s.db.query("UPDATE rooms SET project_id = NULL, cwd = ? WHERE id = ?").run(cwd, r.id);
+      s.setAcpSession(r.id, ids[0] as string, "mock", `sess-${name}`);
+      return r.id;
+    };
+    const ids = [
+      legacy("a", [x.id], shared),
+      legacy("b", [x.id, y.id], shared),
+      legacy("c", [x.id], emptyDm),
+      legacy("d", [y.id], usedDm),
+      legacy("e", [x.id, y.id], group),
+    ];
+    migrateRoomsToProjects(s);
+    const rooms = ids.map((id) => s.getRoom(id));
+    expect(rooms[0]?.projectId).toBe(rooms[1]?.projectId as string);
+    expect(s.getProject(rooms[0]?.projectId as string)?.cwd).toBe(shared);
+    expect(rooms[2]?.projectId).toBe("drafts");
+    expect(s.getProject(rooms[3]?.projectId as string)).toMatchObject({ name: "Y", cwd: usedDm });
+    expect(s.getProject(rooms[4]?.projectId as string)).toMatchObject({ name: "e", cwd: group });
+    expect(s.getAcpSession(ids[0] as string, x.id)).toBeTruthy();
   });
 });
 
@@ -202,7 +232,7 @@ describe("ACP harness integration (mock ACP agent)", () => {
 
   test("DM: reply streams as ACP updates and is persisted with its timeline; session exposes config + commands", async () => {
     dmAgent = await createAgent("Coder", { identity: "你说话简洁。" });
-    dm = await createRoom("私聊", "dm", [dmAgent.id], { cwd });
+    dm = await createRoom("单人", [dmAgent.id], { cwd });
     expect(dm.cwd).toBe(cwd);
     await watch(dm.id);
     const ms = await say(dm.id, "你好");
@@ -319,7 +349,7 @@ describe("ACP harness integration (mock ACP agent)", () => {
   test("group: no @ goes to the main agent, @ goes to the mentioned one, prompt carries what others said", async () => {
     const a = await createAgent("Alice");
     const b = await createAgent("Bob");
-    const g = await createRoom("群", "group", [a.id, b.id], { mainAgentId: b.id });
+    const g = await createRoom("群", [a.id, b.id], { mainAgentId: b.id });
     let ms = await say(g.id, "大家好");
     expect(ms.at(-1)).toMatchObject({ senderName: "Bob", content: "收到：「大家好」（mock-fast）" });
     ms = await say(g.id, "@Alice 你来");
@@ -335,7 +365,7 @@ describe("ACP harness integration (mock ACP agent)", () => {
 
   test("an agent without a harness explains what to do", async () => {
     const x = await createAgent("Lonely", { harness: "" });
-    const r = await createRoom("x", "dm", [x.id]);
+    const r = await createRoom("x", [x.id]);
     const reply = (await say(r.id, "hi")).at(-1);
     expect(reply).toMatchObject({ status: "error" });
     expect(reply?.error).toContain("还没有绑定 Harness");

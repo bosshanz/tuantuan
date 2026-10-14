@@ -15,7 +15,14 @@ import { Orchestrator, type RoomEvent } from "./orchestrator";
 import * as skills from "./skills";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 import { TuantuanMcp } from "./tuantuan-mcp";
-import { createWorkspace, existingFolder, migrateAutoWorkspace, workspacesRoot } from "./workspace";
+import {
+  createProjectDir,
+  DRAFTS_PROJECT_ID,
+  ensureDrafts,
+  existingFolder,
+  migrateRoomsToProjects,
+  workspacesRoot,
+} from "./workspace";
 
 const CustomSchema = z.object({
   format: z.enum(CUSTOM_FORMATS),
@@ -57,10 +64,15 @@ const AgentInputSchema = z.object({
 });
 
 const RoomInputSchema = z.object({
-  name: z.string().trim().min(1, "房间名不能为空").max(64),
-  kind: z.enum(["group", "dm"]),
-  agentIds: z.array(z.string()),
+  name: z.string().trim().min(1, "会话名不能为空").max(64),
+  agentIds: z.array(z.string()).min(1, "至少选择 1 个 Agent"),
   mainAgentId: z.string().nullable().optional(),
+  projectId: z.string().optional(),
+});
+
+const ProjectInputSchema = z.object({
+  name: z.string().trim().min(1, "项目名不能为空").max(64),
+  /** Existing folder; omitted/empty = create <root>/<slug>. */
   cwd: z.string().max(1024).optional(),
 });
 
@@ -110,17 +122,9 @@ export function createApp(deps: AppDeps) {
   const orchestrator = new Orchestrator(store, host, publish);
   mcp.provider = orchestrator;
 
-  // Every conversation owns a working directory; older rooms without one get a workspace now.
-  // Flat auto-folders under the root that are still empty move into dm/ or groups/.
-  for (const r of store.listRooms()) {
-    const agent = r.agentIds[0] ? store.getAgent(r.agentIds[0]) : null;
-    if (!r.cwd) store.updateRoom(r.id, { cwd: createWorkspace(r.kind, r.name, agent?.name) });
-    else if (r.agentIds.every((id) => !store.getAcpSession(r.id, id))) {
-      // Only when no harness session would be lost (moving clears acp_sessions).
-      const next = migrateAutoWorkspace(r.cwd, r.kind, r.name, agent?.name);
-      if (next !== r.cwd) store.updateRoom(r.id, { cwd: next });
-    }
-  }
+  // Projects own the directories: make sure 「草稿」 exists and older rooms belong to a project.
+  ensureDrafts(store);
+  migrateRoomsToProjects(store);
 
   const json = (data: unknown, status = 200) => Response.json(data, { status });
 
@@ -337,15 +341,37 @@ export function createApp(deps: AppDeps) {
         return store.deleteMcpServer(id) ? json({ ok: true }) : json({ error: "MCP 服务不存在" }, 404);
     }
 
+    if (resource === "projects") {
+      if (!id && method === "GET") return json(store.listProjects());
+      if (!id && method === "POST") {
+        const p = ProjectInputSchema.parse(await body());
+        const cwd = p.cwd?.trim() ? existingFolder(p.cwd) : createProjectDir(p.name);
+        return json(store.createProject(p.name, cwd), 201);
+      }
+      const project = id ? store.getProject(id) : null;
+      if (id && !project) return json({ error: "项目不存在" }, 404);
+      if (project && method === "PATCH") {
+        const p = ProjectInputSchema.partial().parse(await body());
+        const cwd = p.cwd === undefined ? undefined : existingFolder(p.cwd);
+        if (cwd !== undefined && cwd !== project.cwd)
+          for (const r of store.listRooms()) if (r.projectId === project.id) orchestrator.cancel(r.id);
+        return json(store.updateProject(project.id, { name: p.name, cwd }));
+      }
+      if (project && method === "DELETE") {
+        if (project.id === DRAFTS_PROJECT_ID) throw new ValidationError("「草稿」不能删除");
+        for (const r of store.listRooms()) if (r.projectId === project.id) orchestrator.cancel(r.id);
+        store.deleteProject(project.id);
+        return json({ ok: true });
+      }
+    }
+
     if (resource === "rooms") {
       if (!id && method === "GET") return json(store.listRooms());
       if (!id && method === "POST") {
         const r = RoomInputSchema.parse(await body());
-        if (r.kind === "dm" && r.agentIds.length !== 1) throw new ValidationError("私聊必须且只能包含 1 个 Agent");
-        // A chosen folder must exist; otherwise the room gets a fresh workspace folder.
-        const agentName = r.agentIds[0] ? store.getAgent(r.agentIds[0])?.name : undefined;
-        const cwd = r.cwd?.trim() ? existingFolder(r.cwd) : createWorkspace(r.kind, r.name, agentName);
-        return json(store.createRoom(r.name, r.kind, r.agentIds, { mainAgentId: r.mainAgentId, cwd }), 201);
+        const projectId = r.projectId || ensureDrafts(store).id;
+        if (!store.getProject(projectId)) throw new ValidationError("项目不存在", 404);
+        return json(store.createRoom(r.name, r.agentIds, { mainAgentId: r.mainAgentId, projectId }), 201);
       }
       const room = id ? store.getRoom(id) : null;
       if (id && !room) return json({ error: "房间不存在" }, 404);
@@ -356,14 +382,19 @@ export function createApp(deps: AppDeps) {
       }
       if (room && !sub && method === "PATCH") {
         const g = z
-          .object({ mainAgentId: z.string().nullable().optional(), cwd: z.string().max(1024).optional() })
+          .object({
+            mainAgentId: z.string().nullable().optional(),
+            name: z.string().trim().min(1).max(64).optional(),
+            projectId: z.string().optional(),
+          })
           .parse(await body());
-        if (g.mainAgentId !== undefined && room.kind !== "group") throw new ValidationError("只有群聊有主 Agent");
-        return json(store.updateRoom(room.id, { ...g, cwd: g.cwd === undefined ? undefined : existingFolder(g.cwd) }));
+        if (g.projectId && !store.getProject(g.projectId)) throw new ValidationError("项目不存在", 404);
+        if (g.projectId && g.projectId !== room.projectId) orchestrator.cancel(room.id);
+        return json(store.updateRoom(room.id, g));
       }
       if (room && sub === "agents" && !subId && method === "PUT") {
         const { agentIds } = z.object({ agentIds: z.array(z.string()) }).parse(await body());
-        if (room.kind === "dm") throw new ValidationError("私聊的成员不能修改");
+        if (agentIds.length === 0) throw new ValidationError("至少保留 1 个 Agent");
         return json(store.setRoomAgents(room.id, agentIds));
       }
       // Per-agent harness session controls: /api/rooms/:id/agents/:agentId/<action>

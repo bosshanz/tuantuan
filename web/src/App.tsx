@@ -1,13 +1,26 @@
-import { Bot, Command, MessagesSquare, PlugZap, Plus, Search, Sparkles, UserRound } from "lucide-react";
+import {
+  Bot,
+  ChevronRight,
+  Command,
+  FolderPlus,
+  MessagesSquare,
+  PlugZap,
+  Plus,
+  Search,
+  Settings2,
+  Sparkles,
+  UserRound,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentEditor } from "./AgentEditor";
 import { AvatarShowcase } from "./AvatarShowcase";
-import { type Agent, api, connectWs, type McpServer, type Meta, type Room, type WsEvent } from "./api";
+import { type Agent, api, connectWs, type McpServer, type Meta, type Project, type Room, type WsEvent } from "./api";
 import { BrandMark } from "./BrandMark";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
+import { NewProject, ProjectSettings } from "./Projects";
 import { SetupPage } from "./Setup";
 import { AgentAvatar, RoomIcon, roomSubtitle, useHashRoute } from "./ui";
 
@@ -15,6 +28,15 @@ export function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [collapsed, setCollapsed] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("tuantuan:collapsed") ?? "[]");
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => localStorage.setItem("tuantuan:collapsed", JSON.stringify(collapsed)), [collapsed]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -28,12 +50,14 @@ export function App() {
 
   const reload = useCallback(async () => {
     try {
-      const [m, a, r, s] = await Promise.all([
+      const [m, a, r, s, p] = await Promise.all([
         api<Meta>("GET", "/api/meta"),
         api<Agent[]>("GET", "/api/agents"),
         api<Room[]>("GET", "/api/rooms"),
         api<McpServer[]>("GET", "/api/mcp-servers"),
+        api<Project[]>("GET", "/api/projects"),
       ]);
+      setProjects(p);
       setMeta(m);
       setAgents(a);
       setRooms(r);
@@ -83,7 +107,9 @@ export function App() {
     go("c");
   };
   const detailId = route[1] ?? null;
-  const roomId = section === "rooms" && detailId && detailId !== "new" ? detailId : null;
+  const roomId = route[0] !== "p" && section === "rooms" && detailId && detailId !== "new" ? detailId : null;
+  const projectPage = route[0] === "p" ? detailId : null;
+  const editingProject = projectPage && projectPage !== "new" ? projects.find((p) => p.id === projectPage) : undefined;
 
   useEffect(() => {
     ws.current?.subscribe(roomId);
@@ -141,55 +167,89 @@ export function App() {
         <ListPane
           title="会话"
           action={
-            <button
-              type="button"
-              className="btn sm"
-              onClick={() => go("c/new")}
-              disabled={agents.length === 0}
-              title={agents.length ? "" : "先创建一个 Agent"}
-            >
-              <Plus size={14} />
-              新建
-            </button>
+            <span className="row" style={{ gap: 4 }}>
+              <button type="button" className="btn ghost icon sm" aria-label="新建项目" onClick={() => go("p/new")}>
+                <FolderPlus size={15} />
+              </button>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => go("c/new")}
+                disabled={agents.length === 0}
+                title={agents.length ? "" : "先创建一个 Agent"}
+              >
+                <Plus size={14} />
+                会话
+              </button>
+            </span>
           }
           onSearch={() => setPaletteOpen(true)}
         >
-          {loaded && rooms.length === 0 && (
+          {loaded && agents.length === 0 && (
             <div className="list-empty">
-              {agents.length === 0 ? "先创建一个 Agent，再开始会话。" : "还没有会话。"}
-              <button type="button" className="btn primary sm" onClick={() => go(agents.length ? "c/new" : "a/new")}>
-                {agents.length ? "新建会话" : "创建第一个 Agent"}
+              先创建一个 Agent。
+              <button type="button" className="btn primary sm" onClick={() => go("a/new")}>
+                创建第一个 Agent
               </button>
             </div>
           )}
-          {(
-            [
-              ["群聊", rooms.filter((r) => r.kind === "group")],
-              ["私聊", rooms.filter((r) => r.kind === "dm")],
-            ] as const
-          ).map(
-            ([label, list]) =>
-              list.length > 0 && (
-                <div key={label}>
-                  <div className="group-label">{label}</div>
-                  {list.map((r) => (
-                    <button
-                      type="button"
-                      key={r.id}
-                      className="list-item"
-                      aria-current={roomId === r.id ? "page" : undefined}
-                      onClick={() => go(`c/${r.id}`)}
-                    >
-                      <RoomIcon room={r} agents={agents} />
-                      <span className="li-body">
-                        <span className="li-title">{r.name}</span>
-                        <span className="li-sub">{roomSubtitle(r, agents)}</span>
-                      </span>
-                    </button>
-                  ))}
+          {projects.map((p) => {
+            const list = rooms.filter((r) => r.projectId === p.id);
+            const open = !collapsed.includes(p.id);
+            return (
+              <div key={p.id} className="project" data-open={open || undefined}>
+                <div className="project-head" aria-current={projectPage === p.id ? "page" : undefined}>
+                  <button
+                    type="button"
+                    className="project-toggle"
+                    aria-expanded={open}
+                    onClick={() => setCollapsed((c) => (open ? [...c, p.id] : c.filter((x) => x !== p.id)))}
+                    title={p.cwd}
+                  >
+                    <ChevronRight size={14} className="chev" />
+                    <span className="project-name">{p.name}</span>
+                    <span className="project-count">{list.length || ""}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost icon xs"
+                    aria-label={`${p.name} 设置`}
+                    onClick={() => go(`p/${p.id}`)}
+                  >
+                    <Settings2 size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost icon xs"
+                    aria-label={`在 ${p.name} 新建会话`}
+                    disabled={agents.length === 0}
+                    onClick={() => go(`c/new/${p.id}`)}
+                  >
+                    <Plus size={14} />
+                  </button>
                 </div>
-              ),
-          )}
+                <div className="collapse">
+                  <div>
+                    {list.map((r) => (
+                      <button
+                        type="button"
+                        key={r.id}
+                        className="list-item"
+                        aria-current={roomId === r.id ? "page" : undefined}
+                        onClick={() => go(`c/${r.id}`)}
+                      >
+                        <RoomIcon room={r} agents={agents} />
+                        <span className="li-body">
+                          <span className="li-title">{r.name}</span>
+                          <span className="li-sub">{roomSubtitle(r, agents)}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </ListPane>
       )}
 
@@ -241,11 +301,39 @@ export function App() {
             </button>
           </div>
         )}
-        {section === "rooms" && !detailId && loaded && <Welcome agents={agents} rooms={rooms} meta={meta} go={go} />}
-        {section === "rooms" && detailId === "new" && (
-          <NewRoom
-            agents={agents}
+        {projectPage === "new" && (
+          <NewProject
             workspacesRoot={meta?.workspacesRoot ?? ""}
+            onBack={() => go("c")}
+            onCreated={async (p) => {
+              await reload();
+              go(`p/${p.id}`);
+            }}
+          />
+        )}
+        {editingProject && (
+          <ProjectSettings
+            key={editingProject.id}
+            project={editingProject}
+            conversations={rooms.filter((r) => r.projectId === editingProject.id).length}
+            onChange={reload}
+            onBack={() => go("c")}
+            onDeleted={async () => {
+              await reload();
+              go("c");
+            }}
+          />
+        )}
+        {projectPage && projectPage !== "new" && loaded && !editingProject && (
+          <NotFound what="项目" onBack={() => go("c")} />
+        )}
+        {section === "rooms" && !detailId && loaded && <Welcome agents={agents} rooms={rooms} meta={meta} go={go} />}
+        {route[0] === "c" && detailId === "new" && (
+          <NewRoom
+            key={route[2] ?? "drafts"}
+            agents={agents}
+            projects={projects}
+            projectId={route[2] && projects.some((p) => p.id === route[2]) ? route[2] : "drafts"}
             onBack={() => go("c")}
             onCreated={async (r) => {
               await reload();
@@ -258,6 +346,7 @@ export function App() {
           <ChatView
             key={room.id}
             room={room}
+            project={projects.find((p) => p.id === room.projectId) ?? null}
             agents={agents}
             userName={userName}
             harnessName={harnessName}
@@ -303,15 +392,15 @@ export function App() {
               go("a");
             }}
             onStartChat={(a) => {
-              const dm = rooms.find((r) => r.kind === "dm" && r.agentIds[0] === a.id);
-              if (dm) go(`c/${dm.id}`);
+              const solo = rooms.find(
+                (r) => r.projectId === "drafts" && r.agentIds.length === 1 && r.agentIds[0] === a.id,
+              );
+              if (solo) go(`c/${solo.id}`);
               else
-                void api<Room>("POST", "/api/rooms", { name: `与 ${a.name} 私聊`, kind: "dm", agentIds: [a.id] }).then(
-                  async (r) => {
-                    await reload();
-                    go(`c/${r.id}`);
-                  },
-                );
+                void api<Room>("POST", "/api/rooms", { name: a.name, agentIds: [a.id] }).then(async (r) => {
+                  await reload();
+                  go(`c/${r.id}`);
+                });
             }}
           />
         )}
@@ -379,7 +468,7 @@ function UserButton({ name, onChange }: { name: string; onChange: (v: string) =>
               onKeyDown={(e) => (e.key === "Enter" || e.key === "Escape") && setOpen(false)}
               onBlur={() => setOpen(false)}
             />
-            <span className="help">群聊中其他人和 Agent 看到的名字</span>
+            <span className="help">Agent 看到的名字</span>
           </label>
         </div>
       )}

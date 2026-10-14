@@ -925,3 +925,23 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .form-page > .row:first-child { gap: var(--s3); }
 .form-actions { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s2); padding-top: var(--s5); border-top: 1px solid var(--border); }
 .form-hint { font-size: var(--fs-xs); color: var(--text-3); }
+
+/* Projects in the sidebar */
+.collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 0.22s var(--ease), opacity 0.18s var(--ease); }
+.collapse > div { overflow: hidden; min-height: 0; }
+.collapse.open, .project[data-open] > .collapse { grid-template-rows: 1fr; opacity: 1; }
+.project + .project { margin-top: 2px; }
+.project-head { display: flex; align-items: center; gap: 2px; padding: 0 2px 0 0; border-radius: var(--r2); transition: background 0.12s; }
+.project-head:hover, .project-head[aria-current] { background: var(--hover, rgba(127,127,127,0.08)); }
+.project-head .btn.icon.xs { width: 24px; height: 24px; min-height: 24px; opacity: 0; transition: opacity 0.12s; }
+.project-head:hover .btn.icon.xs, .project-head:focus-within .btn.icon.xs { opacity: 1; }
+.project-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border: none; background: none; color: var(--text-2); font-size: 12px; font-weight: 600; text-align: left; }
+.project-toggle .chev { flex: none; color: var(--text-3); transition: transform 0.2s var(--ease); }
+.project[data-open] .project-toggle .chev { transform: rotate(90deg); }
+.project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-count { margin-left: auto; font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.project-link { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--r2); border: 1px solid var(--border); color: inherit; text-decoration: none; transition: background 0.12s; }
+.project-link:hover { background: var(--hover, rgba(127,127,127,0.08)); }
+.project-link .mono { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir-preview { font-size: 12px; }
+@media (hover: none) { .project-head .btn.icon.xs { opacity: 1; } }

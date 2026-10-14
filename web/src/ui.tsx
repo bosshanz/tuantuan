@@ -72,7 +72,7 @@ export function HumanAvatar({ name, size = 32 }: { name: string; size?: number }
 
 export function RoomIcon({ room, agents, size = 32 }: { room: Room; agents: Agent[]; size?: number }) {
   const members = room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
-  if (room.kind === "dm" && members[0]) return <AgentAvatar agent={members[0]} size={size} />;
+  if (members.length === 1 && members[0]) return <AgentAvatar agent={members[0]} size={size} />;
   return (
     <span className="room-icon" aria-hidden>
       <Hash size={16} />
@@ -82,8 +82,7 @@ export function RoomIcon({ room, agents, size = 32 }: { room: Room; agents: Agen
 
 export function roomSubtitle(room: Room, agents: Agent[]): string {
   const names = room.agentIds.map((id) => agents.find((a) => a.id === id)?.name).filter(Boolean);
-  if (room.kind === "dm") return names[0] ? "私聊" : "Agent 已删除";
-  return names.length ? `${names.length} 个 Agent · ${names.join("、")}` : "还没有 Agent 成员";
+  return names.length ? names.join("、") : "Agent 已删除";
 }
 
 /** Splits plain text so known @names render as mention chips. */

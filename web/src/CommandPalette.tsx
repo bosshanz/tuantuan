@@ -28,7 +28,7 @@ export function CommandPalette(props: {
       ...props.rooms.map((r) => ({
         key: `r${r.id}`,
         label: r.name,
-        hint: r.kind === "dm" ? "私聊" : "群聊",
+        hint: "会话",
         icon: <RoomIcon room={r} agents={props.agents} size={24} />,
         path: `c/${r.id}`,
       })),

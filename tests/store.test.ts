@@ -11,7 +11,7 @@ describe("Store", () => {
     const path = join(tmpdir(), `agent-hub-store-${Date.now()}.db`);
     try {
       const s1 = new Store(path);
-      const room = s1.createRoom("r", "group", []);
+      const room = s1.createRoom("r", []);
       const m = s1.insertMessage({
         roomId: room.id,
         runId: "x",
@@ -65,7 +65,7 @@ describe("Store", () => {
         INSERT INTO room_agents VALUES ('d1','a1'),('d2','a1'),('g','a1');`);
       db.close();
       const s = new Store(path);
-      expect([s.getRoom("d1")?.cwd, s.getRoom("d2")?.cwd, s.getRoom("g")?.cwd]).toEqual(["/srv/a", "/keep", ""]);
+      expect(["d1", "d2", "g"].map((id) => s.legacyRoomCwd(id))).toEqual(["/srv/a", "/keep", ""]);
       expect(s.getAgent("a1")).not.toHaveProperty("cwd");
       s.db.close();
     } finally {
@@ -77,7 +77,7 @@ describe("Store", () => {
     const s = new Store(":memory:");
     const a = s.createAgent(agentInput("A"));
     const b = s.createAgent(agentInput("B"));
-    const g = s.createRoom("g", "group", [a.id, b.id], { mainAgentId: b.id });
+    const g = s.createRoom("g", [a.id, b.id], { mainAgentId: b.id });
     expect(g.mainAgentId).toBe(b.id);
     expect(s.updateRoom(g.id, { mainAgentId: "nope" }).mainAgentId).toBe(a.id);
     expect(s.setRoomAgents(g.id, [b.id]).mainAgentId).toBe(b.id);
@@ -85,8 +85,8 @@ describe("Store", () => {
 
   test("message seq is per room and monotonic", () => {
     const s = new Store(":memory:");
-    const r1 = s.createRoom("a", "group", []);
-    const r2 = s.createRoom("b", "group", []);
+    const r1 = s.createRoom("a", []);
+    const r2 = s.createRoom("b", []);
     const base = {
       runId: "x",
       hop: 0,

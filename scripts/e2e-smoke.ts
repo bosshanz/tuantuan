@@ -95,23 +95,37 @@ try {
 
   await shot("agent-editor");
 
-  await page.getByRole("button", { name: "会话", exact: true }).click();
-  await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
-  await page.getByLabel("名称").fill("冒烟群");
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
+  // New project with an existing folder.
+  await page.getByRole("button", { name: "新建项目" }).click();
+  await page.getByLabel("项目名称").fill("冒烟项目");
+  await page.getByRole("button", { name: "选择已有" }).click();
+  await page.getByLabel("文件夹路径").fill(cwd);
+  await shot("new-project");
+  await page.getByRole("button", { name: "创建项目" }).click();
+  await page.getByRole("heading", { name: "冒烟项目" }).waitFor();
+  const project = app.store.listProjects().find((p) => p.name === "冒烟项目");
+  if (!project || project.cwd !== cwd) throw new Error("new project dir mismatch");
+
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
+  await page.locator(".pane-head").getByRole("button", { name: "会话" }).click();
+  await page.locator('form .select[aria-label="项目"]').selectOption({ label: "冒烟项目" });
+  await page.getByLabel("会话名称").fill("冒烟会话");
   const pick = (name: string) =>
     page.locator(".pick", { has: page.locator(".pick-name", { hasText: new RegExp(`^${name}$`) }) }).locator("input");
   await pick("Alice").check();
   await pick("Bob").check();
-  // The main agent is chosen when creating the group; its folder is auto-created by default.
   await page.getByLabel("主 Agent").selectOption({ label: "Bob" });
-  await page.getByText(`${workspaces}/groups/冒烟群`).waitFor();
-  await shot("new-group");
+  await page.waitForTimeout(400);
+  await shot("new-conversation");
   await page.getByRole("button", { name: "创建会话" }).click();
-  await page.getByRole("heading", { name: "冒烟群" }).waitFor();
-  const group = app.store.listRooms().find((r) => r.name === "冒烟群");
+  await page.getByRole("heading", { name: "冒烟会话" }).waitFor();
+  const group = app.store.listRooms().find((r) => r.name === "冒烟会话");
   const bobId = app.store.listAgents().find((a) => a.name === "Bob")?.id;
-  if (group?.mainAgentId !== bobId || group?.cwd !== join(workspaces, "groups", "冒烟群") || !existsSync(group.cwd))
-    throw new Error("new group lost main agent / auto folder");
+  if (group?.mainAgentId !== bobId || group?.projectId !== project.id || group?.cwd !== cwd)
+    throw new Error("new conversation lost main / project");
+  await page.waitForTimeout(600);
+  await shot("sidebar");
 
   // Group: no @ -> the main agent (Bob) answers; @Alice -> Alice.
   const input = page.getByLabel("消息输入框");
@@ -128,13 +142,12 @@ try {
   await page.locator(".handoff-from", { hasText: "接 @Bob 的交接：写一份需求文档" }).waitFor();
   await page.getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
   await shot("group");
+  // Single-agent conversation in 草稿
 
-  // Private chat with Bob in an existing folder: every ACP capability the mock harness exercises.
-  await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
-  await page.locator(".radio-card", { hasText: "私聊" }).click();
+  await page.locator(".pane-head").getByRole("button", { name: "会话" }).click();
+  await page.locator('form .select[aria-label="项目"]').selectOption({ label: "冒烟项目" });
+  await page.getByLabel("会话名称").fill("与 Bob");
   await pick("Bob").check();
-  await page.getByRole("button", { name: "选择已有" }).click();
-  await page.getByLabel("文件夹路径").fill(cwd);
   await shot("new-dm");
   await page.getByRole("button", { name: "创建会话" }).click();
   await page.getByLabel("模型").waitFor(); // session config options (mode / model / reasoning)
@@ -212,7 +225,7 @@ try {
     };
     const edge = r(document.querySelector(".pane-head h1"))?.left ?? Number.NaN;
     near(r(document.querySelector(".pane-search .input"))?.left ?? Number.NaN, edge, "search box left edge");
-    near(left(document.querySelector(".group-label")), edge, "section label left edge");
+    near(left(document.querySelector(".project-toggle")), edge, "project label left edge");
     near(left(document.querySelector(".list-item")), edge, "list item left edge");
     for (const g of document.querySelectorAll(".msg-group")) {
       const text = r(g.querySelector(".msg"))?.left ?? Number.NaN;
@@ -290,13 +303,13 @@ try {
   const navs = await page.evaluate(() => performance.getEntriesByType("navigation").length);
   await page.getByRole("button", { name: "Agents", exact: true }).click();
   await page.locator(".list-item", { hasText: "Bob" }).first().click();
-  await page.getByRole("button", { name: /私聊/ }).click();
-  await live("Bob", "私聊直播-1", /收到：「私聊直播-1」/);
-  await page.getByRole("button", { name: "会话", exact: true }).click();
-  await page.locator(".li-title", { hasText: "冒烟群" }).click();
-  await live("冒烟群", "@Bob 群聊直播-2", /\[我\]: @Bob 群聊直播-2/);
-  await page.locator(".li-title", { hasText: /私聊/ }).first().click();
-  await live("Bob", "切换后-3", /收到：「切换后-3」/);
+  await page.getByRole("button", { name: /对话/ }).click();
+  await live("Bob", "直播-1", /收到：「直播-1」/);
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
+  await page.locator(".li-title", { hasText: "冒烟会话" }).click();
+  await live("冒烟会话", "@Bob 会话直播-2", /\[我\]: @Bob 会话直播-2/);
+  await page.locator(".li-title", { hasText: "与 Bob" }).click();
+  await live("与 Bob", "切换后-3", /收到：「切换后-3」/);
   await page.unroute(/\/api\/rooms\/[^/]+\/messages\?/);
   if ((await page.evaluate(() => performance.getEntriesByType("navigation").length)) !== navs)
     throw new Error("page reloaded during live checks");
@@ -324,7 +337,7 @@ try {
     const dev = await browser.newPage();
     await dev.goto(`http://localhost:${vitePort}/`);
     await dev.locator(".rail .dot.ok").waitFor({ timeout: 15000 });
-    await dev.getByText("冒烟群").first().waitFor();
+    await dev.getByText("冒烟会话").first().waitFor();
     await dev.close();
   } finally {
     vite.kill();
@@ -333,7 +346,7 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → BYOK form → onboarding once → new group with main agent + auto folder → DM in a chosen folder → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
+    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
   );
 } catch (e) {
   failed = true;

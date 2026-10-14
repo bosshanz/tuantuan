@@ -36,7 +36,7 @@
 
 | 状态 | 所有者 | 说明 |
 | --- | --- | --- |
-| Agent（Harness、env、权限策略、身份文档、MCP 服务器）、房间（主 Agent、工作目录）、消息（含时间线 JSON）、ACP 会话映射、设置（Harness 路径覆盖、`onboarded`） | SQLite（`Store`） | 唯一权威来源 |
+| Agent（Harness、env、权限策略、身份文档、MCP 服务器）、项目（名称、目录）、房间/会话（所属项目、主 Agent）、消息（含时间线 JSON）、ACP 会话映射、设置（Harness 路径覆盖、`onboarded`） | SQLite（`Store`） | 唯一权威来源 |
 | Harness 进程、挂起的权限请求、终端输出 | `HarnessHost` 内存 | 进程退出即丢失；重启后用 `acp_sessions` 里的 sessionId resume / load |
 | ACP session 自身的对话历史 | Harness | 团团不重放 Harness 的历史（load 时的回放 update 被忽略），只显示自己存的消息 |
 | 模型、Key、登录 | Harness | 团团不保存凭据 |
@@ -56,11 +56,11 @@
 ## 编排
 
 1. 人类消息写库并入房间队列，每个房间同时只执行一条链，不同房间并行。
-2. 触发：私聊 → 该 Agent；群聊 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 主 Agent。串行执行。
-3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session；群聊 prompt = 该 Agent 上次发言之后的群聊记录（带发言者），私聊 = 用户消息（含图片）。身份文档按 Harness 传递（见 README）；不支持的 Harness 附加在会话第一条 prompt 前的 `<tuantuan-identity>` 中。
+2. 触发：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 主 Agent。串行执行。
+3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session；多 Agent prompt = 该 Agent 上次发言之后的会话记录（带发言者），单 Agent = 用户消息（含图片）。身份文档按 Harness 传递（见 README）；不支持的 Harness 附加在会话第一条 prompt 前的 `<tuantuan-identity>` 中。
 4. `session/update` 实时以 `update` 事件推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。
 5. 取消：`session/cancel`，保留已生成部分并标为 `cancelled`。
-6. 交接：回合进行时，Agent 调用 `handoff` 把目标记到本回合（校验是群成员、不是自己）；回合正常结束后按顺序入队（去重、`@所有人` 轮次不重复），`hop + 1`，接手方 prompt 末尾附 `<tuantuan-handoff from="…">task</tuantuan-handoff>`。时间线记录 `handoffs` / `handoffFrom`，界面显示交接卡片。超过 5 次交接停止。群聊新消息打断当前链。
+6. 交接：回合进行时，Agent 调用 `handoff` 把目标记到本回合（校验是群成员、不是自己）；回合正常结束后按顺序入队（去重、`@所有人` 轮次不重复），`hop + 1`，接手方 prompt 末尾附 `<tuantuan-handoff from="…">task</tuantuan-handoff>`。时间线记录 `handoffs` / `handoffFrom`，界面显示交接卡片。超过 5 次交接停止。会话新消息打断当前链。
 7. session/load 回放：`switchSession` 指定历史会话时优先 load，回放的 update 存在 slot 里，`/replay` 接口按用户消息文本去掉本房间已有的轮次后返回，前端只读显示。
 
 ## 取舍

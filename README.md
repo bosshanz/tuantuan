@@ -5,13 +5,13 @@
   <img alt="团团 Tuantuan" src="docs/brand/tuantuan-lockup-light.svg" width="330">
 </picture>
 
-**一群 Agent，团团协作。** 多 Agent 群聊工作台。
+**一群 Agent，团团协作。** 多 Agent 协作工作台。
 
 > 仓库已从 `bosshanz/agent-hub` 更名为 `bosshanz/tuantuan`（旧地址自动跳转）。为兼容，环境变量继续使用 `AGENT_HUB_*` 前缀，默认数据库路径仍是 `data/agent-hub.db`。
 
-团团不自带模型：每个 Agent 绑定一个本机的编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode），团团通过 [ACP（Agent Client Protocol）](https://agentclientprotocol.com) 驱动它。Agent 可以在 **群聊** 中被 @，也可以私聊，完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。
+团团不自带模型：每个 Agent 绑定一个本机的编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode），团团通过 [ACP（Agent Client Protocol）](https://agentclientprotocol.com) 驱动它。按 **项目**（名称 + 目录）组织 **会话**（1+ Agent）；多 Agent 时可 @、设主 Agent、交接。完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。
 
-![群聊：主 Agent 用 handoff 把任务交给 Alice](docs/screenshots/group-chat.png)
+![会话：主 Agent 用 handoff 把任务交给 Alice](docs/screenshots/group-chat.png)
 
 - 模型、Key 和登录全部由 Harness 自己管理，团团不保存任何凭据。
 - 不装任何 CLI 也能体验：`TUANTUAN_MOCK_HARNESS=1` 启用内置 mock ACP agent。
@@ -33,7 +33,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 1. 首次启动自动打开「新手引导」（只出现一次，完成或跳过后记在数据库里）；之后在左侧「Harness」（`#/harness`）管理：检测本机已安装的 Harness，显示版本、安装命令和登录方式，可以填绝对路径覆盖、点「测试」做 ACP 握手。
 2. 「Agents → + 新建」创建 Agent：选 Harness、权限策略、身份文档、MCP 服务器和环境变量。
-3. 「会话 → + 新建」建群聊或私聊。每个会话有自己的**工作目录**：默认自动创建：私聊 `~/Tuantuan/dm/<Agent 名>`，群聊 `~/Tuantuan/groups/<群名>`（环境变量 `TUANTUAN_WORKSPACES` 可改根目录），也可选已有文件夹；之后在详情面板修改。群聊还可设**主 Agent**。
+3. 「会话」侧栏按**项目**分组。先建项目（新建目录，或选择已有文件夹；根目录默认 `~/Tuantuan`，可用 `TUANTUAN_WORKSPACES` 改），再在项目下建会话。未选项目时进默认项目「草稿」（`~/Tuantuan/drafts`）。会话共用项目目录；2+ Agent 时可设**主 Agent**。更换项目目录会重置该项目下会话的 Harness 上下文。
 
 生产方式：`bun run build && bun start`（API 同时托管 `web/dist`，访问 http://localhost:8787）。
 
@@ -54,32 +54,32 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 **身份文档**：每个 Agent 的身份文档保存在团团里，不写进你的仓库。Claude Code 通过 `_meta.systemPrompt.append`、Grok 通过 `_meta.rules`、Codex 通过进程环境 `CODEX_CONFIG` 的 `developer_instructions` 传递；其他 Harness 在会话第一条消息前附加。
 
-## 群聊规则
+## 会话规则
 
 | 你发的消息 | 谁回复 |
 | --- | --- |
 | `@产品经理 …` | 只有被 @ 的 Agent（可以 @ 多个，按顺序各回复一次） |
-| 不 @ 任何人 | 群的**主 Agent** |
+| 不 @ 任何人 | 会话的**主 Agent**（仅 2+ Agent） |
 | `@所有人`（或 `@all` / `@everyone`） | 每个成员按顺序各回复一次 |
 
-- 建群时选择主 Agent；群里所有 Agent 在群的工作目录里工作。
-- **群聊转述**：Agent 每次被叫到时，收到的是它上次发言之后群里的新消息（最多 30 条、约 8000 字，超出时保留最新的并注明省略了几条）。
-- **交接**：团团给群里每个 Agent 的会话注入一个名为 `tuantuan` 的 MCP 服务器，提供 `handoff(agent, task)` 和 `list_members`。Agent 调用 `handoff` 后，对方在这条回复结束后接手并收到 task；界面上显示「交接给 @X」卡片，接手方显示「接 @Y 的交接」。正文里写 `@名字` 不会触发对方。
-  - 只能交给群里的其他成员；同一条消息里已在排队的不重复触发；`@所有人` 这一轮已经回复过的不会再被交接触发。
-  - 每条人类消息最多 5 次交接，超出时停止并提示。新消息会打断当前回复并丢弃未执行的交接。
-  - 传输：Harness 声明支持 HTTP MCP 时直接连团团的 `/mcp/<token>`，否则用 stdio 中转（`server/mcp-shim.ts`）。token 随机生成、只在内存里，每个「会话 + Agent」一个。
+- 会话里所有 Agent 共用项目目录。2+ Agent 时创建会话会选主 Agent。
+- **会话转述**：Agent 每次被叫到时，收到的是它上次发言之后会话里的新消息（最多 30 条、约 8000 字，超出时保留最新的并注明省略了几条）。单 Agent 会话直接转发用户消息。
+- **交接**：多 Agent 会话注入 `tuantuan` MCP（`handoff` / `list_members`）。调用 `handoff` 后对方接手；界面显示交接卡片。正文 `@名字` 不会触发。
+  - 只能交给会话里其他成员；去重与 `@所有人` 轮次规则同前。
+  - 每条人类消息最多 5 次交接；新消息打断当前链。
+  - 传输：HTTP `/mcp/<token>` 或 stdio 中转（`server/mcp-shim.ts`）。
 
-## 私聊
+## 能力
 
 - 流式回复、思考过程、工具卡片（文件 diff、终端输出）、计划清单、用量。
-- 权限请求弹窗：允许一次 / 总是允许 / 拒绝。文件读写和终端只能在会话的工作目录内。
+- 权限请求弹窗：允许一次 / 总是允许 / 拒绝。文件读写和终端只能在项目目录内。
 - Harness 提供的配置项（模式、模型、推理强度等）和斜杠命令（输入 `/` 弹出）。
 - 粘贴或拖入图片（Harness 支持时）、随时停止、会话列表（切换 / 恢复历史会话 / 新会话）。
 - 切换到 Harness 里的历史会话时用 `session/load`，Harness 回放的历史中团团没显示过的轮次（按用户消息去重）以只读方式显示在消息列表顶部。
 
 ## 用 mock 演示
 
-`TUANTUAN_MOCK_HARNESS=1 bun dev` 后可以选「Mock」Harness。它回复「收到：…」，并支持 `/plan`（计划）、`/edit`（权限请求 + diff）、`/run`（终端）、`/slow`（慢回复，用于测试停止）；群聊里 `/handoff 名字 任务`、`/members`。
+`TUANTUAN_MOCK_HARNESS=1 bun dev` 后可以选「Mock」Harness。它回复「收到：…」，并支持 `/plan`（计划）、`/edit`（权限请求 + diff）、`/run`（终端）、`/slow`（慢回复，用于测试停止）；多 Agent 会话里 `/handoff 名字 任务`、`/members`。
 
 ## 环境变量
 
@@ -89,9 +89,11 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ![Agent 编辑](docs/screenshots/agent-editor.png)
 
-![新建群聊：工作目录自动创建](docs/screenshots/new-group.png)
+![侧栏：按项目分组的会话](docs/screenshots/sidebar.png)
 
-![新建私聊：选择已有文件夹](docs/screenshots/new-dm.png)
+![新建项目](docs/screenshots/new-project.png)
+
+![新建会话](docs/screenshots/new-conversation.png)
 
 - 现代简洁风格：干净的中性底色（浅色近白 / 深色石墨），品牌色是 Logo 里的番茄珊瑚红，只用在关键动作和状态上；Agent 头像用鲜亮的彩色区分。字体为 Plus Jakarta Sans（已自托管）+ 苹方，浅色/深色跟随系统。
 - Agent 头像是 SVG Bot（13 种轮廓 × 13 种颜色），默认按 Agent id 生成，在编辑页点击头像修改。头像会根据状态变表情（思考、说话、难过、惊讶、休眠），开启「减少动态效果」时静止。预览全部表情：`/#/dev/avatars`。
@@ -112,7 +114,7 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 
 新建 Agent 时 Harness 选「自定义 API（BYOK）」：接口格式（OpenAI Chat Completions / OpenAI Responses / Anthropic Messages）、Base URL、API Key、模型，可点「测试连接」。
 
-- 团团内置的轻量 harness，只做对话：SSE 流式、身份文档作系统提示、群聊转述；群里的 `handoff` / `list_members` 以原生 function/tool call 提供（与 MCP 走同一处理逻辑）。**没有文件读写和终端。**
+- 团团内置的轻量 harness，只做对话：SSE 流式、身份文档作系统提示、会话转述；多 Agent 时 `handoff` / `list_members` 以原生 function/tool call 提供（与 MCP 走同一处理逻辑）。**没有文件读写和终端。**
 - API Key 只存服务端（SQLite），接口只返回掩码（如 `sk-••••abcd`），不写日志；编辑时留空即保持原 Key。
 
 ## Skills

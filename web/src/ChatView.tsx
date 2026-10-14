@@ -22,6 +22,7 @@ import {
   api,
   type Message,
   type PermissionAsk,
+  type Project,
   type Room,
   type RoomState,
   type SessionView,
@@ -53,6 +54,7 @@ function readImage(f: File): Promise<ImageAttachment> {
 
 export function ChatView(props: {
   room: Room;
+  project: Project | null;
   agents: Agent[];
   userName: string;
   harnessName: (id: string) => string;
@@ -84,7 +86,7 @@ export function ChatView(props: {
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const mentionNames = useMemo(() => [...agents.map((a) => a.name), "所有人", "all", "everyone"], [agents]);
   // The agent the composer talks to by default: the DM partner, or the group's main agent.
-  const primary = room.kind === "dm" ? members[0] : (members.find((a) => a.id === room.mainAgentId) ?? members[0]);
+  const primary = members.find((a) => a.id === room.mainAgentId) ?? members[0];
   const primaryView = primary ? sessions[primary.id] : undefined;
 
   useEffect(() => {
@@ -276,7 +278,7 @@ export function ChatView(props: {
             <div className="empty">
               <RoomIcon room={room} agents={agents} />
               <h2 style={{ fontSize: 17 }}>
-                {room.kind === "group" ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
+                {members.length > 1 ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
               </h2>
               {primary && !primary.harness && (
                 <p className="muted">
@@ -284,7 +286,7 @@ export function ChatView(props: {
                   <a href="#/harness">管理 Harness</a>。
                 </p>
               )}
-              {room.kind === "group" && members.length > 0 && (
+              {members.length > 1 && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
                   {members.map((a) => (
                     <button
@@ -372,8 +374,8 @@ export function ChatView(props: {
             value={draft}
             onChange={setDraft}
             onSubmit={() => void send()}
-            members={room.kind === "group" ? members : []}
-            interrupts={room.kind === "group" && running}
+            members={members.length > 1 ? members : []}
+            interrupts={members.length > 1 && running}
             placeholder={
               primaryView?.commands.length || primaryView?.skills.length ? "发消息，/ 命令 · $ Skills…" : "发消息…"
             }
@@ -440,6 +442,7 @@ export function ChatView(props: {
                 ) : (
                   <RoomInfo
                     room={room}
+                    project={props.project}
                     agents={agents}
                     members={members}
                     messages={messages}
@@ -733,6 +736,7 @@ function SessionSection(props: { room: Room; agent: Agent; view?: SessionView; s
 
 function RoomInfo(props: {
   room: Room;
+  project: Project | null;
   agents: Agent[];
   members: Agent[];
   messages: Message[];
@@ -744,12 +748,10 @@ function RoomInfo(props: {
   const { room } = props;
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cwd, setCwd] = useState(room.cwd);
-  useEffect(() => setCwd(room.cwd), [room.cwd]);
   const replyCount = new Map<string, number>();
   for (const m of props.messages)
     if (m.senderKind === "agent" && m.senderId) replyCount.set(m.senderId, (replyCount.get(m.senderId) ?? 0) + 1);
-  const patch = async (body: { mainAgentId?: string; cwd?: string }) => {
+  const patch = async (body: { mainAgentId?: string; name?: string }) => {
     try {
       await api("PATCH", `/api/rooms/${room.id}`, body);
       await props.onRoomChange();
@@ -772,12 +774,10 @@ function RoomInfo(props: {
     <>
       <section className="d-section">
         <h4 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          {room.kind === "group" ? `成员（${props.members.length}）` : "对话 Agent"}
-          {room.kind === "group" && (
-            <button type="button" className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
-              {editing ? "完成" : "管理成员"}
-            </button>
-          )}
+          {`Agent（${props.members.length}）`}
+          <button type="button" className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
+            {editing ? "完成" : "管理"}
+          </button>
         </h4>
         {editing ? (
           <PickList
@@ -826,9 +826,9 @@ function RoomInfo(props: {
       </section>
       <section className="d-section">
         <h4>设置</h4>
-        {room.kind === "group" && (
+        {props.members.length > 1 && (
           <label className="field">
-            <span className="label">主 Agent（没有 @ 时由它回复）</span>
+            <span className="label">主 Agent</span>
             <select
               className="select"
               aria-label="主 Agent"
@@ -843,21 +843,23 @@ function RoomInfo(props: {
             </select>
           </label>
         )}
-        <label className="field">
-          <span className="label">工作目录</span>
-          <input
-            className="input mono"
-            aria-label="工作目录"
-            value={cwd}
-            onChange={(e) => setCwd(e.target.value)}
-            onBlur={() => cwd.trim() && cwd !== room.cwd && void patch({ cwd })}
-            spellCheck={false}
-          />
-        </label>
+        <div className="field">
+          <span className="label">项目</span>
+          <a className="project-link" href={props.project ? `#/p/${props.project.id}` : undefined}>
+            <span>{props.project?.name ?? "—"}</span>
+            <span className="muted mono">{room.cwd}</span>
+          </a>
+        </div>
       </section>
       {props.members.map((a) =>
         a.harness ? (
-          <SessionSection key={a.id} room={room} agent={a} view={props.sessions[a.id]} solo={room.kind === "dm"} />
+          <SessionSection
+            key={a.id}
+            room={room}
+            agent={a}
+            view={props.sessions[a.id]}
+            solo={props.members.length === 1}
+          />
         ) : null,
       )}
       <section className="d-section" style={{ marginTop: "auto" }}>

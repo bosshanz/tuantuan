@@ -127,6 +127,15 @@ export const MIGRATIONS: string[] = [
    ALTER TABLE agents DROP COLUMN cwd;`,
   // BYOK「自定义」harness settings (format, base URL, model, API key) as JSON; the key never leaves the server.
   `ALTER TABLE agents ADD COLUMN custom TEXT;`,
+  // Projects own the working directory; conversations (rooms) live in a project. Rooms are
+  // assigned to projects at startup (server/projects.ts), which needs the file system.
+  `CREATE TABLE projects (
+     id TEXT PRIMARY KEY,
+     name TEXT NOT NULL,
+     cwd TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   );
+   ALTER TABLE rooms ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -176,14 +185,25 @@ export type AgentInput = Omit<Agent, "id" | "createdAt" | "updatedAt" | "avatarS
   avatarShape?: AvatarShape;
 };
 
+export interface Project {
+  id: string;
+  name: string;
+  /** Working directory of every conversation in the project. */
+  cwd: string;
+  createdAt: number;
+}
+
+/** A conversation inside a project. */
 export interface Room {
   id: string;
   name: string;
+  /** Derived from membership: 2+ agents behave as a group (main agent, relay, handoff). */
   kind: "group" | "dm";
   agentIds: string[];
-  /** Group only: who answers when nobody is @-mentioned. */
+  /** 2+ agents: who answers when nobody is @-mentioned. */
   mainAgentId: string | null;
-  /** Group only: shared working directory of all members; "" = home directory. */
+  projectId: string | null;
+  /** The project's directory (read-only here). */
   cwd: string;
   createdAt: number;
 }
@@ -374,17 +394,16 @@ export class Store {
 
   createRoom(
     name: string,
-    kind: "group" | "dm",
     agentIds: string[],
-    opts: { mainAgentId?: string | null; cwd?: string } = {},
+    opts: { mainAgentId?: string | null; projectId?: string | null } = {},
   ): Room {
     const id = crypto.randomUUID();
     this.db.transaction(() => {
       this.db
-        .query("INSERT INTO rooms (id, name, kind, created_at, cwd) VALUES (?,?,?,?,?)")
-        .run(id, name, kind, Date.now(), opts.cwd ?? "");
+        .query("INSERT INTO rooms (id, name, kind, created_at, cwd, project_id) VALUES (?,?,?,?,?,?)")
+        .run(id, name, kindFor(agentIds), Date.now(), "", opts.projectId ?? null);
       this.setRoomAgentsTx(id, agentIds);
-      if (kind === "group") this.setMainTx(id, opts.mainAgentId ?? null);
+      this.setMainTx(id, opts.mainAgentId ?? null);
     })();
     return this.getRoom(id) as Room;
   }
@@ -392,22 +411,71 @@ export class Store {
   setRoomAgents(roomId: string, agentIds: string[]): Room {
     this.db.transaction(() => {
       this.setRoomAgentsTx(roomId, agentIds);
-      const room = this.getRoom(roomId);
-      if (room?.kind === "group") this.setMainTx(roomId, room.mainAgentId);
+      this.db.query("UPDATE rooms SET kind = ? WHERE id = ?").run(kindFor(agentIds), roomId);
+      this.setMainTx(roomId, this.getRoom(roomId)?.mainAgentId ?? null);
     })();
     return this.getRoom(roomId) as Room;
   }
 
-  /** Room settings. Changing the directory forgets harness sessions (they live in the old one). The main agent must be a member; it falls back to the first member. */
-  updateRoom(roomId: string, patch: { mainAgentId?: string | null; cwd?: string }): Room {
+  /** Conversation settings. The main agent must be a member; it falls back to the first member. */
+  updateRoom(roomId: string, patch: { mainAgentId?: string | null; name?: string; projectId?: string }): Room {
     this.db.transaction(() => {
-      if (patch.cwd !== undefined && patch.cwd !== this.getRoom(roomId)?.cwd) {
-        this.db.query("UPDATE rooms SET cwd = ? WHERE id = ?").run(patch.cwd, roomId);
+      if (patch.name !== undefined) this.db.query("UPDATE rooms SET name = ? WHERE id = ?").run(patch.name, roomId);
+      if (patch.projectId !== undefined && patch.projectId !== this.getRoom(roomId)?.projectId) {
+        // Another project = another directory: harness sessions belong to the old one.
+        this.db.query("UPDATE rooms SET project_id = ? WHERE id = ?").run(patch.projectId, roomId);
         this.db.query("DELETE FROM acp_sessions WHERE room_id = ?").run(roomId);
       }
       if (patch.mainAgentId !== undefined) this.setMainTx(roomId, patch.mainAgentId);
     })();
     return this.getRoom(roomId) as Room;
+  }
+
+  /** Migration only: attach to a project keeping harness sessions (same directory). */
+  assignProject(roomId: string, projectId: string) {
+    this.db.query("UPDATE rooms SET project_id = ? WHERE id = ?").run(projectId, roomId);
+  }
+
+  /** Legacy per-room directory (before projects); used once by the project migration. */
+  legacyRoomCwd(roomId: string): string {
+    return ((this.db.query("SELECT cwd FROM rooms WHERE id = ?").get(roomId) as Row | null)?.cwd as string) ?? "";
+  }
+
+  // ---- projects ----
+  listProjects(): Project[] {
+    return (this.db.query("SELECT * FROM projects ORDER BY created_at, name").all() as Row[]).map(toProject);
+  }
+
+  getProject(id: string): Project | null {
+    const r = this.db.query("SELECT * FROM projects WHERE id = ?").get(id) as Row | null;
+    return r ? toProject(r) : null;
+  }
+
+  createProject(name: string, cwd: string, id: string = crypto.randomUUID()): Project {
+    this.db.query("INSERT INTO projects (id, name, cwd, created_at) VALUES (?,?,?,?)").run(id, name, cwd, Date.now());
+    return this.getProject(id) as Project;
+  }
+
+  /** Changing the directory forgets the harness sessions of every conversation in the project. */
+  updateProject(id: string, patch: { name?: string; cwd?: string }): Project {
+    const p = this.getProject(id);
+    if (!p) throw new ValidationError("项目不存在", 404);
+    this.db.transaction(() => {
+      if (patch.name !== undefined) this.db.query("UPDATE projects SET name = ? WHERE id = ?").run(patch.name, id);
+      if (patch.cwd !== undefined && patch.cwd !== p.cwd) {
+        this.db.query("UPDATE projects SET cwd = ? WHERE id = ?").run(patch.cwd, id);
+        this.db.query("DELETE FROM acp_sessions WHERE room_id IN (SELECT id FROM rooms WHERE project_id = ?)").run(id);
+      }
+    })();
+    return this.getProject(id) as Project;
+  }
+
+  /** Deletes the project and its conversations (the folder on disk is left alone). */
+  deleteProject(id: string): boolean {
+    return this.db.transaction(() => {
+      this.db.query("DELETE FROM rooms WHERE project_id = ?").run(id);
+      return this.db.query("DELETE FROM projects WHERE id = ?").run(id).changes > 0;
+    })();
   }
 
   private setMainTx(roomId: string, wanted: string | null) {
@@ -440,7 +508,8 @@ export class Store {
       kind: r.kind as Room["kind"],
       agentIds,
       mainAgentId: (r.main_agent_id as string | null) ?? null,
-      cwd: (r.cwd as string) ?? "",
+      projectId: (r.project_id as string | null) ?? null,
+      cwd: r.project_id ? (this.getProject(r.project_id as string)?.cwd ?? "") : "",
       createdAt: r.created_at as number,
     };
   }
@@ -534,6 +603,12 @@ export class Store {
   setSetting(key: string, value: unknown) {
     this.db.query("INSERT OR REPLACE INTO settings VALUES (?, ?)").run(key, JSON.stringify(value));
   }
+}
+
+const kindFor = (agentIds: string[]): Room["kind"] => (new Set(agentIds).size > 1 ? "group" : "dm");
+
+function toProject(r: Row): Project {
+  return { id: r.id as string, name: r.name as string, cwd: r.cwd as string, createdAt: r.created_at as number };
 }
 
 function publicCustom(c: CustomSecret): CustomPublic {

@@ -94,7 +94,7 @@ export class TuantuanMcp {
           protocolVersion: typeof m.params?.protocolVersion === "string" ? m.params.protocolVersion : PROTOCOL,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: MCP_SERVER_NAME, title: "团团", version: "1.0" },
-          instructions: "团团群聊工具。",
+          instructions: "团团会话工具。",
         });
       case "ping":
         return ok(m.id, {});

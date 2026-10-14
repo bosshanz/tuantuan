@@ -135,7 +135,7 @@ export function AgentEditor(props: {
   };
 
   const remove = async () => {
-    if (!agent || !confirm(`删除 Agent「${agent.name}」？\n它会退出所有群聊；已有的聊天记录会保留。此操作不可撤销。`))
+    if (!agent || !confirm(`删除 Agent「${agent.name}」？\n它会退出所有会话；已有的聊天记录会保留。此操作不可撤销。`))
       return;
     try {
       await api("DELETE", `/api/agents/${agent.id}`);
@@ -163,7 +163,7 @@ export function AgentEditor(props: {
         {agent && (
           <button type="button" className="btn" onClick={() => props.onStartChat(agent)}>
             <MessageCircle size={15} />
-            <span className="hide-sm">私聊</span>
+            <span className="hide-sm">对话</span>
           </button>
         )}
       </header>
@@ -321,7 +321,7 @@ export function AgentEditor(props: {
               </div>
               <div className="card-body row" style={{ alignItems: "center" }}>
                 <span className="grow muted" style={{ fontSize: 13 }}>
-                  删除后它会退出所有群聊，聊天记录保留。
+                  删除后它会退出所有会话，聊天记录保留。
                 </span>
                 <button type="button" className="btn danger" onClick={remove}>
                   <Trash2 size={15} />
@@ -568,7 +568,7 @@ function CustomFields(props: {
         )}
       </div>
       <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-        仅对话；群聊可交接。无文件与终端。
+        仅对话；多 Agent 时可交接。无文件与终端。
       </p>
     </>
   );

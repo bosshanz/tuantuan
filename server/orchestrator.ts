@@ -46,7 +46,7 @@ interface TurnCtx {
 const INTERJECTION = "被新消息打断";
 /** Agent-to-agent hand-offs per human message. */
 export const MAX_AGENT_HOPS = 5;
-/** Group relay (群聊转述): messages since this agent last spoke, at most this many / this many characters. */
+/** Group relay (会话转述): messages since this agent last spoke, at most this many / this many characters. */
 const GROUP_CONTEXT_MESSAGES = 30;
 export const RELAY_MAX_CHARS = 8000;
 const RELAY_MESSAGE_MAX_CHARS = 2000;
@@ -132,14 +132,14 @@ export class Orchestrator implements ToolProvider {
     const context =
       room.kind === "group"
         ? [
-            `你在团团的群聊「${room.name}」里，名字是「${agent.name}」。用户的消息以「[发言者]: 内容」给出。`,
-            members.length > 0 ? `群里的其他 Agent：${members.map((m) => `@${m.name}`).join("、")}。` : "",
-            room.mainAgentId === agent.id ? "你是本群的主 Agent：没人被 @ 时由你回复。" : "",
+            `你在团团的会话「${room.name}」里，名字是「${agent.name}」。用户的消息以「[发言者]: 内容」给出。`,
+            members.length > 0 ? `会话里的其他 Agent：${members.map((m) => `@${m.name}`).join("、")}。` : "",
+            room.mainAgentId === agent.id ? "你是本会话的主 Agent：没人被 @ 时由你回复。" : "",
             "回复正文里的 @名字 只是普通文字，不会通知任何人。需要别的成员现在动手时，调用 tuantuan 的 handoff 工具（agent=对方名字，task=要对方做的事），对方会在你这条回复结束后接手；只在用户这次的请求确实需要对方时交接，不要用来介绍别人。不要在回复开头写「[名字]:」。",
           ]
             .filter(Boolean)
             .join("")
-        : `你在团团里和用户私聊，你的名字是「${agent.name}」。`;
+        : `你在团团里和用户对话，你的名字是「${agent.name}」。`;
     return [context, agent.identity.trim()].filter(Boolean).join("\n\n");
   }
 
@@ -180,14 +180,14 @@ export class Orchestrator implements ToolProvider {
     let initial: string[];
     if (room.kind === "dm") {
       initial = room.agentIds.slice(0, 1);
-      if (initial.length === 0) return this.system(room.id, human.id, 0, "该私聊的 Agent 已被删除，消息不会得到回复。");
+      if (initial.length === 0) return this.system(room.id, human.id, 0, "该会话的 Agent 已被删除，消息不会得到回复。");
     } else if (mentionsEveryone(human.content)) {
       initial = members.map((m) => m.id);
     } else {
       initial = parseMentions(human.content, members);
       if (initial.length === 0) {
         const main = room.mainAgentId ?? members[0]?.id;
-        if (!main) return this.system(room.id, human.id, 0, "群里还没有 Agent，消息不会得到回复。");
+        if (!main) return this.system(room.id, human.id, 0, "会话里还没有 Agent，消息不会得到回复。");
         initial = [main];
       }
     }
@@ -228,7 +228,7 @@ export class Orchestrator implements ToolProvider {
   }
 
   /**
-   * What the agent is told this turn: the human text in a DM; in a group, a relay (群聊转述) of what
+   * What the agent is told this turn: the human text in a DM; in a group, a relay (会话转述) of what
    * was said since it last spoke, newest kept when over RELAY_MAX_CHARS, plus the hand-off task if any.
    */
   promptFor(room: Room, agent: Agent, human: Message, images: ImageAttachment[], from?: Handoff): acp.ContentBlock[] {
@@ -257,7 +257,7 @@ export class Orchestrator implements ToolProvider {
     }
     if (kept.length === 0) kept.push(`[${human.senderName}]: ${human.content}`);
     const omitted = fresh.length - kept.length;
-    const header = `${lastOwn >= 0 ? "你上次发言之后，群里的新消息" : "群里最近的消息"}${
+    const header = `${lastOwn >= 0 ? "你上次发言之后，会话里的新消息" : "会话里最近的消息"}${
       omitted > 0 ? `（更早的 ${omitted} 条已省略）` : ""
     }：`;
     let text = `${header}\n\n${kept.join("\n\n")}`;
@@ -346,7 +346,7 @@ export class Orchestrator implements ToolProvider {
       {
         name: "handoff",
         description:
-          "把任务交给群里的另一个 Agent：你这条回复结束后，对方会收到 task 并接手。只在用户的请求确实需要对方现在动手时使用；回复正文里写 @名字 不会通知对方。",
+          "把任务交给会话里的另一个 Agent：你这条回复结束后，对方会收到 task 并接手。只在用户的请求确实需要对方现在动手时使用；回复正文里写 @名字 不会通知对方。",
         inputSchema: {
           type: "object",
           properties: {
@@ -358,7 +358,7 @@ export class Orchestrator implements ToolProvider {
       },
       {
         name: "list_members",
-        description: "列出群里的 Agent 成员（名字、Harness、谁是主 Agent）。",
+        description: "列出会话里的 Agent 成员（名字、Harness、谁是主 Agent）。",
         inputSchema: { type: "object", properties: {} },
       },
     ];
@@ -389,7 +389,7 @@ export class Orchestrator implements ToolProvider {
         const to = members.find((m) => m.name.toLowerCase() === target.toLowerCase());
         if (!to)
           throw new Error(
-            `群里没有「${target}」。可以交接给：${members
+            `会话里没有「${target}」。可以交接给：${members
               .filter((m) => m.id !== ctx.agentId)
               .map((m) => m.name)
               .join("、")}`,
