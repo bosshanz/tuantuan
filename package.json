@@ -1,5 +1,6 @@
 {
-  "name": "agent-hub",
+  "name": "tuantuan",
+  "description": "团团 Tuantuan — 多 Agent 群聊工作台：自动模型路由、任务交接、桌面机器人",
   "private": true,
   "type": "module",
   "scripts": {

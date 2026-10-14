@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentEditor } from "./AgentEditor";
 import { AvatarShowcase } from "./AvatarShowcase";
 import { type Agent, api, connectWs, type McpServer, type Meta, type Room, type WsEvent } from "./api";
+import { BrandMark } from "./BrandMark";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
 import { NewRoom } from "./NewRoom";
@@ -88,8 +89,8 @@ export function App() {
   return (
     <div className={`shell ${section === "robot" ? "no-list" : ""}`} data-mobile={mobileView}>
       <nav className="rail" aria-label="主导航">
-        <div className="logo" aria-hidden>
-          A
+        <div className="logo" title="团团 Tuantuan">
+          <BrandMark size={32} />
         </div>
         <RailButton
           icon={<MessagesSquare size={20} />}
@@ -453,7 +454,7 @@ function Welcome({
       <div className="empty-icon">
         <Sparkles size={24} />
       </div>
-      <h2>{agents.length === 0 ? "欢迎使用 Agent Hub" : "选择一个会话"}</h2>
+      <h2>{agents.length === 0 ? "欢迎使用团团" : "选择一个会话"}</h2>
       <ol className="steps">
         {steps.map((s, i) => (
           <li key={s.title} className={`step ${s.done ? "done" : ""}`}>

@@ -1,4 +1,13 @@
-# agent-hub
+# 团团 Tuantuan
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/tuantuan-lockup-dark.svg">
+  <img alt="团团 Tuantuan" src="docs/brand/tuantuan-lockup-light.svg" width="330">
+</picture>
+
+**一群 Agent，团团协作。** 多 Agent 群聊工作台。
+
+> 仓库名仍为 `agent-hub`；为兼容，环境变量继续使用 `AGENT_HUB_*` 前缀，默认数据库路径仍是 `data/agent-hub.db`。
 
 动态 Agent 平台：在网页上用 **Prompt + Tools + Skills** 组合出 Agent，后台按任务 **自动路由模型**，Agent 可以在 **群聊** 中被 @，也能通过 `handoff` 工具把任务交接给另一个 Agent。还带一个用语音对话的虚拟桌面机器人。
 

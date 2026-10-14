@@ -760,3 +760,16 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 .showcase-grid tbody th { text-align: right; }
 .showcase-grid td { padding: 8px 14px; text-align: center; border-top: 1px solid var(--border); }
 .showcase-grid td svg { display: inline-block; }
+
+/* ---- brand mark (团团) ---- */
+.rail .logo { background: none; border-radius: 0; }
+.brand-mark { display: block; overflow: visible; }
+.brand-mark .bm-ink { fill: var(--ink); }
+.brand-mark .bm-red { fill: var(--accent); }
+.brand-mark .bm-eyes { stroke: var(--on-ink); stroke-width: 9; stroke-linecap: round; transform-box: fill-box; transform-origin: center; transition: transform 0.35s ease; animation: bm-blink 6s infinite; }
+.brand-mark .bm-eyes-red { stroke: var(--paper); animation-delay: 0.18s; }
+.logo:hover .bm-eyes-ink { transform: translateX(3px); }
+.logo:hover .bm-eyes-red { transform: translateX(-4px) translateY(3px); }
+html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
+@keyframes bm-blink { 0%, 93%, 100% { scale: 1 1; } 95% { scale: 1 0.12; } }
+@media (prefers-reduced-motion: reduce) { .brand-mark .bm-eyes { animation: none; transition: none; } }

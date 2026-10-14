@@ -19,7 +19,7 @@ export class McpConnections {
     let p = this.clients.get(id);
     if (!p) {
       p = (async () => {
-        const client = new Client({ name: "agent-hub", version: "0.1.0" });
+        const client = new Client({ name: "tuantuan", version: "0.1.0" });
         await client.connect(new StreamableHTTPClientTransport(new URL(url)));
         return client;
       })();

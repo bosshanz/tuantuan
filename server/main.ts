@@ -13,7 +13,7 @@ const { server } = serve(
 );
 
 console.log(
-  `agent-hub API 已启动: http://localhost:${server.port}  (配置: ${source}, 模型 ${config.models.length} 个)`,
+  `团团 Tuantuan API 已启动: http://localhost:${server.port}  (配置: ${source}, 模型 ${config.models.length} 个)`,
 );
 console.log(
   source === "builtin-mock"
