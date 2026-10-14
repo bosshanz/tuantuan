@@ -1,16 +1,20 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AcpProcess } from "../server/acp";
 import { serve } from "../server/app";
-import { defaultAvatar } from "../server/avatars";
-import { loadSkills } from "../server/skills";
-import type { Agent, Message, Room, RoutingDecision } from "../server/store";
-import { testConfig } from "./helpers";
+import type { SessionView } from "../server/host";
+import type { RoomEvent } from "../server/orchestrator";
+import type { Agent, Message, Room } from "../server/store";
+import { agentInput, until } from "./helpers";
 
-const { app, server } = serve(
-  { config: testConfig({ maxAgentHops: 3 }), configSource: "test", skills: loadSkills("skills"), dbPath: ":memory:" },
-  0,
-);
+const { app, server } = serve({ dbPath: ":memory:" }, 0);
 const base = `http://localhost:${server.port}`;
-afterAll(() => server.stop(true));
+afterAll(() => {
+  app.host.shutdown();
+  server.stop(true);
+});
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<{ status: number; data: T }> {
   const res = await fetch(base + path, {
@@ -21,250 +25,216 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<{ s
   return { status: res.status, data: (await res.json()) as T };
 }
 
-const agentBody = (name: string, systemPrompt = "", extra: Partial<Agent> = {}) => ({
-  name,
-  color: "#336699",
-  avatar: name.slice(0, 1),
-  systemPrompt,
-  tools: [],
-  skills: [],
-  modelMode: "auto",
-  pinnedModel: null,
-  ...extra,
+async function createAgent(name: string, extra: Parameters<typeof agentInput>[1] = {}): Promise<Agent> {
+  const r = await api<Agent>("POST", "/api/agents", agentInput(name, extra));
+  expect(r.status).toBe(201);
+  return r.data;
+}
+
+async function createRoom(name: string, kind: "group" | "dm", agentIds: string[], extra = {}): Promise<Room> {
+  const r = await api<Room>("POST", "/api/rooms", { name, kind, agentIds, ...extra });
+  expect(r.status).toBe(201);
+  return r.data;
+}
+
+const events: RoomEvent[] = [];
+let ws: WebSocket;
+const subscribed = new Set<string>();
+async function watch(roomId: string) {
+  if (subscribed.has(roomId)) return;
+  subscribed.add(roomId);
+  ws.send(JSON.stringify({ type: "subscribe", roomId }));
+  await until(() =>
+    events.some((e) => (e as { type: string }).type === "subscribed" && (e as { roomId?: string }).roomId === roomId),
+  );
+}
+
+async function say(roomId: string, content: string, images: { mimeType: string; data: string }[] = []) {
+  const r = await api<Message>("POST", `/api/rooms/${roomId}/messages`, { senderName: "Andy", content, images });
+  expect(r.status).toBe(201);
+  await app.orchestrator.idle(roomId);
+  return (await api<{ messages: Message[] }>("GET", `/api/rooms/${roomId}/messages`)).data.messages;
+}
+
+beforeAll(async () => {
+  ws = new WebSocket(`ws://localhost:${server.port}/ws`);
+  ws.addEventListener("message", (e) => events.push(JSON.parse(String(e.data))));
+  await new Promise((r) => ws.addEventListener("open", r, { once: true }));
 });
 
-async function createAgent(name: string, systemPrompt = "", extra: Partial<Agent> = {}): Promise<Agent> {
-  const r = await api<Agent>("POST", "/api/agents", agentBody(name, systemPrompt, extra));
-  expect(r.status).toBe(201);
-  return r.data;
-}
+describe("ACP harness integration (mock ACP agent)", () => {
+  let dmAgent: Agent;
+  let dm: Room;
+  const cwd = mkdtempSync(join(tmpdir(), "tuantuan-cwd-"));
 
-async function createRoom(name: string, kind: "group" | "dm", agentIds: string[]): Promise<Room> {
-  const r = await api<Room>("POST", "/api/rooms", { name, kind, agentIds });
-  expect(r.status).toBe(201);
-  return r.data;
-}
-
-/** Posts a human message and waits until the room's chain (and any queued chains) finish. */
-async function say(roomId: string, content: string) {
-  await api("POST", `/api/rooms/${roomId}/messages`, { senderName: "Andy", content });
-  await app.orchestrator.idle(roomId);
-  return (await api<{ messages: Message[]; routing: RoutingDecision[] }>("GET", `/api/rooms/${roomId}/messages`)).data;
-}
-
-describe("HTTP + WS integration (mock provider)", () => {
-  let a: Agent;
-  let b: Agent;
-  let room: Room;
-  const events: { type: string; [k: string]: unknown }[] = [];
-  let ws: WebSocket;
-
-  beforeAll(async () => {
-    a = await createAgent("Alice", "[[handoff:Bob 请你来处理这个问题]][[reply:这个交给 Bob 处理。]]");
-    b = await createAgent("Bob");
-    room = await createRoom("项目群", "group", [a.id, b.id]);
-    ws = new WebSocket(`ws://localhost:${server.port}/ws`);
-    await new Promise((r) => ws.addEventListener("open", r, { once: true }));
-    ws.addEventListener("message", (e) => events.push(JSON.parse(String(e.data))));
-    ws.send(JSON.stringify({ type: "subscribe", roomId: room.id }));
-    while (!events.some((e) => e.type === "subscribed")) await Bun.sleep(5);
-  });
-  afterAll(() => ws.close());
-
-  test("agent avatars: default derived from id, chosen shape+colour persisted, unknown shape rejected", async () => {
-    const { color: _c, ...noColor } = agentBody("AvatarDefault");
-    const r = await api<Agent>("POST", "/api/agents", noColor);
-    expect(r.status).toBe(201);
-    expect(r.data.avatarShape).toBe(defaultAvatar(r.data.id).shape);
-    expect(r.data.color).toBe(defaultAvatar(r.data.id).color);
-    const put = await api<Agent>("PUT", `/api/agents/${r.data.id}`, {
-      ...agentBody("AvatarDefault"),
-      avatarShape: "hex",
-      color: "#3d7bfa",
-    });
-    expect(put.data).toMatchObject({ avatarShape: "hex", color: "#3d7bfa" });
-    const listed = (await api<Agent[]>("GET", "/api/agents")).data.find((a) => a.id === r.data.id);
-    expect(listed?.avatarShape).toBe("hex");
-    const bad = await api("PUT", `/api/agents/${r.data.id}`, {
-      ...agentBody("AvatarDefault"),
-      avatarShape: "triangle!",
-    });
-    expect(bad.status).toBe(400);
+  test("DM: reply streams as ACP updates and is persisted with its timeline; session exposes config + commands", async () => {
+    dmAgent = await createAgent("Coder", { cwd, identity: "你说话简洁。" });
+    dm = await createRoom("私聊", "dm", [dmAgent.id]);
+    await watch(dm.id);
+    const ms = await say(dm.id, "你好");
+    const reply = ms.at(-1) as Message;
+    expect(reply).toMatchObject({ senderKind: "agent", status: "done", content: "收到：「你好」（mock-fast）" });
+    expect(reply.timeline?.parts.map((p) => p.kind)).toEqual(["thought", "text"]);
+    expect(reply.timeline?.stopReason).toBe("end_turn");
+    const updates = events.filter((e) => e.type === "update" && e.messageId === reply.id);
+    expect(updates.length).toBeGreaterThan(2);
+    const view = (await api<SessionView>("GET", `/api/rooms/${dm.id}/agents/${dmAgent.id}/session`)).data;
+    expect(view.configOptions.map((o) => o.id)).toEqual(["mode", "model", "effort"]);
+    expect(view.commands.map((c) => c.name)).toContain("plan");
+    expect(view.usage?.size).toBe(200000);
+    expect(view.capabilities).toMatchObject({ image: true, list: true, resume: true });
   });
 
-  test("human @A -> A @B -> B replies, streamed over WS with routing recorded", async () => {
-    const { messages, routing } = await say(room.id, "@Alice 帮忙看下");
-    const view = messages.map((m) => [m.senderName, m.hop, m.status]);
-    expect(view).toEqual([
-      ["Andy", 0, "done"],
-      ["Alice", 1, "done"],
-      ["Bob", 2, "done"],
-    ]);
-    expect(messages[1]?.content).toBe("这个交给 Bob 处理。");
-    expect(messages[1]?.toolCalls.map((c) => [c.name, JSON.parse(c.arguments), c.status])).toEqual([
-      ["handoff", { agent: "Bob", task: "请你来处理这个问题" }, "ok"],
-    ]);
-    expect(messages[2]?.content).toContain("我是 Bob");
-    expect(messages.every((m) => m.runId === messages[0]?.id)).toBe(true);
+  test("identity doc reaches a first-prompt harness once per session and never shows up as user text", async () => {
+    const ms = await say(dm.id, "第二句");
+    expect(ms.at(-1)?.content).toBe("收到：「第二句」（mock-fast）");
+    expect(app.orchestrator.identityFor(dm, dmAgent)).toContain("你说话简洁。");
+  });
 
-    expect(routing).toHaveLength(2);
-    for (const r of routing) {
-      expect(r.plan.mode).toBe("auto");
-      expect(r.plan.classification?.source).toBe("llm");
-      expect(r.chosenModel).toBe(r.plan.candidates[0] ?? "missing");
-      // Alice makes two model calls (handoff tool call, then the reply); every attempt succeeds on the first candidate.
-      for (const at of r.attempts) expect(at).toEqual({ modelId: r.chosenModel as string, ok: true });
-    }
+  test("plan updates fold into a checklist", async () => {
+    const reply = (await say(dm.id, "/plan")).at(-1) as Message;
+    expect(reply.timeline?.plan?.map((e) => e.status)).toEqual(["completed", "completed", "completed"]);
+  });
 
-    const bobId = messages[2]?.id;
-    const deltas = events
-      .filter((e) => e.type === "delta" && e.messageId === bobId)
-      .map((e) => e.text)
-      .join("");
-    expect(deltas).toBe(messages[2]?.content ?? "x");
-    expect(events.some((e) => e.type === "routing")).toBe(true);
-    expect(events.filter((e) => e.type === "room.state").at(-1)).toMatchObject({
-      state: { activeRunId: null, queued: 0 },
+  test("permission: allow writes the file inside the agent cwd; reject leaves it alone", async () => {
+    await Bun.write(join(cwd, "mock-edit.txt"), "hello\n");
+    const before = events.length;
+    await api("POST", `/api/rooms/${dm.id}/messages`, { content: "/edit" });
+    const ask = await until(() => {
+      const e = events.slice(before).find((x) => x.type === "permission" && x.ask);
+      return e?.type === "permission" ? e.ask : null;
+    });
+    expect(ask.options.map((o) => o.kind)).toEqual(["allow_once", "allow_always", "reject_once"]);
+    expect((await api("GET", `/api/rooms/${dm.id}/messages`)).data).toMatchObject({ asks: [{ id: ask.id }] });
+    expect((await api("POST", `/api/permissions/${ask.id}`, { optionId: "allow" })).status).toBe(200);
+    await app.orchestrator.idle(dm.id);
+    expect(readFileSync(join(cwd, "mock-edit.txt"), "utf8")).toBe("hello\ntuantuan\n");
+    const msgs = (await api<{ messages: Message[] }>("GET", `/api/rooms/${dm.id}/messages`)).data.messages;
+    const reply = msgs.at(-1) as Message;
+    const tool = Object.values(reply.timeline?.tools ?? {})[0];
+    expect(tool).toMatchObject({ kind: "edit", status: "completed" });
+    expect(tool?.content[0]).toMatchObject({ type: "diff", oldText: "hello\n" });
+
+    await Bun.write(join(cwd, "mock-edit.txt"), "hello\n");
+    const mark = events.length;
+    await api("POST", `/api/rooms/${dm.id}/messages`, { content: "/edit" });
+    const ask2 = await until(() => {
+      const e = events.slice(mark).find((x) => x.type === "permission" && x.ask);
+      return e?.type === "permission" ? e.ask : null;
+    });
+    await api("POST", `/api/permissions/${ask2.id}`, { optionId: "reject" });
+    await app.orchestrator.idle(dm.id);
+    expect(readFileSync(join(cwd, "mock-edit.txt"), "utf8")).toBe("hello\n");
+    expect((await api("POST", `/api/permissions/${ask2.id}`, { optionId: "allow" })).status).toBe(404);
+  });
+
+  test("terminal: the agent runs a command through Tuantuan; output streams to the room", async () => {
+    const mark = events.length;
+    const reply = (await say(dm.id, "/run")).at(-1) as Message;
+    expect(Object.values(reply.timeline?.tools ?? {})[0]).toMatchObject({ kind: "execute", status: "completed" });
+    const term = events.slice(mark).findLast((e) => e.type === "terminal");
+    expect(term?.type === "terminal" && term.terminal).toMatchObject({
+      output: "hello from terminal\n",
+      exitStatus: { exitCode: 0 },
     });
   });
 
-  test("a group message without @ goes to ONE agent picked by topic (mock picker is deterministic)", async () => {
-    const { messages, routing } = await say(room.id, "大家好");
-    const turn = messages.slice(messages.findLastIndex((m) => m.senderKind === "human"));
-    // No keyword overlap → first member (Alice); Alice's scripted reply hands off to Bob explicitly.
-    expect(turn.filter((m) => m.senderKind === "agent").map((m) => [m.senderName, m.hop])).toEqual([
-      ["Alice", 1],
-      ["Bob", 2],
-    ]);
-    const alice = turn.find((m) => m.senderName === "Alice") as Message;
-    const sel = routing.find((d) => d.messageId === alice.id)?.plan.selection;
-    expect(sel).toMatchObject({ agentName: "Alice", by: "llm" });
-    expect(sel?.reason).toContain("mock/small");
-    const bob = turn.find((m) => m.senderName === "Bob") as Message;
-    expect(routing.find((d) => d.messageId === bob.id)?.plan.selection).toBeUndefined();
-  });
-
-  test("@所有人 is reserved and cannot be an agent name", async () => {
-    expect((await api("POST", "/api/agents", agentBody("所有人"))).status).toBe(400);
-    expect((await api("POST", "/api/agents", agentBody("ALL"))).status).toBe(400);
-  });
-
-  test("hop limit stops an A<->B loop and says so", async () => {
-    const p = await createAgent("PingBot", "[[handoff:PongBot 该你了]][[reply:交给 PongBot]]");
-    const q = await createAgent("PongBot", "[[handoff:PingBot 该你了]][[reply:交给 PingBot]]");
-    const r = await createRoom("循环群", "group", [p.id, q.id]);
-    const { messages } = await say(r.id, "@PingBot 开始");
-    const agents = messages.filter((m) => m.senderKind === "agent");
-    // hop 1 is triggered by the human; hops 2..4 are the 3 allowed agent-to-agent triggers.
-    expect(agents.map((m) => [m.senderName, m.hop])).toEqual([
-      ["PingBot", 1],
-      ["PongBot", 2],
-      ["PingBot", 3],
-      ["PongBot", 4],
-    ]);
-    const last = messages.at(-1);
-    expect(last?.senderKind).toBe("system");
-    expect(last?.content).toContain("最多 3 次");
-    expect(last?.content).toContain("@PingBot");
-  });
-
-  test("an agent mentioning itself does not trigger itself", async () => {
-    const s = await createAgent("Narcissus", "[[handoff:Narcissus 我又来了]][[reply:@Narcissus 我又来了]]");
-    const r = await createRoom("自恋群", "group", [s.id]);
-    const { messages } = await say(r.id, "@Narcissus 你好");
-    expect(messages.filter((m) => m.senderKind === "agent")).toHaveLength(1);
-  });
-
-  test("agents not in the room are not triggered", async () => {
-    const outsider = await createAgent("Outsider");
-    const r = await createRoom("单人群", "group", [b.id]);
-    const { messages } = await say(r.id, `@${outsider.name} @Bob 在吗`);
-    expect(messages.filter((m) => m.senderKind === "agent").map((m) => m.senderName)).toEqual(["Bob"]);
-  });
-
-  test("DM: every message goes to the single agent; tool calls and fallback are recorded", async () => {
-    const calc = await createAgent("Calc", "", { tools: ["builtin:calculator"] });
-    const dm = await createRoom("和 Calc 私聊", "dm", [calc.id]);
-    const { messages, routing } = await say(dm.id, '算一下 [[tool:calculator {"expression":"12*12"}]] [[fail:small]]');
-    const reply = messages.at(-1) as Message;
-    expect(reply.senderName).toBe("Calc");
-    expect(reply.toolCalls).toMatchObject([{ name: "calculator", status: "ok", result: "144" }]);
-    expect(reply.content).toContain("144");
-    const decision = routing.find((d) => d.messageId === reply.id) as RoutingDecision;
-    // Classifier (mock/small) failed -> rules; first candidate mock/small failed -> next one.
-    expect(decision.plan.classification?.source).toBe("rules");
-    expect(decision.plan.classification?.classifierError).toContain("模拟失败");
-    expect(decision.attempts[0]).toMatchObject({ modelId: "mock/small", ok: false });
-    expect(decision.chosenModel).not.toBe("mock/small");
-  });
-
-  test("pinned model with all candidates failing ends in a truthful error", async () => {
-    const pinned = await createAgent("Pinned", "", { modelMode: "pinned", pinnedModel: "mock/small" });
-    const dm = await createRoom("固定模型", "dm", [pinned.id]);
-    const { messages, routing } = await say(dm.id, "hi [[fail:small]]");
-    const reply = messages.at(-1) as Message;
-    expect(reply.status).toBe("error");
-    expect(reply.error).toContain("所有候选模型均失败");
-    expect(routing[0]).toMatchObject({ chosenModel: null, plan: { mode: "pinned", candidates: ["mock/small"] } });
-  });
-
-  test("cancel aborts the running reply and drops queued messages", async () => {
-    const slow = await createAgent("Slow");
-    const dm = await createRoom("慢", "dm", [slow.id]);
-    process.env.MOCK_CHUNK_DELAY_MS = "40";
-    try {
-      await api("POST", `/api/rooms/${dm.id}/messages`, { content: "第一条消息，内容要长一些以便有足够的流式分片" });
-      await api("POST", `/api/rooms/${dm.id}/messages`, { content: "第二条（排队）" });
-      expect(app.orchestrator.state(dm.id).queued).toBe(1);
-      await Bun.sleep(120);
-      expect((await api<{ cancelled: boolean }>("POST", `/api/rooms/${dm.id}/cancel`)).data.cancelled).toBe(true);
-      await app.orchestrator.idle(dm.id);
-    } finally {
-      process.env.MOCK_CHUNK_DELAY_MS = "0";
-    }
-    const { messages } = (await api<{ messages: Message[] }>("GET", `/api/rooms/${dm.id}/messages`)).data;
-    const agentMsgs = messages.filter((m) => m.senderKind === "agent");
-    expect(agentMsgs).toHaveLength(1);
-    expect(agentMsgs[0]?.status).toBe("cancelled");
-    expect(messages.some((m) => m.senderKind === "system" && m.content.includes("1 条消息不会再触发"))).toBe(true);
-    expect((await api("POST", `/api/rooms/${dm.id}/cancel`)).data).toEqual({ cancelled: false });
-  });
-
-  test("validation: duplicate names, bad tools, bad pinned model, dm membership", async () => {
-    expect((await api("POST", "/api/agents", agentBody("alice"))).status).toBe(409);
-    expect((await api("POST", "/api/agents", agentBody("Has Space"))).status).toBe(400);
-    const badTool = await api<{ error: string }>(
-      "POST",
-      "/api/agents",
-      agentBody("T1", "", { tools: ["builtin:rm_rf"] }),
-    );
-    expect(badTool).toEqual({ status: 400, data: { error: "未知工具：builtin:rm_rf" } });
-    expect(
-      (await api("POST", "/api/agents", agentBody("T2", "", { modelMode: "pinned", pinnedModel: "x/y" }))).status,
-    ).toBe(400);
-    expect((await api("POST", "/api/agents", agentBody("T3", "", { skills: ["code-review"] }))).status).toBe(201);
-    expect((await api("POST", "/api/rooms", { name: "dm", kind: "dm", agentIds: [a.id, b.id] })).status).toBe(400);
-    expect((await api("GET", "/api/rooms/nope/messages")).status).toBe(404);
-  });
-
-  test("editing and deleting an agent", async () => {
-    const t = await createAgent("Temp");
-    const upd = await api<Agent>("PUT", `/api/agents/${t.id}`, agentBody("Temp2", "新提示词", { color: "#000000" }));
-    expect(upd.data).toMatchObject({ name: "Temp2", systemPrompt: "新提示词", createdAt: t.createdAt });
-    expect((await api("DELETE", `/api/agents/${t.id}`)).status).toBe(200);
-    expect((await api("DELETE", `/api/agents/${t.id}`)).status).toBe(404);
-  });
-
-  test("meta exposes models, builtin tools and skills", async () => {
-    const meta = (
-      await api<{ models: unknown[]; builtinTools: { id: string }[]; skills: { name: string }[] }>("GET", "/api/meta")
+  test("config options change the harness's behaviour", async () => {
+    const view = (
+      await api<SessionView>("POST", `/api/rooms/${dm.id}/agents/${dmAgent.id}/config`, {
+        configId: "model",
+        value: "mock-smart",
+      })
     ).data;
-    expect(meta.builtinTools.map((t) => t.id).sort()).toEqual([
-      "builtin:calculator",
-      "builtin:current_time",
-      "builtin:web_fetch",
-    ]);
-    expect(meta.skills.map((s) => s.name)).toContain("code-review");
-    expect(meta.models).toHaveLength(3);
+    expect(view.configOptions.find((o) => o.id === "model")?.currentValue).toBe("mock-smart");
+    expect((await say(dm.id, "嗨")).at(-1)?.content).toBe("收到：「嗨」（mock-smart）");
+  });
+
+  test("images go to harnesses that accept them", async () => {
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const ms = await say(dm.id, "看图", [{ mimeType: "image/png", data: png }]);
+    expect(ms.at(-2)?.timeline?.parts[0]).toMatchObject({ kind: "image", mimeType: "image/png" });
+    expect(ms.at(-1)?.content).toContain("还有 1 张图片");
+  });
+
+  test("cancel sends session/cancel and the reply ends as cancelled", async () => {
+    await api("POST", `/api/rooms/${dm.id}/messages`, { content: "/slow" });
+    await until(() => app.store.recentMessages(dm.id, 1)[0]?.status === "streaming");
+    await Bun.sleep(200);
+    expect((await api("POST", `/api/rooms/${dm.id}/cancel`)).data).toEqual({ cancelled: true });
+    await app.orchestrator.idle(dm.id);
+    expect(app.store.recentMessages(dm.id, 1)[0]?.status).toBe("cancelled");
+  });
+
+  test("history: list sessions, start a new one, switch back; a dead process falls back to a fresh session", async () => {
+    const list = (await api<{ sessionId: string }[]>("GET", `/api/rooms/${dm.id}/agents/${dmAgent.id}/history`)).data;
+    const first = app.store.getAcpSession(dm.id, dmAgent.id)?.sessionId as string;
+    expect(list.map((s) => s.sessionId)).toContain(first);
+    const fresh = (
+      await api<SessionView>("POST", `/api/rooms/${dm.id}/agents/${dmAgent.id}/session`, { sessionId: null })
+    ).data;
+    expect(fresh.sessionId).not.toBe(first);
+    const back = (
+      await api<SessionView>("POST", `/api/rooms/${dm.id}/agents/${dmAgent.id}/session`, { sessionId: first })
+    ).data;
+    expect(back.sessionId).toBe(first);
+    app.host.shutdown();
+    expect((await say(dm.id, "重启后")).at(-1)?.content).toBe("收到：「重启后」（mock-fast）");
+  });
+
+  test("group: no @ goes to the main agent, @ goes to the mentioned one, prompt carries what others said", async () => {
+    const a = await createAgent("Alice");
+    const b = await createAgent("Bob");
+    const g = await createRoom("群", "group", [a.id, b.id], { mainAgentId: b.id });
+    let ms = await say(g.id, "大家好");
+    expect(ms.at(-1)).toMatchObject({ senderName: "Bob", content: "收到：「[Andy]: 大家好」（mock-fast）" });
+    ms = await say(g.id, "@Alice 你来");
+    expect(ms.at(-1)?.senderName).toBe("Alice");
+    expect(ms.at(-1)?.content).toContain("[Bob]: 收到");
+    const patched = (await api<Room>("PATCH", `/api/rooms/${g.id}`, { mainAgentId: a.id })).data;
+    expect(patched.mainAgentId).toBe(a.id);
+    expect((await say(g.id, "再来")).at(-1)?.senderName).toBe("Alice");
+  });
+
+  test("an agent without a harness explains what to do", async () => {
+    const x = await createAgent("Lonely", { harness: "" });
+    const r = await createRoom("x", "dm", [x.id]);
+    const reply = (await say(r.id, "hi")).at(-1);
+    expect(reply).toMatchObject({ status: "error" });
+    expect(reply?.error).toContain("还没有绑定 Harness");
+  });
+
+  test("validation: unknown harness, bad env names, duplicate names", async () => {
+    expect((await api("POST", "/api/agents", agentInput("Z", { harness: "nope" }))).status).toBe(400);
+    expect((await api("POST", "/api/agents", agentInput("Z", { env: { "BAD-NAME": "x" } }))).status).toBe(400);
+    expect((await api("POST", "/api/agents", agentInput("coder"))).status).toBe(409);
+  });
+
+  test("harness registry: detection, path override and handshake for the mock harness", async () => {
+    const list = (await api<{ id: string; path: string | null }[]>("GET", "/api/harnesses")).data;
+    expect(list.map((h) => h.id)).toEqual(["claude-code", "codex", "grok", "opencode", "mock"]);
+    expect(list.find((h) => h.id === "mock")?.path).toBeTruthy();
+    const t = (await api<{ ok: boolean; agentInfo: { name: string } }>("POST", "/api/harnesses/mock/test")).data;
+    expect(t).toMatchObject({ ok: true, agentInfo: { name: "mock-agent" } });
+    const bad = (
+      await api<{ id: string; error: string | null }[]>("PUT", "/api/harnesses/mock/path", { path: "/nope/bin" })
+    ).data;
+    expect(bad.find((h) => h.id === "mock")?.error).toContain("找不到");
+    await api("PUT", "/api/harnesses/mock/path", { path: null });
+  });
+});
+
+describe("client-side fs is confined to the agent's working directory", () => {
+  test("paths outside cwd are refused", () => {
+    const root = mkdtempSync(join(tmpdir(), "root"));
+    const p = new AcpProcess(
+      { command: process.execPath, args: ["--version"], env: {}, cwd: root },
+      { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
+    );
+    expect(p.inside("a/b.txt")).toBe(join(root, "a/b.txt"));
+    expect(() => p.inside("../etc/passwd")).toThrow();
+    expect(() => p.inside("/etc/passwd")).toThrow();
+    expect(() => p.inside(`${root}kit/x`)).toThrow();
+    p.kill();
   });
 });

@@ -1,39 +1,51 @@
-// Browser smoke test against the built UI + real server + mock provider.
+// Browser smoke test against the built UI + real server + the mock ACP harness (server/mock-agent.ts).
 // Needs `bun run build` first and a Chrome/Chromium binary (CHROME_PATH, default /usr/bin/google-chrome).
-import { rmSync } from "node:fs";
+// SHOTS_DIR=<dir> also saves screenshots of the main screens.
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
 import { serve } from "../server/app";
-import { MOCK_CONFIG } from "../server/config";
-import { loadSkills } from "../server/skills";
 
-process.env.MOCK_CHUNK_DELAY_MS = "5";
+process.env.TUANTUAN_MOCK_HARNESS = "1";
 const dbPath = join(tmpdir(), `agent-hub-e2e-${Date.now()}.db`);
-const { server } = serve(
-  { config: MOCK_CONFIG, configSource: "builtin-mock", skills: loadSkills("skills"), dbPath, staticDir: "web/dist" },
-  0,
-);
+const cwd = mkdtempSync(join(tmpdir(), "tuantuan-e2e-cwd-"));
+writeFileSync(join(cwd, "mock-edit.txt"), "hello\n");
+const shotsDir = process.env.SHOTS_DIR;
+if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+const { server, app } = serve({ dbPath, staticDir: "web/dist" }, 0);
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH ?? "/usr/bin/google-chrome" });
 let failed = false;
 try {
-  const page = await browser.newPage();
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const shot = async (name: string) => {
+    if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}.png`) });
+  };
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`http://localhost:${server.port}/`);
   await page.locator(".rail .dot.ok").waitFor();
 
-  const createAgent = async (name: string, prompt: string, tool?: string) => {
+  // Onboarding: the mock harness is detected and the ACP handshake succeeds.
+  await page.getByRole("button", { name: "引导", exact: true }).click();
+  const mockRow = page.locator(".harness-row", { hasText: "Mock（测试）" });
+  await mockRow.getByRole("button", { name: "握手测试" }).click();
+  await mockRow.getByText(/ACP v1 · Mock/).waitFor();
+  await shot("setup");
+
+  const createAgent = async (name: string, identity: string) => {
     await page.getByRole("button", { name: "Agents", exact: true }).click();
     await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
     await page.getByLabel("名称").fill(name);
-    await page.getByLabel("系统 Prompt").fill(prompt);
-    if (tool) await page.getByRole("checkbox", { name: new RegExp(tool) }).check();
+    await page.getByLabel("Harness", { exact: true }).selectOption({ label: "Mock（测试）" });
+    await page.getByLabel("工作目录").fill(cwd);
+    await page.getByLabel("身份文档").fill(identity);
     await page.getByRole("button", { name: "创建 Agent" }).click();
     await page.getByText("所有修改已保存").waitFor();
   };
-  await createAgent("Alice", "[[handoff:Bob 请你来接手]][[reply:这个交给 Bob 了。]]");
-  await createAgent("Bob", "", "calculator");
+  await createAgent("Alice", "你是产品经理。");
+  await createAgent("Bob", "你是工程师。");
+  await shot("agent-editor");
 
   await page.getByRole("button", { name: "会话", exact: true }).click();
   await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
@@ -45,21 +57,60 @@ try {
   await page.getByRole("button", { name: "创建会话" }).click();
   await page.getByRole("heading", { name: "冒烟群" }).waitFor();
 
+  // Group: no @ -> the main agent (first member) answers; @Bob -> Bob, who sees what Alice said.
   const input = page.getByLabel("消息输入框");
-  await input.fill("@Alice 你好");
+  await input.fill("大家好");
   await input.press("Enter");
-  await page.locator(".handoff", { hasText: "请你来接手" }).first().waitFor();
-  await page.getByText(/我是 Bob（mock\//).waitFor();
-  await page.getByText("由 Alice 转交").waitFor();
-  const routingCount = await page.locator('[data-shot="expand"]').count();
-  if (routingCount !== 2) throw new Error(`expected 2 routing chips, got ${routingCount}`);
-  await page.locator('[data-shot="expand"]').first().click();
-  await page.getByRole("heading", { name: "回复详情" }).waitFor();
+  await page.locator(".msg-group", { hasText: "Alice" }).getByText("收到：「[我]: 大家好」").waitFor();
+  await input.fill("@Bob 你来");
+  await input.press("Enter");
+  await page
+    .locator(".msg-group", { hasText: "Bob" })
+    .locator("p", { hasText: /\[Alice\]: 收到/ })
+    .first()
+    .waitFor();
+  await shot("group");
 
-  await input.fill('@Bob 算 [[tool:calculator {"expression":"7*6"}]]');
+  // Private chat with Bob: every ACP capability the mock harness exercises.
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.locator(".list-item", { hasText: "Bob" }).first().click();
+  await page.getByRole("button", { name: /私聊/ }).click();
+  await page.getByLabel("模型").waitFor(); // session config options (mode / model / reasoning)
+  await input.fill("/pl");
+  await page.locator(".slash-pop").getByText("/plan").waitFor();
+  await input.press("Tab");
   await input.press("Enter");
-  await page.locator(".msg .tool", { hasText: "calculator" }).filter({ hasText: "成功" }).first().waitFor();
-  await page.getByText("工具返回：42").waitFor();
+  await page.locator(".plan-item[data-status=completed]", { hasText: "跑测试" }).waitFor();
+  await page.locator(".thought").first().waitFor();
+
+  await input.fill("/edit");
+  await input.press("Enter");
+  const dialog = page.getByRole("alertdialog");
+  await dialog.locator('.diff-line[data-op="+"]', { hasText: "tuantuan" }).waitFor();
+  await shot("permission");
+  await dialog.getByRole("button", { name: "允许", exact: true }).click();
+  await page.getByText("已修改 mock-edit.txt。").waitFor();
+  if (readFileSync(join(cwd, "mock-edit.txt"), "utf8") !== "hello\ntuantuan\n") throw new Error("edit not applied");
+
+  await input.fill("/run");
+  await input.press("Enter");
+  await page.locator(".term", { hasText: "hello from terminal" }).waitFor();
+  await page.getByText("命令跑完了。").waitFor();
+
+  await page.getByLabel("模型").selectOption("mock-smart");
+  await input.fill("换模型了");
+  await input.press("Enter");
+  await page.getByText("收到：「换模型了」（mock-smart）").waitFor();
+  await page.locator(".ctx-usage").waitFor();
+  await shot("dm-capabilities");
+
+  await input.fill("/slow");
+  await input.press("Enter");
+  await page.getByRole("button", { name: "停止" }).click();
+  await page.locator(".state-tag", { hasText: "已停止" }).waitFor();
+
+  await page.locator('[data-shot="expand"]').last().click();
+  await page.getByRole("heading", { name: "回复详情" }).waitFor();
 
   // Let enter/exit animations finish so geometry is measured at rest.
   const settle = () =>
@@ -104,7 +155,7 @@ try {
     for (const g of document.querySelectorAll(".msg-group")) {
       const text = r(g.querySelector(".msg"))?.left ?? Number.NaN;
       near(r(g.querySelector(".msg-head"))?.left ?? text, text, "message name vs body");
-      for (const s of [".msg-meta", ".handoff", ".tool-list"])
+      for (const s of [".msg-meta", ".timeline"])
         for (const el of g.querySelectorAll(s)) near(el.getBoundingClientRect().left, text, `${s} vs body`);
     }
     const firstAvatar = r(document.querySelector(".msg-group .avatar"));
@@ -127,8 +178,7 @@ try {
   await page.locator("#robot-agent").selectOption({ label: "绑定：Bob" });
   await page.getByLabel("文字输入").fill("你好");
   await page.getByLabel("文字输入").press("Enter");
-  await page.getByText("动作：挥手").waitFor();
-  await page.locator(".turn.agent", { hasText: "我是 Bob" }).waitFor();
+  await page.locator(".turn.agent", { hasText: "收到：「你好」" }).waitFor();
   await page.getByRole("button", { name: "会话", exact: true }).click();
   await page.locator(".li-title", { hasText: "桌面机器人 · Bob" }).waitFor();
   // Re-opening the robot page must reuse the same session room, not add another one.
@@ -199,7 +249,7 @@ try {
   await live("Bob", "私聊直播-1", /收到：「私聊直播-1」/);
   await page.getByRole("button", { name: "会话", exact: true }).click();
   await page.locator(".li-title", { hasText: "冒烟群" }).click();
-  await live("冒烟群", "@Bob 群聊直播-2", /群聊直播-2/);
+  await live("冒烟群", "@Bob 群聊直播-2", /\[我\]: @Bob 群聊直播-2/);
   await page.locator(".li-title", { hasText: /私聊/ }).first().click();
   await live("Bob", "切换后-3", /收到：「切换后-3」/);
   await page.unroute(/\/api\/rooms\/[^/]+\/messages\?/);
@@ -207,8 +257,10 @@ try {
     throw new Error("page reloaded during live checks");
 
   // Dev setup (`bun dev`): the robot must connect through the Vite proxy too (/device WebSocket).
+  // Spawn vite's own entry (not `bunx`), so kill() stops the server itself: an orphaned vite from a
+  // previous run would keep the port and proxy to a dead API, failing every other run.
   const vitePort = 5199;
-  const vite = Bun.spawn(["bunx", "vite", "--port", String(vitePort), "--strictPort"], {
+  const vite = Bun.spawn(["node", "node_modules/vite/bin/vite.js", "--port", String(vitePort), "--strictPort"], {
     env: { ...process.env, PORT: String(server.port) },
     stdout: "pipe",
     stderr: "pipe",
@@ -232,17 +284,19 @@ try {
     vite.kill();
   }
 
-  await page.screenshot({ path: join(tmpdir(), "agent-hub-e2e.png"), fullPage: true });
+  await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (create agents → group → @Alice → Alice @Bob → Bob replies → routing details → tool call → robot text turn with action → robot conversation listed)",
+    "e2e smoke: PASS (setup handshake → agents on mock ACP harness → group main agent + @ → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → robot turn → live updates under slow snapshot → robot via Vite proxy)",
   );
 } catch (e) {
   failed = true;
   console.error("e2e smoke: FAIL", e);
 } finally {
   await browser.close();
+  app.host.shutdown();
   server.stop(true);
+  rmSync(cwd, { recursive: true, force: true });
   rmSync(dbPath, { force: true });
   rmSync(`${dbPath}-wal`, { force: true });
   rmSync(`${dbPath}-shm`, { force: true });

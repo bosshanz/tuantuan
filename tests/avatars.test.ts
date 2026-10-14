@@ -1,6 +1,7 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { AVATAR_COLORS, AVATAR_SHAPES, defaultAvatar, LEGACY_AVATAR_COLORS } from "../server/avatars";
-import { Store } from "../server/store";
+import { MIGRATIONS, Store } from "../server/store";
 
 describe("default agent avatars", () => {
   test("are deterministic per id and always valid", () => {
@@ -26,11 +27,12 @@ describe("palette migration", () => {
   });
   test("migration 5 recolours paper & ink defaults and leaves custom colours alone", () => {
     const path = `/tmp/tt-palette-${Date.now()}.db`;
-    const s1 = new Store(path);
-    s1.db.exec(
+    const s1 = new Database(path);
+    for (const m of MIGRATIONS.slice(0, 4)) s1.exec(m);
+    s1.exec(
       "INSERT INTO agents (id,name,color,avatar,system_prompt,tools,skills,model_mode,pinned_model,created_at,updated_at,avatar_shape) VALUES ('a','A','#2F4A6D','A','','[]','[]','auto',NULL,0,0,'orb'),('b','B','#123456','B','','[]','[]','auto',NULL,0,0,'orb'); PRAGMA user_version = 4",
     );
-    s1.db.close();
+    s1.close();
     const s2 = new Store(path);
     const rows = s2.db.query("SELECT id, color FROM agents ORDER BY id").all();
     expect(rows).toEqual([

@@ -2,9 +2,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { serve } from "../server/app";
 import { DeviceHub, type DeviceSocket } from "../server/device";
 import { ROBOT_ACTIONS, ROBOT_EXPRESSIONS } from "../server/device-protocol";
-import { mockRobotCue } from "../server/mock";
 import { Store } from "../server/store";
-import { testConfig } from "./helpers";
+import { agentInput as baseAgent } from "./helpers";
 
 const caps = { expressions: [...ROBOT_EXPRESSIONS], actions: [...ROBOT_ACTIONS], asr: false, tts: false };
 
@@ -18,18 +17,7 @@ function fakeSocket() {
   return { socket, sent, closed };
 }
 
-function agentInput(name: string) {
-  return {
-    name,
-    color: "#000000",
-    avatar: "R",
-    systemPrompt: "",
-    tools: [],
-    skills: [],
-    modelMode: "auto" as const,
-    pinnedModel: null,
-  };
-}
+const agentInput = (name: string) => baseAgent(name, { avatar: "R" });
 
 describe("device protocol (unit)", () => {
   const store = new Store(":memory:");
@@ -121,28 +109,20 @@ describe("device protocol (unit)", () => {
     const hub = new DeviceHub(store);
     expect(hub.controlFor(store.createRoom("g", "group", []).id)).toBeNull();
   });
-
-  test("mock robot cues are deterministic", () => {
-    expect(mockRobotCue("你好呀")).toEqual({ expression: "happy", action: "wave" });
-    expect(mockRobotCue("跳个舞吧，跳舞")).toEqual({ expression: "happy", action: "dance" });
-    expect(mockRobotCue("今天好难过")).toEqual({ expression: "sad", action: "shake_head" });
-    expect(mockRobotCue("真的吗？")).toEqual({ expression: "surprised", action: "tilt" });
-    expect(mockRobotCue("讲个故事")).toEqual({ expression: "happy", action: "nod" });
-  });
 });
 
-describe("device channel over WebSocket (integration, mock provider)", () => {
+describe("device channel over WebSocket (integration, mock ACP harness)", () => {
   const { app, server } = serve(
     {
-      config: testConfig(),
-      configSource: "test",
-      skills: { skills: [], errors: [] },
       dbPath: ":memory:",
       deviceAckTimeoutMs: 200,
     },
     0,
   );
-  afterAll(() => server.stop(true));
+  afterAll(() => {
+    app.host.shutdown();
+    server.stop(true);
+  });
   const agent = app.store.createAgent(agentInput("小机"));
 
   async function connect(autoAck = true) {
@@ -167,7 +147,7 @@ describe("device channel over WebSocket (integration, mock provider)", () => {
     return { ws, inbox, until, send: (m: unknown) => ws.send(JSON.stringify(m)) };
   }
 
-  test("utterance → accepted, thinking, expression+action, streamed reply, idle; persisted as a DM", async () => {
+  test("utterance → accepted, thinking, streamed reply, idle; persisted as a DM", async () => {
     const d = await connect();
     d.send({
       type: "hello",
@@ -186,8 +166,6 @@ describe("device channel over WebSocket (integration, mock provider)", () => {
     const types = d.inbox.map((m) => m.type);
     const order = (t: string) => types.indexOf(t);
     expect(order("session.state")).toBeLessThan(order("utterance.accepted") + 1);
-    expect(d.inbox.find((m) => m.type === "expression")).toMatchObject({ name: "happy" });
-    expect(d.inbox.find((m) => m.type === "action")).toMatchObject({ name: "wave" });
     expect(d.inbox.some((m) => m.type === "session.state" && m.state === "thinking")).toBe(true);
     expect(d.inbox.some((m) => m.type === "session.state" && m.state === "replying")).toBe(true);
     const deltas = d.inbox
@@ -196,20 +174,16 @@ describe("device channel over WebSocket (integration, mock provider)", () => {
       .join("");
     expect(end).toMatchObject({ status: "done", error: null });
     expect(deltas).toBe(end.text as string);
-    expect(order("action")).toBeLessThan(order("reply.delta"));
+    expect(deltas).toContain("收到：「你好，小机」");
     const seqs = d.inbox.map((m) => m.seq as number);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
 
     const { messages } = (await (
       await fetch(`http://localhost:${server.port}/api/rooms/${welcome.roomId}/messages`)
     ).json()) as {
-      messages: { senderName: string; toolCalls: { name: string; status: string; result?: string }[] }[];
+      messages: { senderName: string }[];
     };
     expect(messages.map((m) => m.senderName)).toEqual(["Andy", "小机"]);
-    expect(messages[1]?.toolCalls.map((t) => [t.name, t.status])).toEqual([
-      ["robot_express", "ok"],
-      ["robot_action", "ok"],
-    ]);
     const rooms = (await (await fetch(`http://localhost:${server.port}/api/rooms`)).json()) as {
       id: string;
       deviceId: string;
@@ -218,32 +192,18 @@ describe("device channel over WebSocket (integration, mock provider)", () => {
     d.ws.close();
   });
 
-  test("a device that never acks makes the tool fail truthfully, the reply still completes", async () => {
-    const d = await connect(false);
-    d.send({ type: "hello", protocol: 1, deviceId: "robot-mute", agentId: agent.id, capabilities: caps });
-    await d.until((m) => m.type === "welcome");
-    d.send({ type: "utterance", id: "u1", text: "讲个故事" });
-    const end = await d.until((m) => m.type === "reply.end");
-    expect(end.status).toBe("done");
-    const msg = app.store.getMessage(end.messageId as string);
-    expect(msg?.toolCalls.map((t) => t.status)).toEqual(["error", "error"]);
-    expect(msg?.toolCalls[0]?.error).toContain("未确认");
-    d.ws.close();
-  });
-
   test("interrupt cancels the reply; barge-in utterance supersedes the running one", async () => {
     const d = await connect();
     d.send({ type: "hello", protocol: 1, deviceId: "robot-2", agentId: agent.id, capabilities: caps });
     await d.until((m) => m.type === "welcome");
-    process.env.MOCK_CHUNK_DELAY_MS = "30";
-    try {
-      d.send({ type: "utterance", id: "u1", text: "请讲一个很长很长很长很长很长很长的故事" });
+    {
+      d.send({ type: "utterance", id: "u1", text: "/slow 讲个很长的故事" });
       await d.until((m) => m.type === "reply.delta");
       d.send({ type: "interrupt" });
       expect(await d.until((m) => m.type === "interrupt.result")).toMatchObject({ cancelled: true });
       expect(await d.until((m) => m.type === "reply.end")).toMatchObject({ status: "cancelled" });
 
-      d.send({ type: "utterance", id: "u2", text: "第二个很长很长很长很长很长很长的问题" });
+      d.send({ type: "utterance", id: "u2", text: "/slow 第二个问题" });
       await d.until((m) => m.type === "reply.start" && d.inbox.filter((x) => x.type === "reply.start").length === 2);
       await d.until((m) => m.type === "reply.delta" && d.inbox.filter((x) => x.type === "reply.end").length === 1);
       d.send({ type: "utterance", id: "u3", text: "算了，换个话题" });
@@ -252,8 +212,6 @@ describe("device channel over WebSocket (integration, mock provider)", () => {
         return d.inbox.filter((x) => x.type === "reply.end").map((x) => x.status);
       };
       expect(await ends()).toEqual(["cancelled", "cancelled", "done"]);
-    } finally {
-      process.env.MOCK_CHUNK_DELAY_MS = "0";
     }
     d.ws.close();
   });

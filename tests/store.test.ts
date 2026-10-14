@@ -1,8 +1,10 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Store } from "../server/store";
+import { MIGRATIONS, Store } from "../server/store";
+import { agentInput } from "./helpers";
 
 describe("Store", () => {
   test("migrations are idempotent and a restart marks in-flight replies as interrupted", () => {
@@ -23,18 +25,43 @@ describe("Store", () => {
       s1.db.close();
       const s2 = new Store(path);
       expect(s2.getMessage(m.id)).toMatchObject({ status: "interrupted", error: "服务重启，回复中断" });
-      expect(s2.db.query("PRAGMA user_version").get()).toEqual({ user_version: 5 });
+      expect(s2.db.query("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
       s2.db.close();
     } finally {
       for (const f of [path, `${path}-wal`, `${path}-shm`]) rmSync(f, { force: true });
     }
   });
 
-  test("pinned_model must be set exactly when mode is pinned (DB CHECK)", () => {
+  test("migration 6: system prompt becomes the identity doc, MCP tool ids become servers, groups get a main agent", () => {
+    const path = join(tmpdir(), `agent-hub-m6-${Date.now()}.db`);
+    try {
+      const db = new Database(path);
+      for (const m of MIGRATIONS.slice(0, 5)) db.exec(m);
+      db.exec("PRAGMA user_version = 5");
+      db.exec(`INSERT INTO mcp_servers VALUES ('srv1','s','http://x',0);
+        INSERT INTO agents (id,name,color,avatar,system_prompt,tools,skills,model_mode,pinned_model,created_at,updated_at,avatar_shape)
+        VALUES ('a1','A','#000000','A','你是测试员','["builtin:calculator","mcp:srv1:search","mcp:srv1:fetch"]','[]','auto',NULL,0,0,'orb'),
+               ('a2','B','#000000','B','','[]','[]','auto',NULL,1,1,'orb');
+        INSERT INTO rooms VALUES ('g','群','group',0); INSERT INTO room_agents VALUES ('g','a2'),('g','a1');`);
+      db.close();
+      const s = new Store(path);
+      expect(s.getAgent("a1")).toMatchObject({ identity: "你是测试员", harness: "", mcpServerIds: ["srv1"] });
+      expect(s.getAgent("a2")?.mcpServerIds).toEqual([]);
+      expect(s.getRoom("g")).toMatchObject({ mainAgentId: "a2", cwd: "" });
+      s.db.close();
+    } finally {
+      for (const f of [path, `${path}-wal`, `${path}-shm`]) rmSync(f, { force: true });
+    }
+  });
+
+  test("group main agent must be a member and follows membership changes", () => {
     const s = new Store(":memory:");
-    expect(() =>
-      s.db.query("INSERT INTO agents VALUES ('a','n','#000000','x','', '[]','[]','pinned',NULL,0,0,'orb')").run(),
-    ).toThrow("CHECK");
+    const a = s.createAgent(agentInput("A"));
+    const b = s.createAgent(agentInput("B"));
+    const g = s.createRoom("g", "group", [a.id, b.id], { mainAgentId: b.id });
+    expect(g.mainAgentId).toBe(b.id);
+    expect(s.updateGroup(g.id, { mainAgentId: "nope" }).mainAgentId).toBe(a.id);
+    expect(s.setRoomAgents(g.id, [b.id]).mainAgentId).toBe(b.id);
   });
 
   test("message seq is per room and monotonic", () => {
@@ -58,35 +85,25 @@ describe("Store", () => {
   test("browser robot sessions collapse to one shared device: empty ones dropped, newest kept per agent", () => {
     const path = join(tmpdir(), `agent-hub-robot-${Date.now()}.db`);
     try {
-      const s1 = new Store(path);
-      const agent = s1.createAgent({
-        name: "R",
-        color: "#000000",
-        avatar: "R",
-        systemPrompt: "",
-        tools: [],
-        skills: [],
-        modelMode: "auto",
-        pinnedModel: null,
-      });
-      const old = s1.deviceRoom("web-robot-aaaa1111", agent);
-      s1.insertMessage({
-        roomId: old.id,
-        runId: "x",
-        hop: 0,
-        senderKind: "human",
-        senderId: null,
-        senderName: "me",
-        content: "hi",
-        status: "done",
-      });
-      const empty = s1.deviceRoom("web-robot-bbbb2222", agent);
-      s1.db.exec("UPDATE device_sessions SET created_at = 1 WHERE room_id = '" + old.id + "'");
-      s1.db.exec("ALTER TABLE agents DROP COLUMN avatar_shape; PRAGMA user_version = 2");
-      s1.db.close();
+      // Build a version-2 database (before avatar shapes) holding two browser-robot rooms.
+      const db = new Database(path);
+      for (const m of MIGRATIONS.slice(0, 2)) db.exec(m);
+      db.exec(`PRAGMA user_version = 2;
+        INSERT INTO agents (id,name,color,avatar,system_prompt,tools,skills,model_mode,pinned_model,created_at,updated_at)
+          VALUES ('r','R','#000000','R','','[]','[]','auto',NULL,0,0);
+        INSERT INTO rooms VALUES ('old','桌面机器人 · R','dm',0), ('empty','桌面机器人 · R','dm',2);
+        INSERT INTO room_agents VALUES ('old','r'), ('empty','r');
+        INSERT INTO device_sessions VALUES ('web-robot-aaaa1111','r','old',1), ('web-robot-bbbb2222','r','empty',2);
+        INSERT INTO messages (id,room_id,seq,run_id,hop,sender_kind,sender_id,sender_name,content,status,created_at)
+          VALUES ('m','old',1,'m',0,'human',NULL,'me','hi','done',0);`);
+      db.close();
+      const old = { id: "old" };
+      const empty = { id: "empty" };
       const s2 = new Store(path);
       expect(s2.getRoom(empty.id)).toBeFalsy();
-      expect(s2.deviceRoom("web-robot", agent).id).toBe(old.id);
+      expect(s2.deviceRoom("web-robot", s2.getAgent("r") as NonNullable<ReturnType<Store["getAgent"]>>).id).toBe(
+        old.id,
+      );
       s2.db.close();
     } finally {
       for (const f of [path, `${path}-wal`, `${path}-shm`]) rmSync(f, { force: true });
