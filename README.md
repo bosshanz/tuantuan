@@ -44,7 +44,10 @@ cp .env.example .env                                     # 填入对应的 API K
 
 `config/providers.json` 结构：
 
-- `providers`：`{ id, type: "openai", baseUrl, apiKeyEnv }`，Key 只通过环境变量名引用，文件里不放密钥；`type: "mock"` 为内置模型。
+- `providers`：`{ id, type: "openai", baseUrl?, baseUrlEnv?, apiKeyEnv }`，Key 只通过环境变量名引用，文件里不放密钥；`type: "mock"` 为内置模型。
+  - 地址解析顺序：`baseUrlEnv` 指向的环境变量非空时用它（必须是合法 http(s) URL，否则启动报错并指出变量名）→ 否则用 `baseUrl` → 两者都没有则启动报错并指出 provider。
+  - 示例配置里每个 provider 都有 `*_BASE_URL`，所以日常只需改 `.env`；newapi 没有默认地址，必须填 `NEWAPI_BASE_URL`（不用的话从 providers.json 删掉它）。
+  - 启动日志会列出所用配置文件，以及每个 provider 的地址来源和 Key 是否已设置。没有 providers.json 时只用内置 mock，`.env` 里的 Key 不会生效（不会自动套用示例配置）。
 - `models`：`{ id, provider, model, tags, costTier, contextWindow }`。`tags` 取值 `chat | coding | reasoning | long_context | tool_heavy | vision`；`costTier` 1（最便宜）~ 3（最强）。
 - `router.classifierModel`：用于任务分类的便宜模型；省略则只用规则分类。`router.minTier`：各难度优先的最低成本档。
 - `limits`：`maxAgentHops`（每条人类消息最多的 Agent 互相 @ 次数，默认 5）、`maxToolIterations`（默认 6）、`contextMessages` / `contextChars`（上下文窗口）。

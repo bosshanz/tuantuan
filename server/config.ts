@@ -18,7 +18,10 @@ const ProviderSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
     type: z.literal("openai"),
-    baseUrl: z.string().url(),
+    /** Fallback URL; used when baseUrlEnv is absent or that env var is empty. */
+    baseUrl: z.string().url().optional(),
+    /** Env var name whose non-empty value overrides baseUrl, so URLs can live in .env. */
+    baseUrlEnv: z.string().optional(),
     apiKeyEnv: z.string(),
   }),
 ]);
@@ -56,9 +59,30 @@ const ConfigSchema = z.object({
     .default({ maxAgentHops: 5, maxToolIterations: 6, contextMessages: 30, contextChars: 24000 }),
 });
 
-export type ProviderConfig = z.infer<typeof ProviderSchema>;
+/** After parseConfig, every openai provider has a resolved baseUrl. */
+export type ProviderConfig =
+  | { id: string; type: "mock" }
+  | { id: string; type: "openai"; baseUrl: string; baseUrlEnv?: string; apiKeyEnv: string };
 export type ModelConfig = z.infer<typeof ModelSchema>;
-export type AppConfig = z.infer<typeof ConfigSchema>;
+export type AppConfig = Omit<z.infer<typeof ConfigSchema>, "providers"> & { providers: ProviderConfig[] };
+
+type Env = Record<string, string | undefined>;
+
+/** baseUrlEnv (if set and non-empty) > baseUrl > config error. */
+export function resolveBaseUrl(p: { id: string; baseUrl?: string; baseUrlEnv?: string }, env: Env): string {
+  const fromEnv = p.baseUrlEnv ? env[p.baseUrlEnv]?.trim() : undefined;
+  if (fromEnv) {
+    if (!URL.canParse(fromEnv) || !/^https?:$/.test(new URL(fromEnv).protocol))
+      throw new Error(`环境变量 ${p.baseUrlEnv} 不是合法的 http(s) URL: ${fromEnv}`);
+    return fromEnv;
+  }
+  if (p.baseUrl) return p.baseUrl;
+  throw new Error(
+    p.baseUrlEnv
+      ? `provider ${p.id} 缺少 baseUrl：请在 .env 设置 ${p.baseUrlEnv}，或在配置文件中填写 baseUrl`
+      : `provider ${p.id} 缺少 baseUrl（或 baseUrlEnv）`,
+  );
+}
 
 /** Used when no config file exists: everything runs on the deterministic mock provider. */
 export const MOCK_CONFIG: AppConfig = {
@@ -93,8 +117,12 @@ export const MOCK_CONFIG: AppConfig = {
   limits: { maxAgentHops: 5, maxToolIterations: 6, contextMessages: 30, contextChars: 24000 },
 };
 
-export function parseConfig(raw: unknown): AppConfig {
-  const config = ConfigSchema.parse(raw);
+export function parseConfig(raw: unknown, env: Env = process.env): AppConfig {
+  const parsed = ConfigSchema.parse(raw);
+  const config: AppConfig = {
+    ...parsed,
+    providers: parsed.providers.map((p) => (p.type === "openai" ? { ...p, baseUrl: resolveBaseUrl(p, env) } : p)),
+  };
   const providerIds = new Set(config.providers.map((p) => p.id));
   const modelIds = new Set<string>();
   for (const m of config.models) {
@@ -114,6 +142,16 @@ export function loadConfig(path = process.env.AGENT_HUB_CONFIG ?? "config/provid
   const abs = resolve(path);
   if (!existsSync(abs)) return { config: MOCK_CONFIG, source: "builtin-mock" };
   return { config: parseConfig(JSON.parse(readFileSync(abs, "utf8"))), source: abs };
+}
+
+/** One line per provider for the startup log: where its URL came from and whether its key is set. */
+export function describeProviders(config: AppConfig, env: Env = process.env): string[] {
+  return config.providers.map((p) => {
+    if (p.type === "mock") return `  ${p.id}: 内置 mock`;
+    const urlSrc = p.baseUrlEnv && env[p.baseUrlEnv]?.trim() ? p.baseUrlEnv : "配置文件 baseUrl";
+    const key = env[p.apiKeyEnv] ? "Key 已设置" : `缺少 ${p.apiKeyEnv}（调用会失败）`;
+    return `  ${p.id}: ${p.baseUrl}（来自 ${urlSrc}）· ${key}`;
+  });
 }
 
 export function resolveApiKey(provider: ProviderConfig): string {

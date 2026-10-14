@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { serve } from "./app";
-import { loadConfig } from "./config";
+import { describeProviders, loadConfig } from "./config";
 import { loadSkills } from "./skills";
 
 const { config, source } = loadConfig();
@@ -14,6 +14,11 @@ const { server } = serve(
 
 console.log(
   `agent-hub API 已启动: http://localhost:${server.port}  (配置: ${source}, 模型 ${config.models.length} 个)`,
+);
+console.log(
+  source === "builtin-mock"
+    ? `未找到配置文件 ${process.env.AGENT_HUB_CONFIG ?? "config/providers.json"}，使用内置 mock（.env 里的 Key/URL 不会生效）`
+    : `Providers:\n${describeProviders(config).join("\n")}`,
 );
 console.log(`Skills: ${skills.skills.map((s) => s.name).join(", ") || "无"}`);
 for (const e of skills.errors) console.warn(`Skill 加载失败 ${e.dir}: ${e.error}`);

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { classifyByRules } from "../server/classify";
-import { type AppConfig, MOCK_CONFIG, parseConfig } from "../server/config";
+import { type AppConfig, describeProviders, MOCK_CONFIG, parseConfig } from "../server/config";
 import { ProviderError } from "../server/llm";
 import {
   type Attempt,
@@ -152,5 +152,51 @@ describe("config validation", () => {
       models: [{ id: "a", provider: "mock", model: "a", tags: ["chat"], costTier: 1, contextWindow: 1000 }],
     });
     expect(c.limits.maxAgentHops).toBe(5);
+  });
+});
+
+describe("provider baseUrl resolution", () => {
+  const cfg = (p: Record<string, unknown>) => ({
+    providers: [{ id: "p", type: "openai", apiKeyEnv: "K", ...p }],
+    models: [{ id: "p/m", provider: "p", model: "m", tags: ["chat"], costTier: 1, contextWindow: 1000 }],
+  });
+  const url = (c: AppConfig) => (c.providers[0] as { baseUrl: string }).baseUrl;
+
+  test("env var wins over baseUrl when non-empty", () => {
+    const c = parseConfig(cfg({ baseUrl: "https://default.example/v1", baseUrlEnv: "P_URL" }), {
+      P_URL: "https://override.example/v1",
+    });
+    expect(url(c)).toBe("https://override.example/v1");
+  });
+  test("empty or unset env var falls back to baseUrl", () => {
+    const raw = cfg({ baseUrl: "https://default.example/v1", baseUrlEnv: "P_URL" });
+    expect(url(parseConfig(raw, { P_URL: "  " }))).toBe("https://default.example/v1");
+    expect(url(parseConfig(raw, {}))).toBe("https://default.example/v1");
+  });
+  test("baseUrlEnv alone is enough when set", () => {
+    expect(url(parseConfig(cfg({ baseUrlEnv: "P_URL" }), { P_URL: "http://localhost:3000/v1" }))).toBe(
+      "http://localhost:3000/v1",
+    );
+  });
+  test("invalid env URL fails naming the variable", () => {
+    expect(() =>
+      parseConfig(cfg({ baseUrl: "https://d.example", baseUrlEnv: "P_URL" }), { P_URL: "not a url" }),
+    ).toThrow("环境变量 P_URL 不是合法的 http(s) URL");
+    expect(() => parseConfig(cfg({ baseUrlEnv: "P_URL" }), { P_URL: "ftp://x.example" })).toThrow("P_URL");
+  });
+  test("neither source fails naming the provider", () => {
+    expect(() => parseConfig(cfg({ baseUrlEnv: "P_URL" }), {})).toThrow(
+      "provider p 缺少 baseUrl：请在 .env 设置 P_URL",
+    );
+    expect(() => parseConfig(cfg({}), {})).toThrow("provider p 缺少 baseUrl");
+  });
+  test("example config: newapi requires NEWAPI_BASE_URL, others fall back to official defaults", async () => {
+    const example = await Bun.file("config/providers.example.json").json();
+    expect(() => parseConfig(example, {})).toThrow("NEWAPI_BASE_URL");
+    const c = parseConfig(example, { NEWAPI_BASE_URL: "https://relay.example/v1" });
+    const byId = Object.fromEntries(c.providers.map((p) => [p.id, p]));
+    expect((byId.newapi as { baseUrl: string }).baseUrl).toBe("https://relay.example/v1");
+    expect((byId.deepseek as { baseUrl: string }).baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(describeProviders(c, { DEEPSEEK_API_KEY: "x" }).join("\n")).toContain("缺少 ARK_API_KEY");
   });
 });
