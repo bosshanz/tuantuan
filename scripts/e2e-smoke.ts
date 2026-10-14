@@ -61,6 +61,55 @@ try {
   await page.locator(".msg .tool", { hasText: "calculator" }).filter({ hasText: "成功" }).first().waitFor();
   await page.getByText("工具返回：42").waitFor();
 
+  // Alignment: one header line across columns, shared left edges, no header collisions.
+  await page.getByRole("heading", { name: "回复详情" }).waitFor();
+  const issues = await page.evaluate(() => {
+    const out: string[] = [];
+    const r = (el: Element | null) => el?.getBoundingClientRect();
+    const near = (a: number, b: number, what: string) => Math.abs(a - b) > 0.5 && out.push(`${what}: ${a} vs ${b}`);
+    const heads = [".pane-head", ".main-head", ".details-head"].map((s) => [s, r(document.querySelector(s))] as const);
+    for (const [s, b] of heads) {
+      if (!b) out.push(`missing ${s}`);
+      else {
+        near(b.height, 56, `${s} height`);
+        near(b.top, 0, `${s} top`);
+      }
+    }
+    const logo = r(document.querySelector(".rail .logo"));
+    if (logo) near(logo.top + logo.height / 2, 28, "rail logo centred on header line");
+    const details = r(document.querySelector(".details"));
+    for (const b of document.querySelectorAll(".main-head button")) {
+      const x = b.getBoundingClientRect();
+      if (details && x.width && x.right > details.left) out.push("chat header control overlaps the details panel");
+    }
+    const left = (el: Element | null) => {
+      if (!el) return Number.NaN;
+      return el.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(el).paddingLeft);
+    };
+    const edge = r(document.querySelector(".pane-head h1"))?.left ?? Number.NaN;
+    near(r(document.querySelector(".pane-search .input"))?.left ?? Number.NaN, edge, "search box left edge");
+    near(left(document.querySelector(".group-label")), edge, "section label left edge");
+    near(left(document.querySelector(".list-item")), edge, "list item left edge");
+    for (const g of document.querySelectorAll(".msg-group")) {
+      const text = r(g.querySelector(".msg"))?.left ?? Number.NaN;
+      near(r(g.querySelector(".msg-head"))?.left ?? text, text, "message name vs body");
+      for (const s of [".msg-meta", ".handoff", ".tool-list"])
+        for (const el of g.querySelectorAll(s)) near(el.getBoundingClientRect().left, text, `${s} vs body`);
+    }
+    const firstAvatar = r(document.querySelector(".msg-group .avatar"));
+    if (firstAvatar)
+      near(
+        r(document.querySelector(".composer-box"))?.left ?? Number.NaN,
+        firstAvatar.left,
+        "composer vs avatar column",
+      );
+    const dts = [...document.querySelectorAll(".details .kv dt")].map((e) => e.getBoundingClientRect().left);
+    const dds = [...document.querySelectorAll(".details .kv dd")].map((e) => e.getBoundingClientRect().left);
+    if (new Set(dts).size > 1 || new Set(dds).size > 1) out.push("details label/value columns not aligned");
+    return out;
+  });
+  if (issues.length) throw new Error(`alignment: ${issues.join("; ")}`);
+
   // Virtual desktop robot via the text fallback (Web Speech is not available headless).
   await page.getByRole("button", { name: "机器人", exact: true }).click();
   await page.getByText("设备已连接").waitFor();
@@ -71,6 +120,13 @@ try {
   await page.locator(".turn.agent", { hasText: "我是 Bob" }).waitFor();
   await page.getByRole("button", { name: "会话", exact: true }).click();
   await page.locator(".li-title", { hasText: "桌面机器人 · Bob" }).waitFor();
+  // Re-opening the robot page must reuse the same session room, not add another one.
+  await page.getByRole("button", { name: "机器人", exact: true }).click();
+  await page.getByText("设备已连接").waitFor();
+  await page.getByRole("button", { name: "会话", exact: true }).click();
+  await page.locator(".li-title", { hasText: "桌面机器人 · Bob" }).waitFor();
+  const robotRooms = await page.locator(".li-title", { hasText: "桌面机器人 · Bob" }).count();
+  if (robotRooms !== 1) throw new Error(`expected 1 robot room for Bob, got ${robotRooms}`);
 
   await page.screenshot({ path: join(tmpdir(), "agent-hub-e2e.png"), fullPage: true });
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);

@@ -120,11 +120,12 @@ export class DeviceClient {
   }
 }
 
+/**
+ * The browser robot is one logical device for the whole hub, so every browser (and every fresh
+ * profile) reuses the same session room per agent instead of creating a new one each visit.
+ */
+export const WEB_ROBOT_ID = "web-robot";
+
 export function deviceId(): string {
-  let id = localStorage.getItem("agent-hub:device-id");
-  if (!id) {
-    id = `web-robot-${crypto.randomUUID().slice(0, 8)}`;
-    localStorage.setItem("agent-hub:device-id", id);
-  }
-  return id;
+  return WEB_ROBOT_ID;
 }

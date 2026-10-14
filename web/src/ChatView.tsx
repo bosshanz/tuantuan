@@ -192,19 +192,21 @@ export function ChatView(props: {
             <h2>{room.name}</h2>
             <div className="sub">{roomSubtitle(room, agents)}</div>
           </div>
-          <button
-            type="button"
-            className="btn ghost icon"
-            aria-pressed={panel}
-            aria-label={panel ? "收起详情面板" : "展开详情面板"}
-            title="详情面板"
-            onClick={() => {
-              setPanel((v) => !v);
-              setSelected(null);
-            }}
-          >
-            <PanelRight size={18} />
-          </button>
+          {!(panel && wide) && (
+            <button
+              type="button"
+              className="btn ghost icon"
+              aria-pressed={panel}
+              aria-label={panel ? "收起详情面板" : "展开详情面板"}
+              title="详情面板"
+              onClick={() => {
+                setPanel((v) => !v);
+                setSelected(null);
+              }}
+            >
+              <PanelRight size={18} />
+            </button>
+          )}
         </header>
 
         {loadError && (
@@ -315,13 +317,19 @@ export function ChatView(props: {
           )}
           <aside className="details" aria-label="详情面板">
             <div className="details-head">
+              {selectedMsg && (
+                <button
+                  type="button"
+                  className="btn ghost icon"
+                  aria-label="返回会话信息"
+                  title="返回会话信息"
+                  onClick={() => setSelected(null)}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+              )}
               <h3>{selectedMsg ? "回复详情" : "会话信息"}</h3>
-              <div style={{ display: "flex", gap: 4 }}>
-                {selectedMsg && (
-                  <button type="button" className="btn ghost sm" onClick={() => setSelected(null)}>
-                    会话信息
-                  </button>
-                )}
+              <div className="details-actions">
                 <button
                   type="button"
                   className="btn ghost icon"

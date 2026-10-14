@@ -654,3 +654,44 @@ html { overflow: hidden; }
 .shell { grid-template-rows: minmax(0, 1fr); }
 .list-pane, .main, .rail { min-height: 0; }
 .pane-head h1 { font-family: var(--display); font-size: 20px; font-weight: 600; }
+
+/* ================= alignment: 4px grid, one header line ================= */
+:root { --head-h: 56px; --gutter: 16px; }
+.main-head, .details-head, .pane-head { box-sizing: border-box; height: var(--head-h); min-height: var(--head-h); padding-top: 0; padding-bottom: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.main-head { padding: 0 var(--s5); gap: var(--s3); }
+.main-head .title { display: flex; flex-direction: column; justify-content: center; gap: 0; }
+.main-head h2 { line-height: 24px; }
+.main-head .sub { line-height: 16px; }
+.details-head { padding: 0 var(--s3) 0 var(--gutter); gap: var(--s1); justify-content: flex-start; }
+.details-head h3 { flex: 1; min-width: 0; font-family: var(--display); font-size: 16px; line-height: 24px; }
+.details-head .btn.icon:first-child { margin-left: -8px; }
+.details-actions { display: flex; align-items: center; gap: var(--s1); }
+.pane-head { padding: 0 var(--s3) 0 var(--gutter); }
+.pane-head h1 { line-height: 24px; }
+.rail { padding-top: 0; background-image: linear-gradient(var(--border), var(--border)); background-size: 100% 1px; background-position: 0 calc(var(--head-h) - 1px); background-repeat: no-repeat; }
+.rail .logo { width: 32px; height: 32px; margin: calc((var(--head-h) - 32px) / 2) 0 var(--s3); }
+/* list column: title, search box, section labels and item icons share one left edge */
+.pane-search { padding: var(--s3) var(--gutter) var(--s2); }
+.pane-search > svg { left: calc(var(--gutter) + 10px); top: calc(var(--s3) + 8.5px); }
+.pane-scroll { padding: 0 calc(var(--gutter) - 8px) var(--s3); }
+.group-label { padding: var(--s4) 8px var(--s1); line-height: 16px; }
+.list-item { padding: 8px; }
+/* details: label/value grid on shared baselines */
+.details-body { padding: var(--gutter); }
+.kv { grid-template-columns: 76px minmax(0, 1fr); row-gap: 8px; align-items: baseline; line-height: 20px; }
+.kv dd > * { line-height: 20px; }
+.kv dd svg, .tool summary svg, .trace svg, .btn svg, .rail-btn svg, .chip-btn svg, .rcpt svg, .handoff-label svg { flex-shrink: 0; vertical-align: middle; }
+.kv dd .row, .kv dd .attempt, .attempt { display: flex; align-items: center; gap: 6px; }
+.badge { line-height: 1; vertical-align: baseline; }
+kbd, kbd.combo { line-height: 1; vertical-align: middle; }
+.search-trigger kbd { margin-left: auto; }
+/* message column: name, body, cards, meta share the text left edge (avatar column 36 + gap 12) */
+.msg-group { column-gap: var(--s3); padding: var(--s2) var(--s5); }
+.msg-head { align-items: baseline; height: 24px; line-height: 24px; }
+.msg-group .avatar { margin-top: 0; }
+.handoff, .tool-list, .msg-meta, .msg-error { margin-left: 0; }
+.trace { margin-left: 0; padding-left: 0; }
+.composer { padding: 0 var(--s5) var(--s4); }
+.attempts li { line-height: 20px; } .attempts li svg { margin-top: 3.5px; }
+.kv dd.cand { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; row-gap: 0; line-height: 20px; }
+.kv dd.cand svg { margin: 0; }

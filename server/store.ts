@@ -69,6 +69,17 @@ const MIGRATIONS: string[] = [
      created_at INTEGER NOT NULL,
      PRIMARY KEY (device_id, agent_id)
    );`,
+  // The browser robot used to mint a random device id per browser profile, flooding the list with
+  // "桌面机器人" rooms. It now uses one shared id: drop the empty ones and adopt the newest per agent.
+  `DELETE FROM rooms WHERE id IN (
+     SELECT room_id FROM device_sessions
+     WHERE device_id LIKE 'web-robot-%' AND room_id NOT IN (SELECT DISTINCT room_id FROM messages));
+   DELETE FROM device_sessions WHERE room_id NOT IN (SELECT id FROM rooms);
+   UPDATE device_sessions SET device_id = 'web-robot'
+   WHERE device_id LIKE 'web-robot-%'
+     AND NOT EXISTS (SELECT 1 FROM device_sessions d0 WHERE d0.device_id = 'web-robot' AND d0.agent_id = device_sessions.agent_id)
+     AND created_at = (SELECT MAX(d2.created_at) FROM device_sessions d2
+                       WHERE d2.agent_id = device_sessions.agent_id AND d2.device_id LIKE 'web-robot-%');`,
 ];
 
 export interface Agent {
