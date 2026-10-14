@@ -327,7 +327,8 @@ export function SessionBar(props: {
   onMode: (modeId: string) => void;
 }) {
   const { view } = props;
-  const selects = view.configOptions.filter((o) => o.type === "select");
+  // The model option lives in the composer's ModelPicker.
+  const selects = view.configOptions.filter((o) => o.type === "select" && o.category !== "model" && o.id !== "model");
   const hasModeOption = view.configOptions.some((o) => o.category === "mode");
   const pct = view.usage && view.usage.size > 0 ? Math.min(100, (view.usage.used / view.usage.size) * 100) : null;
   return (

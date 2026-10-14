@@ -225,6 +225,52 @@ describe("projects", () => {
   });
 });
 
+describe("preferred model", () => {
+  test("session/new applies the conversation preference; setConfig persists it", async () => {
+    const a = await createAgent("ModelBot");
+    const r = await createRoom("m", [a.id]);
+    app.store.setRoomModel(r.id, a.id, "mock-smart");
+    const view = (await api<SessionView>("GET", `/api/rooms/${r.id}/agents/${a.id}/session`)).data;
+    const model = view.configOptions.find((o) => o.id === "model");
+    expect(model).toMatchObject({ type: "select", currentValue: "mock-smart" });
+    const next = (
+      await api<SessionView>("POST", `/api/rooms/${r.id}/agents/${a.id}/config`, {
+        configId: "model",
+        value: "mock-fast",
+      })
+    ).data;
+    expect(next.configOptions.find((o) => o.id === "model")).toMatchObject({ currentValue: "mock-fast" });
+    expect(app.store.getRoomModel(r.id, a.id)).toBe("mock-fast");
+    const msg = await say(r.id, "你好");
+    expect(msg.at(-1)?.content).toContain("mock-fast");
+  });
+
+  test("BYOK conversation can override the agent model", async () => {
+    const created = await api<Agent>("POST", "/api/agents", {
+      ...agentInput("BYOK-model"),
+      harness: "custom",
+      custom: {
+        format: "openai-chat",
+        baseUrl: "http://127.0.0.1:9",
+        model: "agent-default",
+        apiKey: "sk-x",
+      },
+    });
+    const byok = created.data;
+    const r = await createRoom("byok-model", [byok.id]);
+    const view = (await api<SessionView>("GET", `/api/rooms/${r.id}/agents/${byok.id}/session`)).data;
+    expect(view.customModel).toMatchObject({ value: byok.custom?.model, default: byok.custom?.model });
+    const next = (
+      await api<SessionView>("POST", `/api/rooms/${r.id}/agents/${byok.id}/config`, {
+        configId: "model",
+        value: "override-model",
+      })
+    ).data;
+    expect(next.customModel?.value).toBe("override-model");
+    expect(app.store.getRoomModel(r.id, byok.id)).toBe("override-model");
+  });
+});
+
 describe("ACP harness integration (mock ACP agent)", () => {
   let dmAgent: Agent;
   let dm: Room;
@@ -343,7 +389,7 @@ describe("ACP harness integration (mock ACP agent)", () => {
     ).data;
     expect(back.sessionId).toBe(first);
     app.host.shutdown();
-    expect((await say(dm.id, "重启后")).at(-1)?.content).toBe("收到：「重启后」（mock-fast）");
+    expect((await say(dm.id, "重启后")).at(-1)?.content).toBe("收到：「重启后」（mock-smart）");
   });
 
   test("group: no @ goes to the main agent, @ goes to the mentioned one, prompt carries what others said", async () => {

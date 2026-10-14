@@ -31,6 +31,7 @@ import {
 } from "./api";
 import { agentActivity, messageExpression } from "./avatarState";
 import { PermissionDialog, SessionBar, TimelineView } from "./Harness";
+import { ModelPicker, modelEntry } from "./ModelPicker";
 import { mergeMessages, upsertMessage } from "./messageMerge";
 import { usePresence } from "./motion";
 import { PickList } from "./PickList";
@@ -144,14 +145,19 @@ export function ChatView(props: {
     };
   }, [room.id, props.subscribeEvents]);
 
-  // Warm up the primary agent's session so pickers and slash commands are there before the first message.
+  // Warm up every member's session so the model picker and slash commands are there before the first message.
+  const warming = useRef(new Set<string>());
   useEffect(() => {
-    if (!primary?.harness || sessions[primary.id]) return;
-    api<SessionView>("GET", `/api/rooms/${room.id}/agents/${primary.id}/session`).then(
-      (v) => setSessions((s) => ({ ...s, [primary.id]: v })),
-      () => {}, // errors (not installed / login needed) surface when a message is sent
-    );
-  }, [room.id, primary?.id, primary?.harness, sessions]);
+    for (const a of members) {
+      const key = `${room.id}|${a.id}`;
+      if (!a.harness || sessions[a.id] || warming.current.has(key)) continue;
+      warming.current.add(key);
+      api<SessionView>("GET", `/api/rooms/${room.id}/agents/${a.id}/session`).then(
+        (v) => setSessions((s) => ({ ...s, [a.id]: v })),
+        () => {}, // errors (not installed / login needed) surface when a message is sent
+      );
+    }
+  }, [room.id, members, sessions]);
 
   // After switching to an older harness session, show what it replayed that this room doesn't have.
   const primarySession = primaryView?.sessionId ?? null;
@@ -220,6 +226,19 @@ export function ChatView(props: {
       setSendError((e as Error).message);
     }
   };
+
+  const pickModel = async (agentId: string, configId: string, value: string) => {
+    try {
+      const v = await api<SessionView>("POST", `/api/rooms/${room.id}/agents/${agentId}/config`, { configId, value });
+      setSessions((s) => ({ ...s, [agentId]: v }));
+    } catch (e) {
+      setSendError((e as Error).message);
+    }
+  };
+  const modelEntries = members.flatMap((a) => {
+    const e = modelEntry(a, sessions[a.id]);
+    return e ? [e] : [];
+  });
 
   const openDetails = (id: string) => {
     setSelected((cur) => (cur === id && panel ? null : id));
@@ -384,6 +403,7 @@ export function ChatView(props: {
             images={images}
             onImages={setImages}
             imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
+            modelPicker={<ModelPicker entries={modelEntries} primaryId={primary?.id ?? null} onPick={pickModel} />}
           />
         </footer>
       </div>
@@ -895,6 +915,7 @@ function Composer(props: {
   onImages: (imgs: ImageAttachment[]) => void;
   /** null = the harness does not take images (button hidden). */
   imageNote: string | null;
+  modelPicker?: React.ReactNode;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const addFiles = async (files: Iterable<File>) => {
@@ -1117,6 +1138,7 @@ function Composer(props: {
         ) : (
           <span className="grow" />
         )}
+        {props.modelPicker}
         <button
           type="button"
           className="send-btn"

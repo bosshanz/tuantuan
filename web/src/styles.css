@@ -945,3 +945,31 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .project-link .mono { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dir-preview { font-size: 12px; }
 @media (hover: none) { .project-head .btn.icon.xs { opacity: 1; } }
+
+/* Model picker (composer, next to send) */
+.model-picker { position: relative; flex-shrink: 0; }
+.model-trigger { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 220px; padding: 0 6px 0 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text-2); font-size: 12px; font-weight: 500; line-height: 1; transition: background 0.12s var(--ease), color 0.12s var(--ease), border-color 0.12s var(--ease); }
+.model-trigger:hover:not(:disabled), .model-trigger[data-open] { background: var(--surface-hover); color: var(--text); }
+.model-trigger[data-open] { border-color: var(--border); }
+.model-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.model-trigger:disabled { cursor: default; opacity: 0.8; }
+.model-trigger .brand-logo { flex: none; color: var(--text); }
+.model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-more { flex: none; padding: 0 5px; height: 16px; display: inline-flex; align-items: center; border-radius: 999px; background: var(--surface-2); color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+.model-chev { flex: none; color: var(--text-3); transition: transform 0.18s var(--ease); }
+.model-trigger[data-open] .model-chev { transform: rotate(180deg); }
+.model-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 30; width: 264px; max-height: 320px; overflow-y: auto; padding: 4px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-2); outline: none; transform-origin: bottom right; animation: t-pop-in 0.16s var(--ease); }
+.model-group + .model-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
+.model-group-head { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; font-size: 11px; font-weight: 600; color: var(--text-3); }
+.model-option { width: 100%; border: none; background: none; text-align: left;  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
+.model-option[data-active] { background: var(--surface-hover); }
+.model-option .brand-logo { flex: none; color: var(--text-2); }
+.model-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-tag { flex: none; font-size: 10px; color: var(--text-3); }
+.model-check { flex: none; color: var(--accent); opacity: 0; transition: opacity 0.12s; }
+.model-option[aria-selected="true"] .model-check { opacity: 1; }
+.model-option[aria-selected="true"] .model-option-name { font-weight: 600; }
+.model-empty { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; font-size: 12px; color: var(--text-3); }
+.model-free { padding: 4px 4px 2px; }
+.model-free .input { height: 30px; font-size: 12px; font-family: var(--mono); }
+@media (prefers-reduced-motion: reduce) { .model-menu { animation: none; } .model-chev { transition: none; } }

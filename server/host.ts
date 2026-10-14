@@ -22,6 +22,8 @@ export interface SessionView {
   skills: { name: string; description: string }[];
   usage: { used: number; size: number; cost?: { amount: number; currency: string } | null } | null;
   title: string | null;
+  /** BYOK only: model for this conversation (free text) and the agent's default. */
+  customModel?: { value: string; default: string } | null;
   capabilities: {
     image: boolean;
     loadSession: boolean;
@@ -312,6 +314,7 @@ export class HarnessHost {
         slot.replaying = false;
       }
     }
+    let fresh = false;
     if (!view.sessionId) {
       let created: acp.NewSessionResponse;
       try {
@@ -328,9 +331,27 @@ export class HarnessHost {
       slot.identityPending = proc.spec.identity === "first-prompt" && identity.trim() !== "";
       this.store.setAcpSession(room.id, agent.id, proc.spec.id, created.sessionId);
       res = created;
+      fresh = true;
     }
     view.configOptions = res?.configOptions ?? [];
     view.modes = res?.modes ?? null;
+    // Conversation preference is applied on a brand-new session (ACP has no model field on session/new).
+    if (fresh) {
+      const want = this.store.getRoomModel(room.id, agent.id);
+      const opt = modelOption(view.configOptions);
+      if (want && opt && opt.currentValue !== want && selectValues(opt).includes(want)) {
+        try {
+          const set = (await proc.acp.agent.request(methods.agent.session.setConfigOption, {
+            sessionId: view.sessionId as string,
+            configId: opt.id,
+            value: want,
+          } as acp.SetSessionConfigOptionRequest)) as acp.SetSessionConfigOptionResponse;
+          view.configOptions = set.configOptions;
+        } catch {
+          // keep the harness default; the picker shows what is actually active
+        }
+      }
+    }
     this.slots.set(slotKey, slot);
     this.events.session(room.id, agent.id, { ...view });
     return { proc, slot };
@@ -413,6 +434,10 @@ export class HarnessHost {
           skills: [...mat.skills, ...mat.roomSkills].map((x) => ({ name: x.name, description: x.description })),
           usage: null,
           title: null,
+          customModel: {
+            value: this.store.getRoomModel(room.id, agent.id) ?? agent.custom?.model ?? "",
+            default: agent.custom?.model ?? "",
+          },
           capabilities: { image: false, loadSession: false, list: false, resume: false },
         },
         turn: null,
@@ -423,6 +448,8 @@ export class HarnessHost {
       this.slots.set(key, slot);
       this.events.session(room.id, agent.id, { ...slot.view });
     }
+    const model = this.store.getRoomModel(room.id, agent.id) ?? agent.custom?.model ?? "";
+    slot.view.customModel = { value: model, default: agent.custom?.model ?? "" };
     return slot;
   }
 
@@ -447,8 +474,9 @@ export class HarnessHost {
     onUpdate: (u: acp.SessionUpdate) => void,
     signal: AbortSignal,
   ): Promise<{ stopReason: acp.StopReason }> {
-    const cfg = this.store.getCustomSecret(agent.id);
-    if (!cfg) throw new ValidationError("请先在 Agent 设置里填写自定义 API");
+    const saved = this.store.getCustomSecret(agent.id);
+    if (!saved) throw new ValidationError("请先在 Agent 设置里填写自定义 API");
+    const cfg = { ...saved, model: this.store.getRoomModel(room.id, agent.id) || saved.model };
     if (!cfg.apiKey) throw new ValidationError("请填写 API Key");
     this.ensureCustom(room, agent);
     const key = `${room.id}|${agent.id}`;
@@ -497,7 +525,15 @@ export class HarnessHost {
   }
 
   async setConfig(room: Room, agent: Agent, identity: string, configId: string, value: string | boolean) {
-    if (agent.harness === CUSTOM_HARNESS) throw new ValidationError("自定义 API 没有配置项");
+    if (agent.harness === CUSTOM_HARNESS) {
+      if (configId !== "model" || typeof value !== "string" || !value.trim())
+        throw new ValidationError("自定义 API 只能改模型");
+      const slot = this.ensureCustom(room, agent);
+      this.store.setRoomModel(room.id, agent.id, value.trim());
+      slot.view.customModel = { value: value.trim(), default: agent.custom?.model ?? "" };
+      this.events.session(room.id, agent.id, { ...slot.view });
+      return slot.view;
+    }
     const { proc, slot } = await this.session(room, agent, identity);
     const params =
       typeof value === "boolean"
@@ -508,6 +544,8 @@ export class HarnessHost {
       params as acp.SetSessionConfigOptionRequest,
     )) as acp.SetSessionConfigOptionResponse;
     slot.view.configOptions = res.configOptions;
+    const opt = modelOption(slot.view.configOptions);
+    if (opt && opt.id === configId && typeof value === "string") this.store.setRoomModel(room.id, agent.id, value);
     this.events.session(room.id, agent.id, { ...slot.view });
     return slot.view;
   }
@@ -581,4 +619,21 @@ function splitCommands(all: acp.AvailableCommand[]): {
     else commands.push(c);
   }
   return { commands, skills };
+}
+
+/** The harness's model picker, if it advertises one (ACP session config option, category "model"). */
+export function modelOption(opts: acp.SessionConfigOption[]): (acp.SessionConfigOption & { type: "select" }) | null {
+  const o = opts.find((x) => x.type === "select" && (x.category === "model" || x.id === "model"));
+  return (o as (acp.SessionConfigOption & { type: "select" }) | undefined) ?? null;
+}
+
+export function selectValues(o: acp.SessionConfigOption): string[] {
+  if (o.type !== "select") return [];
+  const out: string[] = [];
+  for (const x of o.options as unknown[]) {
+    const g = x as { options?: { value: string }[]; value?: string };
+    if (g.options) out.push(...g.options.map((y) => y.value));
+    else if (g.value !== undefined) out.push(g.value);
+  }
+  return out;
 }

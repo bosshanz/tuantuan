@@ -150,7 +150,12 @@ try {
   await pick("Bob").check();
   await shot("new-dm");
   await page.getByRole("button", { name: "创建会话" }).click();
-  await page.getByLabel("模型").waitFor(); // session config options (mode / model / reasoning)
+  await page.locator(".model-trigger").waitFor(); // composer model picker
+  await page.locator(".model-trigger").click();
+  await page.getByRole("option", { name: "Mock Smart" }).waitFor();
+  await shot("model-picker");
+  await page.getByRole("option", { name: "Mock Smart" }).click();
+  await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
   await input.fill("/pl");
   await page.locator(".slash-pop").getByText("/plan").waitFor();
   await input.press("Tab");
@@ -172,7 +177,7 @@ try {
   await page.locator(".term", { hasText: "hello from terminal" }).waitFor();
   await page.getByText("命令跑完了。").waitFor();
 
-  await page.getByLabel("模型").selectOption("mock-smart");
+  // Already switched to Mock Smart via the composer picker above; sending confirms the preference stuck.
   await input.fill("换模型了");
   await input.press("Enter");
   await page.getByText("收到：「换模型了」（mock-smart）").waitFor();

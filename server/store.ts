@@ -136,6 +136,13 @@ export const MIGRATIONS: string[] = [
      created_at INTEGER NOT NULL
    );
    ALTER TABLE rooms ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;`,
+  // Preferred model per conversation member (harness session/new + setConfigOption / BYOK override).
+  `CREATE TABLE room_models (
+     room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+     model TEXT NOT NULL,
+     PRIMARY KEY (room_id, agent_id)
+   );`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -566,6 +573,23 @@ export class Store {
       .query("SELECT * FROM messages WHERE room_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?")
       .all(roomId, beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as Row[];
     return rows.reverse().map(toMessage);
+  }
+
+  // ---- Preferred model per (room, agent) ----
+  getRoomModel(roomId: string, agentId: string): string | null {
+    const r = this.db
+      .query("SELECT model FROM room_models WHERE room_id = ? AND agent_id = ?")
+      .get(roomId, agentId) as Row | null;
+    return r ? (r.model as string) : null;
+  }
+
+  setRoomModel(roomId: string, agentId: string, model: string) {
+    this.db
+      .query(
+        `INSERT INTO room_models (room_id, agent_id, model) VALUES (?,?,?)
+         ON CONFLICT(room_id, agent_id) DO UPDATE SET model = excluded.model`,
+      )
+      .run(roomId, agentId, model);
   }
 
   // ---- ACP sessions: one per (room, agent) ----
