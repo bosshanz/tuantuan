@@ -28,7 +28,7 @@ export function CommandPalette(props: {
         key: `r${r.id}`,
         label: r.name,
         hint: r.deviceId ? "机器人会话" : r.kind === "dm" ? "私聊" : "群聊",
-        icon: <RoomIcon room={r} agents={props.agents} />,
+        icon: <RoomIcon room={r} agents={props.agents} size={24} />,
         path: `c/${r.id}`,
       })),
       ...props.agents.map((a) => ({
@@ -90,7 +90,7 @@ export function CommandPalette(props: {
               onMouseMove={() => setActive(i)}
               onClick={() => pick(it)}
             >
-              {it.icon}
+              <span className="pop-icon">{it.icon}</span>
               <span style={{ flex: 1 }}>{it.label}</span>
               <span className="muted" style={{ fontSize: 12 }}>
                 {it.hint}

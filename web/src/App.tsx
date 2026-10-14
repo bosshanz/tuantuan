@@ -253,7 +253,11 @@ export function App() {
               <Bot size={24} />
             </div>
             <h2>{agents.length ? "选择一个 Agent 进行编辑" : "创建你的第一个 Agent"}</h2>
-            <p>Agent = 系统 Prompt + 工具 + Skills + 模型策略。名称就是在群聊里 @ 它的方式。</p>
+            <p>
+              Agent 由系统 Prompt、工具、Skills 和模型策略组成。
+              <br />
+              在群聊里 @名称 即可召唤。
+            </p>
             <button type="button" className="btn primary" onClick={() => go("a/new")}>
               <Plus size={16} />
               新建 Agent
@@ -317,6 +321,8 @@ export function App() {
     </div>
   );
 }
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
 function RailButton(props: { icon: React.ReactNode; label: string; current: boolean; onClick: () => void }) {
   return (
@@ -396,18 +402,12 @@ function ListPane(props: { title: string; action: React.ReactNode; onSearch: () 
       </div>
       <div className="pane-search">
         <Search size={15} />
-        <button
-          type="button"
-          className="input"
-          style={{ textAlign: "left", color: "var(--text-3)", display: "flex", justifyContent: "space-between" }}
-          onClick={props.onSearch}
-        >
+        <button type="button" className="input search-trigger" onClick={props.onSearch}>
           搜索会话与 Agent
-          <span>
-            <kbd>
-              <Command size={10} />K
-            </kbd>
-          </span>
+          <kbd className="combo">
+            {IS_MAC ? <Command size={10} /> : <span>Ctrl</span>}
+            <span>K</span>
+          </kbd>
         </button>
       </div>
       <div className="pane-scroll">{props.children}</div>
@@ -482,7 +482,12 @@ function Welcome({
           {meta.configSource === "builtin-mock"
             ? "当前使用内置 mock 模型，无需 API Key"
             : `模型配置：${meta.configSource}`}{" "}
-          · 每条消息最多 {meta.limits.maxAgentHops} 次 Agent 互相 @ · <kbd>⌘K</kbd> 快速切换
+          · 每条消息最多 {meta.limits.maxAgentHops} 次 Agent 互相 @ ·{" "}
+          <kbd className="combo">
+            {IS_MAC ? "⌘" : <span>Ctrl</span>}
+            <span>K</span>
+          </kbd>{" "}
+          快速切换
         </p>
       )}
     </div>

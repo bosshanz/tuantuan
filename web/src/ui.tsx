@@ -19,6 +19,8 @@ hljs.registerAliases(["js", "jsx"], { languageName: "javascript" });
 hljs.registerAliases(["sh", "shell"], { languageName: "bash" });
 hljs.registerAliases(["py"], { languageName: "python" });
 
+const EMOJI = /\p{Extended_Pictographic}/u;
+
 export function AgentAvatar({
   agent,
   size = 32,
@@ -36,7 +38,11 @@ export function AgentAvatar({
     );
   }
   return (
-    <span className="avatar" style={{ background: agent.color, ["--size" as string]: `${size}px` }} aria-hidden>
+    <span
+      className={EMOJI.test(agent.avatar) ? "avatar emoji" : "avatar"}
+      style={{ background: agent.color, ["--size" as string]: `${size}px` }}
+      aria-hidden
+    >
       {agent.avatar}
     </span>
   );
@@ -50,7 +56,7 @@ export function HumanAvatar({ name, size = 32 }: { name: string; size?: number }
   );
 }
 
-export function RoomIcon({ room, agents }: { room: Room; agents: Agent[] }) {
+export function RoomIcon({ room, agents, size = 32 }: { room: Room; agents: Agent[]; size?: number }) {
   const members = room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
   if (room.deviceId)
     return (
@@ -58,7 +64,7 @@ export function RoomIcon({ room, agents }: { room: Room; agents: Agent[] }) {
         <Bot size={17} />
       </span>
     );
-  if (room.kind === "dm" && members[0]) return <AgentAvatar agent={members[0]} />;
+  if (room.kind === "dm" && members[0]) return <AgentAvatar agent={members[0]} size={size} />;
   return (
     <span className="room-icon" aria-hidden>
       <Hash size={16} />
