@@ -720,3 +720,43 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 .color-opt[aria-checked="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-2); }
 .color-opt { box-shadow: inset 0 0 0 1px var(--border); }
 .color-opt[aria-checked="true"] { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-2); }
+
+/* ---------- bot avatar expressions & motion (transform/opacity only) ---------- */
+.bot-avatar .ba-face line, .bot-avatar .ba-face path { stroke: var(--paper); stroke-width: 7.5; stroke-linecap: round; fill: none; }
+.bot-avatar .ba-face .ba-dot { fill: var(--paper); stroke: none; }
+.bot-avatar .ba-eyes line { stroke: var(--paper); }
+.bot-avatar .ba-root, .bot-avatar .ba-eyes, .bot-avatar .ba-look, .bot-avatar .ba-mouth, .bot-avatar .ba-body { transform-box: fill-box; transform-origin: 50% 50%; }
+.bot-avatar .ba-root { transform-origin: 50% 100%; }
+.bot-avatar[data-anim] .ba-eyes { animation: ba-blink 5.2s var(--blink-delay, 0s) infinite; }
+.bot-avatar[data-anim="full"] .ba-body { animation: ba-breathe 3.6s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="idle"] .ba-look { animation: ba-glance 9s calc(var(--blink-delay, 0s) * 2) ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-root { animation: ba-wobble 1.4s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-look { animation: ba-ponder 2.4s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="speaking"] .ba-talk { animation: ba-talk 0.28s ease-in-out infinite alternate; }
+.bot-avatar[data-anim="full"][data-expr="speaking"] .ba-body { animation: ba-pulse 0.56s ease-in-out infinite alternate; }
+.bot-avatar[data-anim="full"][data-expr="sad"] .ba-root { animation: ba-shake 0.42s ease-in-out 1; }
+.bot-avatar[data-anim="full"][data-expr="happy"] .ba-root { animation: ba-hop 0.5s var(--ease) 1; }
+.bot-avatar[data-anim="full"] .ba-root[data-hop] { animation: ba-hop 0.5s var(--ease) 1; }
+.bot-avatar[data-anim="full"][data-expr="sleepy"] .ba-body { animation: ba-breathe 6s ease-in-out infinite; }
+.bot-avatar[data-expr="sleepy"] .ba-eyes, .bot-avatar[data-expr="happy"] .ba-eyes { animation: none !important; }
+.bot-avatar[data-offscreen="true"] *, html[data-tab-hidden] .bot-avatar * { animation-play-state: paused !important; }
+@keyframes ba-blink { 0%, 93%, 100% { transform: scaleY(1); } 95.5% { transform: scaleY(0.1); } }
+@keyframes ba-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025, 0.985); } }
+@keyframes ba-glance { 0%, 40%, 100% { transform: translateX(0); } 46%, 58% { transform: translateX(4px); } 64%, 74% { transform: translateX(-3px); } }
+@keyframes ba-ponder { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(3px, -2px); } }
+@keyframes ba-wobble { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes ba-talk { from { transform: scaleY(0.45); } to { transform: scaleY(1.15); } }
+@keyframes ba-pulse { from { transform: scale(1); } to { transform: scale(1.03); } }
+@keyframes ba-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+@keyframes ba-hop { 0% { transform: scale(1, 1); } 25% { transform: scale(1.12, 0.86); } 55% { transform: translateY(-10%) scale(0.92, 1.1); } 80% { transform: translateY(0) scale(1.04, 0.96); } 100% { transform: scale(1, 1); } }
+@media (prefers-reduced-motion: reduce) { .bot-avatar * { animation: none !important; } }
+.showcase { height: 100%; overflow: auto; padding: var(--s6) var(--s8); }
+.showcase-head { display: flex; align-items: center; gap: var(--s4); margin-bottom: var(--s5); }
+.showcase-head h1 { margin: 0; font-size: 24px; }
+.showcase-head .seg { display: flex; gap: 4px; }
+.showcase-head .btn[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
+.showcase-grid { border-collapse: collapse; }
+.showcase-grid th { font-weight: 500; font-size: 12px; color: var(--text-3); padding: 4px 10px; text-align: center; }
+.showcase-grid tbody th { text-align: right; }
+.showcase-grid td { padding: 8px 14px; text-align: center; border-top: 1px solid var(--border); }
+.showcase-grid td svg { display: inline-block; }

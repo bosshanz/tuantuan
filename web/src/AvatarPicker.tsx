@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AVATAR_COLORS, AVATAR_SHAPES, type AvatarShape, SHAPE_LABEL } from "../../server/avatars";
+import { EXPRESSIONS, type Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
 
 /** Radio-group keyboard model: arrows move within the group, Tab leaves it. */
@@ -22,6 +23,15 @@ export function AvatarPicker(props: {
   onReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Hovering the preview cycles through the expressions so the choice is seen alive.
+  const [hover, setHover] = useState(false);
+  const [tick, setTick] = useState(0);
+  const [hoverShape, setHoverShape] = useState<AvatarShape | null>(null);
+  useEffect(() => {
+    if (!hover) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1400);
+    return () => clearInterval(t);
+  }, [hover]);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -51,8 +61,21 @@ export function AvatarPicker(props: {
         aria-label="编辑头像"
         title="编辑头像"
         onClick={() => setOpen((v) => !v)}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => {
+          setHover(false);
+          setTick(0);
+        }}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
       >
-        <BotAvatar shape={props.shape} color={props.color} size={56} />
+        <BotAvatar
+          shape={props.shape}
+          color={props.color}
+          size={56}
+          animate
+          expression={hover ? (EXPRESSIONS[tick % EXPRESSIONS.length] as Expression) : "idle"}
+        />
       </button>
       {open && (
         <div className="avatar-pop" role="dialog" aria-label="编辑头像">
@@ -74,8 +97,17 @@ export function AvatarPicker(props: {
                 tabIndex={props.shape === s ? 0 : -1}
                 className="shape-opt"
                 onClick={() => props.onChange(s, props.color)}
+                onMouseEnter={() => setHoverShape(s)}
+                onMouseLeave={() => setHoverShape(null)}
               >
-                <BotAvatar shape={s} color={props.color} size={36} />
+                <BotAvatar
+                  shape={s}
+                  color={props.color}
+                  size={36}
+                  animate={hoverShape === s}
+                  expression={hoverShape === s ? "happy" : "idle"}
+                  pulse={hoverShape === s ? s : undefined}
+                />
               </button>
             ))}
           </div>

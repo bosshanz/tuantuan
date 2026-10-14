@@ -4,6 +4,11 @@ import { App } from "./App";
 import "@fontsource-variable/newsreader/opsz.css";
 import "./styles.css";
 
+// Pause decorative avatar motion while the tab is hidden.
+const syncHidden = () => document.documentElement.toggleAttribute("data-tab-hidden", document.hidden);
+document.addEventListener("visibilitychange", syncHidden);
+syncHidden();
+
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <App />

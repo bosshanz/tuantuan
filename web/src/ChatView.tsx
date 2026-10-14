@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { type Agent, api, type Message, type Room, type RoomState, type RoutingDecision, type WsEvent } from "./api";
+import { agentActivity, messageExpression } from "./avatarState";
 import { PickList } from "./PickList";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
 
@@ -247,7 +248,7 @@ export function ChatView(props: {
             ) : (
               <div key={g.messages[0]?.id} className="msg-group">
                 {g.kind === "agent" ? (
-                  <AgentAvatar agent={agentById.get(g.senderId ?? "")} name={g.senderName} size={36} />
+                  <LiveAvatar agent={agentById.get(g.senderId ?? "")} name={g.senderName} last={g.messages.at(-1)} />
                 ) : (
                   <HumanAvatar name={g.senderName} size={36} />
                 )}
@@ -757,9 +758,10 @@ function RoomInfo(props: {
             {props.members.length === 0 && <p className="muted">没有 Agent 成员。</p>}
             {props.members.map((a) => {
               const n = replyCount.get(a.id) ?? 0;
+              const doing = agentActivity(a.id, props.messages);
               return (
                 <a key={a.id} className="member-row" href={`#/a/${a.id}`} title="编辑这个 Agent">
-                  <AgentAvatar agent={a} size={32} />
+                  <AgentAvatar agent={a} size={32} expression={doing} animate />
                   <span className="member-body">
                     <span className="member-name">{a.name}</span>
                     <span className="member-sub">
@@ -975,5 +977,20 @@ function Recipients(props: { text: string; members: Agent[]; interrupts: boolean
         </span>
       )}
     </span>
+  );
+}
+
+/** Message-column avatar: animated only while this group's latest reply is in flight. */
+function LiveAvatar(props: { agent?: Agent; name: string; last?: Message }) {
+  const state = props.last ? messageExpression(props.last) : { expression: "idle" as const, live: false };
+  return (
+    <AgentAvatar
+      agent={props.agent}
+      name={props.name}
+      size={36}
+      expression={state.expression}
+      animate={state.live}
+      pulse={state.live ? props.last?.id : undefined}
+    />
   );
 }

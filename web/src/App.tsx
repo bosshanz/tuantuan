@@ -1,6 +1,7 @@
 import { Bot, Command, MessagesSquare, Plus, Search, Sparkles, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentEditor } from "./AgentEditor";
+import { AvatarShowcase } from "./AvatarShowcase";
 import { type Agent, api, connectWs, type McpServer, type Meta, type Room, type WsEvent } from "./api";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
@@ -83,6 +84,7 @@ export function App() {
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
   const mobileView = section === "robot" || detailId ? "main" : "list";
 
+  if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
     <div className={`shell ${section === "robot" ? "no-list" : ""}`} data-mobile={mobileView}>
       <nav className="rail" aria-label="主导航">

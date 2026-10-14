@@ -12,6 +12,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import type { Agent, Room } from "./api";
+import type { Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
 
 for (const [name, lang] of Object.entries({ bash, go, javascript, json, python, sql, typescript }))
@@ -27,10 +28,16 @@ export function AgentAvatar({
   agent,
   size = 32,
   name,
+  expression,
+  animate,
+  pulse,
 }: {
   agent?: Pick<Agent, "color" | "name"> & { avatarShape?: AvatarShape };
   size?: number;
   name?: string;
+  expression?: Expression;
+  animate?: boolean;
+  pulse?: unknown;
 }) {
   if (!agent) {
     return (
@@ -42,7 +49,14 @@ export function AgentAvatar({
   const fallback = defaultAvatar(agent.name);
   return (
     <span className="avatar bot" style={{ ["--size" as string]: `${size}px` }} aria-hidden>
-      <BotAvatar shape={agent.avatarShape ?? fallback.shape} color={agent.color || fallback.color} size={size} />
+      <BotAvatar
+        shape={agent.avatarShape ?? fallback.shape}
+        color={agent.color || fallback.color}
+        size={size}
+        expression={expression}
+        animate={animate}
+        pulse={pulse}
+      />
     </span>
   );
 }

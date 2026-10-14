@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../../server/avatars";
+import type { Expression } from "./avatarState";
 
 /** Hand-authored silhouettes in a 100×100 box; `eyes` is where the face sits (x, y of the midpoint). */
 const SHAPES: Record<AvatarShape, { body: ReactNode; eyes: [number, number] }> = {
@@ -88,22 +89,145 @@ const SHAPES: Record<AvatarShape, { body: ReactNode; eyes: [number, number] }> =
   },
 };
 
-export function BotAvatar({ shape, color, size = 32 }: { shape: AvatarShape; color: string; size?: number }) {
+/** Eyes (and mouth) per expression, drawn around the face midpoint (x, y). */
+function Face({ e, x, y }: { e: Expression; x: number; y: number }) {
+  const L = x - 10;
+  const R = x + 8;
+  switch (e) {
+    case "happy":
+      return (
+        <g className="ba-eyes">
+          <path d={`M${L - 6} ${y + 3}Q${L} ${y - 7} ${L + 6} ${y + 3}`} />
+          <path d={`M${R - 6} ${y + 3}Q${R} ${y - 7} ${R + 6} ${y + 3}`} />
+        </g>
+      );
+    case "surprised":
+      return (
+        <>
+          <g className="ba-eyes">
+            <circle className="ba-dot" cx={L} cy={y - 1} r="5.5" />
+            <circle className="ba-dot" cx={R} cy={y - 1} r="5.5" />
+          </g>
+          <circle className="ba-dot ba-mouth" cx={x - 1} cy={y + 15} r="3.5" />
+        </>
+      );
+    case "sad":
+      return (
+        <>
+          <g className="ba-eyes">
+            <line x1={L - 3} y1={y - 1} x2={L + 1} y2={y + 8} />
+            <line x1={R + 3} y1={y - 1} x2={R - 1} y2={y + 8} />
+          </g>
+          <path className="ba-mouth" d={`M${x - 8} ${y + 20}Q${x - 1} ${y + 14} ${x + 6} ${y + 20}`} />
+        </>
+      );
+    case "sleepy":
+      return (
+        <g className="ba-eyes">
+          <line x1={L - 5} y1={y + 3} x2={L + 5} y2={y + 3} />
+          <line x1={R - 5} y1={y + 3} x2={R + 5} y2={y + 3} />
+        </g>
+      );
+    case "thinking":
+      return (
+        <g className="ba-look">
+          <g className="ba-eyes">
+            <line x1={L + 4} y1={y - 10} x2={L + 2} y2={y + 1} />
+            <line x1={R + 4} y1={y - 10} x2={R + 2} y2={y + 1} />
+          </g>
+        </g>
+      );
+    default:
+      return (
+        <>
+          <g className="ba-look">
+            <g className="ba-eyes">
+              <line x1={L + 1} y1={y - 6} x2={L - 1} y2={y + 6} />
+              <line x1={R + 1} y1={y - 6} x2={R - 1} y2={y + 6} />
+            </g>
+          </g>
+          {e === "speaking" && <ellipse className="ba-dot ba-mouth ba-talk" cx={x - 1} cy={y + 16} rx="5" ry="3.5" />}
+        </>
+      );
+  }
+}
+
+let seq = 0;
+
+/**
+ * Bot avatar. Static unless `animate` (blink, breathing, glance and the expression's own loop);
+ * `pulse` changes trigger a one-shot hop. Animations pause offscreen / in hidden tabs and are off
+ * under prefers-reduced-motion. Below 32px only the blink runs.
+ */
+export function BotAvatar({
+  shape,
+  color,
+  size = 32,
+  expression = "idle",
+  animate = false,
+  pulse,
+}: {
+  shape: AvatarShape;
+  color: string;
+  size?: number;
+  expression?: Expression;
+  animate?: boolean;
+  /** Change this value to play the squash-and-stretch hop once (e.g. a new reply or hand-off). */
+  pulse?: unknown;
+}) {
   const s = SHAPES[shape] ?? SHAPES.orb;
   const [x, y] = s.eyes;
+  const ref = useRef<SVGSVGElement>(null);
+  // Per-instance offsets so a row of avatars never blinks in unison.
+  const [offset] = useState(() => (seq++ * 1.7) % 5);
+  const [shown, setShown] = useState<Expression>(expression);
+  const [hop, setHop] = useState(animate && pulse !== undefined ? 1 : 0);
+  const prev = useRef(expression);
+  useEffect(() => {
+    // Finishing a reply earns a brief smile before settling back to the target expression.
+    const was = prev.current;
+    prev.current = expression;
+    if (animate && was === "speaking" && expression === "idle") {
+      setShown("happy");
+      const t = setTimeout(() => setShown("idle"), 1600);
+      return () => clearTimeout(t);
+    }
+    setShown(expression);
+  }, [expression, animate]);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (pulse !== undefined) setHop((h) => h + 1);
+  }, [pulse]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!animate || !el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([entry]) => {
+      el.dataset.offscreen = entry?.isIntersecting ? "false" : "true";
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [animate]);
   return (
     <svg
+      ref={ref}
       className="bot-avatar"
       viewBox="0 0 100 100"
       width={size}
       height={size}
-      style={{ ["--c" as string]: color }}
+      data-expr={shown}
+      data-anim={animate ? (size >= 32 ? "full" : "blink") : undefined}
+      style={{ ["--c" as string]: color, ["--blink-delay" as string]: `${offset}s` }}
       aria-hidden
     >
-      <g className="ba-body">{s.body}</g>
-      <g className="ba-eyes">
-        <line x1={x - 9} y1={y - 6} x2={x - 11} y2={y + 6} />
-        <line x1={x + 9} y1={y - 6} x2={x + 7} y2={y + 6} />
+      <g className="ba-root" key={hop} data-hop={hop > 0 ? "" : undefined}>
+        <g className="ba-body">{s.body}</g>
+        <g className="ba-face">
+          <Face e={shown} x={x} y={y} />
+        </g>
       </g>
     </svg>
   );
