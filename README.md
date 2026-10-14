@@ -27,6 +27,8 @@ bun install
 bun dev          # 同时启动 API（:8787）和前端（:5173），默认 mock 模型
 ```
 
+开发模式下 Vite 会把 `/api`、`/ws` 和机器人用的 `/device` 转发到 API（列表在 `server/routes.ts`）。改了 `vite.config.ts` 或这个列表后要重启 `bun dev`。
+
 打开 http://localhost:5173 ：
 
 1. 左侧「Agents → + 新建」创建 Agent（名称用于 @，不能含空格）。
@@ -191,6 +193,7 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 | 决策模型一直没生效 | 检查 `DECISION_BASE_URL` 是业务空间地址、Key 有权限；详情面板的「分类」会写明回退原因（超时、HTTP 状态、置信度不足）。 |
 | 群里一句话好几个 Agent 都回复 | 只有 @ 多人、`@所有人` 或 Agent 调用了 `handoff` 才会这样。详情面板的工具调用里能看到 handoff。 |
 | Agent 说「让 @X 来」但 X 没反应 | 正常：正文里的 @ 只是显示，交接必须调用 `handoff` 工具；模型要支持 function calling。 |
+| 机器人一直「正在连接」或显示「连不上设备服务」 | 设备 WebSocket `/device` 连不上：确认 API 在运行；开发模式下 pull 后重启 `bun dev`，让代理配置生效。 |
 | 机器人不听 / 不说话 | 浏览器需要麦克风权限和 Web Speech 支持；不行就用文字输入。 |
 | 机器人会话列表里有很多空的旧会话 | 旧版本每次打开都新建会话；升级后启动一次会自动清理（迁移 3）。 |
 | e2e 找不到浏览器 | 设置 `CHROME_PATH` 指向本机 Chrome。 |

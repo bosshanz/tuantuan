@@ -206,6 +206,32 @@ try {
   if ((await page.evaluate(() => performance.getEntriesByType("navigation").length)) !== navs)
     throw new Error("page reloaded during live checks");
 
+  // Dev setup (`bun dev`): the robot must connect through the Vite proxy too (/device WebSocket).
+  const vitePort = 5199;
+  const vite = Bun.spawn(["bunx", "vite", "--port", String(vitePort), "--strictPort"], {
+    env: { ...process.env, PORT: String(server.port) },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  try {
+    for (let i = 0; i < 100; i++) {
+      if (
+        await fetch(`http://localhost:${vitePort}/`).then(
+          (r) => r.ok,
+          () => false,
+        )
+      )
+        break;
+      await Bun.sleep(100);
+    }
+    const dev = await browser.newPage();
+    await dev.goto(`http://localhost:${vitePort}/#/robot`);
+    await dev.getByText("设备已连接").waitFor({ timeout: 15000 });
+    await dev.close();
+  } finally {
+    vite.kill();
+  }
+
   await page.screenshot({ path: join(tmpdir(), "agent-hub-e2e.png"), fullPage: true });
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(

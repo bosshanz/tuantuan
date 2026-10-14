@@ -10,7 +10,8 @@ import {
 export type Command = Extract<DeviceOutbound, { type: "expression" | "action" }>;
 
 export interface DeviceHandlers {
-  onConnection(connected: boolean): void;
+  /** `failures` counts consecutive failed attempts since the last successful connection. */
+  onConnection(connected: boolean, failures?: number): void;
   onWelcome(w: Extract<DeviceOutbound, { type: "welcome" }>): void;
   onSessionState(s: SessionState): void;
   onReplyStart(messageId: string): void;
@@ -60,7 +61,7 @@ export class DeviceClient {
     };
     ws.onmessage = (ev) => this.dispatch(JSON.parse(String(ev.data)) as DeviceOutbound);
     ws.onclose = () => {
-      this.h.onConnection(false);
+      this.h.onConnection(false, this.retry + 1);
       if (!this.closed) setTimeout(() => !this.closed && this.open(), Math.min(5000, 500 * 2 ** this.retry++));
     };
   }

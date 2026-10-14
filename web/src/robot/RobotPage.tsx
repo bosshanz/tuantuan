@@ -67,6 +67,7 @@ function RobotSession(props: {
 }) {
   const { agent } = props;
   const [connected, setConnected] = useState(false);
+  const [failures, setFailures] = useState(0);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [session, setSession] = useState<SessionState>("idle");
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -121,7 +122,10 @@ function RobotSession(props: {
       agent.id,
       props.userName,
       {
-        onConnection: setConnected,
+        onConnection: (ok, n = 0) => {
+          setConnected(ok);
+          setFailures(ok ? 0 : n);
+        },
         onWelcome: (w) => {
           setRoomId(w.roomId);
           setProtocolError(null);
@@ -321,7 +325,7 @@ function RobotSession(props: {
           <h2>桌面机器人</h2>
           <div className="sub">
             <span className={`dot ${connected ? "ok" : "bad"}`} />
-            {connected ? "设备已连接" : "正在连接…"} · 云端 Agent
+            {connected ? "设备已连接" : failures >= 3 ? "连不上设备服务" : "正在连接…"} · 云端 Agent
           </div>
         </div>
         <label className="sr-only" htmlFor="robot-agent">
