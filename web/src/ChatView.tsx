@@ -218,7 +218,7 @@ export function ChatView(props: {
             <div className="empty">
               <RoomIcon room={room} agents={agents} />
               <h2 style={{ fontSize: 17 }}>
-                {room.kind === "group" ? room.name : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
+                {room.kind === "group" ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
               </h2>
               {room.kind === "group" && members.length > 0 && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
