@@ -128,6 +128,41 @@ try {
   const robotRooms = await page.locator(".li-title", { hasText: "桌面机器人 · Bob" }).count();
   if (robotRooms !== 1) throw new Error(`expected 1 robot room for Bob, got ${robotRooms}`);
 
+  // Agent editor: header stays on the 56px line, opaque, and scrolled content never shows through.
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.locator(".list-item", { hasText: "Alice" }).first().click();
+  await page.getByLabel("名称").waitFor();
+  await page.locator("form.page").evaluate((el) => el.scrollTo(0, 240));
+  await page.waitForTimeout(100);
+  const editorIssues = await page.evaluate(() => {
+    const out: string[] = [];
+    const head = document.querySelector(".main-head")?.getBoundingClientRect();
+    const list = document.querySelector(".pane-head")?.getBoundingClientRect();
+    const page = document.querySelector("form.page")?.getBoundingClientRect();
+    const bar = document.querySelector(".save-bar")?.getBoundingClientRect();
+    if (!head || !list || !page || !bar) return ["editor elements missing"];
+    if (Math.abs(head.height - 56) > 0.5 || head.top !== 0) out.push(`editor head ${head.top}/${head.height}`);
+    if (Math.abs(head.bottom - list.bottom) > 0.5) out.push("editor head not aligned with list head");
+    if (page.top < head.bottom - 0.5) out.push(`content scrolls under header (${page.top} < ${head.bottom})`);
+    for (const el of document.querySelectorAll(".main-head > *, .main-head .avatar")) {
+      const b = el.getBoundingClientRect();
+      if (b.top < head.top - 0.5 || b.bottom > head.bottom + 0.5) out.push(`header child clipped: ${el.className}`);
+    }
+    const bg = getComputedStyle(document.querySelector(".main-head") as Element).backgroundColor;
+    if (/rgba\(.*,\s*0(\.\d+)?\)$/.test(bg) || bg === "transparent") out.push(`header bg not opaque: ${bg}`);
+    const barBg = getComputedStyle(document.querySelector(".save-bar") as Element).backgroundColor;
+    if (/rgba\(/.test(barBg)) out.push(`save bar bg not opaque: ${barBg}`);
+    const inner = document.querySelector(".page-inner")?.getBoundingClientRect();
+    const btn = document.querySelector(".save-bar .btn.primary")?.getBoundingClientRect();
+    const status = document.querySelector(".save-bar .status")?.getBoundingClientRect();
+    if (inner && btn && Math.abs(btn.right - (inner.right - 24)) > 1)
+      out.push(`save button ${btn.right} vs content ${inner.right - 24}`);
+    if (inner && status && Math.abs(status.left - (inner.left + 24)) > 1)
+      out.push(`save status ${status.left} vs content ${inner.left + 24}`);
+    return out;
+  });
+  if (editorIssues.length) throw new Error(`editor header: ${editorIssues.join("; ")}`);
+
   await page.screenshot({ path: join(tmpdir(), "agent-hub-e2e.png"), fullPage: true });
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(

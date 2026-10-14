@@ -773,3 +773,14 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 @keyframes bm-blink { 0%, 93%, 100% { scale: 1 1; } 95% { scale: 1 0.12; } }
 @media (prefers-reduced-motion: reduce) { .brand-mark .bm-eyes { animation: none; transition: none; } }
+
+/* ---- editor header & save bar: opaque, on the 56px line ---- */
+.main-head { position: relative; z-index: 2; background: var(--surface); }
+.main-head .preview-head.title { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
+.main-head .preview-head .avatar { --size: 28px; flex-shrink: 0; }
+.editor-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; overflow: hidden; }
+.editor-title h2 { flex-shrink: 0; max-width: 60%; }
+.editor-title .sub { min-width: 0; text-overflow: ellipsis; }
+.save-bar { background: var(--surface); backdrop-filter: none; z-index: 2; }
+.save-bar { padding-inline: max(var(--s6), calc((100% - 760px) / 2 + var(--s6))); }
+@media (max-width: 760px) { .save-bar { padding-inline: var(--s3); } }

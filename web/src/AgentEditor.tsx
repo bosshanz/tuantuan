@@ -105,8 +105,8 @@ export function AgentEditor(props: {
           <ChevronLeft size={18} />
         </button>
         <div className="preview-head title">
-          <AgentAvatar agent={form} size={36} />
-          <div style={{ minWidth: 0 }}>
+          <AgentAvatar agent={form} size={28} />
+          <div className="editor-title">
             <h2>{agent ? agent.name : form.name.trim() || "新建 Agent"}</h2>
             <div className="sub">
               {form.modelMode === "auto" ? "Auto 路由" : `固定 ${form.pinnedModel ?? ""}`} · {form.tools.length} 个工具
