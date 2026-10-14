@@ -540,3 +540,4 @@ a.member-row .avatar { --size: 32px; }
 .rcpt svg { margin-left: 4px; }
 .interrupt-note { color: var(--warn); }
 @media (prefers-reduced-motion: reduce) { .trace, .trace .chev, a.member-row { transition: none; } }
+.interrupt-note { display: inline-flex; align-items: center; margin-left: 2px; }

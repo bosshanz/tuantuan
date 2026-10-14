@@ -36,7 +36,6 @@ export function RobotPage(props: {
           <MessageSquareText size={24} />
         </div>
         <h2>先创建一个 Agent</h2>
-        <p>桌面机器人需要绑定一个云端 Agent 才能对话。</p>
         <button type="button" className="btn primary" onClick={props.goCreateAgent}>
           创建 Agent
         </button>
@@ -407,11 +406,7 @@ function RobotSession(props: {
             </label>
           </div>
           <p className="robot-hint">
-            {RecognitionImpl
-              ? handsFree
-                ? "免按键模式：直接说话即可，说话会打断机器人朗读。建议佩戴耳机，避免朗读声被麦克风收进去。"
-                : "按住麦克风（或按住空格键）说话，松开发送；点击机器人可打断。"
-              : "当前浏览器不支持语音识别（推荐 Chrome），请在右侧用文字和机器人对话。"}
+            {RecognitionImpl ? (handsFree ? "直接说话即可" : "按住说话") : "此浏览器不支持语音，可用文字对话"}
           </p>
           {protocolError && (
             <div className="form-error" role="alert">
@@ -422,13 +417,7 @@ function RobotSession(props: {
         </div>
         <aside className="robot-side" aria-label="对话记录">
           <div className="transcript" ref={transcriptRef} aria-live="polite">
-            {turns.length === 0 && !interim && (
-              <div className="list-empty">
-                说一句「你好」试试。
-                <br />
-                机器人的回复会同步保存到会话列表的「桌面机器人」分组。
-              </div>
-            )}
+            {turns.length === 0 && !interim && <div className="list-empty">说一句「你好」试试</div>}
             {turns.map((t) => (
               <div key={t.id} className={`turn ${t.role} ${t.status === "error" ? "error" : ""}`}>
                 {t.text || (t.status === "streaming" ? "…" : "")}

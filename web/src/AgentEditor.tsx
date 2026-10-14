@@ -115,7 +115,6 @@ export function AgentEditor(props: {
           <section className="card">
             <div className="card-head">
               <h3>基本信息</h3>
-              <p>名称就是在群聊里 @ 它的方式，需唯一，不能含空格或 @。</p>
             </div>
             <div className="card-body">
               <div className="row wrap-sm">
@@ -170,7 +169,6 @@ export function AgentEditor(props: {
           <section className="card">
             <div className="card-head">
               <h3>系统 Prompt</h3>
-              <p>描述角色、语气和边界。mock 模式下可写 [[reply:固定回复]] 演示 @ 其他 Agent。</p>
             </div>
             <div className="card-body">
               <textarea
@@ -187,7 +185,6 @@ export function AgentEditor(props: {
           <section className="card">
             <div className="card-head">
               <h3>模型</h3>
-              <p>Auto 按任务类型和难度选择模型，失败时自动换下一个候选；固定模型不回退。</p>
             </div>
             <div className="card-body">
               <fieldset className="segmented" aria-label="模型策略">
@@ -229,8 +226,7 @@ export function AgentEditor(props: {
                   </select>
                   {pinnedMissing && (
                     <span className="error-text" role="alert">
-                      固定模型 {form.pinnedModel} 不在当前启用的模型中（.env 的 AGENT_HUB_MODELS 或
-                      providers.json），这个 Agent 回复会失败。请改选一个已启用的模型，或切回 Auto 路由。
+                      {form.pinnedModel} 未启用，回复会失败。请换一个模型或改用 Auto。
                     </span>
                   )}
                 </label>
@@ -249,7 +245,6 @@ export function AgentEditor(props: {
           <section className="card">
             <div className="card-head">
               <h3>Skills</h3>
-              <p>Agent 平时只看到名称和描述，需要时才加载完整说明（渐进披露）。</p>
             </div>
             <div className="card-body">
               <PickList
@@ -433,7 +428,7 @@ function ToolsSection(props: {
       <div className="card-head row" style={{ alignItems: "center" }}>
         <div className="grow">
           <h3>工具</h3>
-          <p>已选 {props.selected.length} 个。工具失败时，错误会如实交给模型。MCP 服务全局共享。</p>
+          {props.selected.length > 0 && <p>已选 {props.selected.length} 个</p>}
         </div>
         <button type="button" className="btn sm" onClick={() => setAdding((v) => !v)}>
           <Plug size={13} />

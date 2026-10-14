@@ -218,13 +218,8 @@ export function ChatView(props: {
             <div className="empty">
               <RoomIcon room={room} agents={agents} />
               <h2 style={{ fontSize: 17 }}>
-                {room.kind === "group" ? "在群里 @ 一个 Agent 开始吧" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
+                {room.kind === "group" ? room.name : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
               </h2>
-              <p style={{ fontSize: 13 }}>
-                {room.kind === "group"
-                  ? "@ 谁谁回复，@所有人 每个 Agent 各回复一次；不 @ 时按话题自动选一个 Agent。回复中发新消息会打断当前回复。"
-                  : "私聊中每条消息都会交给这个 Agent。"}
-              </p>
               {room.kind === "group" && members.length > 0 && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
                   {members.map((a) => (
@@ -288,7 +283,7 @@ export function ChatView(props: {
                 className="btn sm"
                 onClick={() => void cancel()}
                 disabled={!running}
-                title="停止当前回复（保留已生成内容），并丢弃排队消息"
+                title="停止回复"
               >
                 <CircleStop size={13} />
                 停止
@@ -306,11 +301,7 @@ export function ChatView(props: {
             onSubmit={() => void send()}
             members={room.kind === "group" ? members : []}
             interrupts={room.kind === "group" && running}
-            placeholder={
-              room.kind === "group"
-                ? `发消息到 ${room.name}，不 @ 时按话题自动选一个 Agent`
-                : `发消息给 ${members[0]?.name ?? "Agent"}`
-            }
+            placeholder="发消息…"
           />
         </footer>
       </div>
@@ -485,15 +476,11 @@ function MessageItem(props: {
               aria-pressed={props.selected}
               onClick={props.onDetails}
               data-shot="expand"
-              title="查看回复详情：为什么是它、用了哪个模型、工具调用"
+              title="查看详情"
             >
-              {m.hop >= 2 ? (
-                <span>接 {props.handoffFrom ?? "其他 Agent"} 的交接</span>
-              ) : d.plan.selection ? (
-                <span>按话题选中</span>
-              ) : null}
+              {m.hop >= 2 && <span>由 {props.handoffFrom ?? "其他 Agent"} 转交</span>}
               <span className="model">{d.chosenModel ?? (d.attempts.length ? "模型全部失败" : "选择模型中…")}</span>
-              {fellBack && <span className="warn">已回退</span>}
+              {fellBack && <span className="warn">已切换模型</span>}
               <ChevronRight size={11} className="chev" />
             </button>
           )}
@@ -705,7 +692,7 @@ function RoomInfo(props: {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const replyCount = new Map<string, number>();
-  const stats = { replies: 0, picked: 0, handoffs: 0, fallbacks: 0, failed: 0, models: [] as [string, number][] };
+  const stats = { replies: 0, handoffs: 0, fallbacks: 0, failed: 0, models: [] as [string, number][] };
   const byModel = new Map<string, number>();
   for (const m of props.messages) {
     if (m.senderKind !== "agent") continue;
@@ -715,7 +702,6 @@ function RoomInfo(props: {
     stats.handoffs += m.toolCalls.filter((c) => c.name === "handoff" && c.status === "ok").length;
     const d = props.routing[m.id];
     if (!d) continue;
-    if (d.plan.selection) stats.picked++;
     if (d.attempts.some((a) => !a.ok)) stats.fallbacks++;
     if (d.chosenModel) byModel.set(d.chosenModel, (byModel.get(d.chosenModel) ?? 0) + 1);
   }
@@ -786,31 +772,9 @@ function RoomInfo(props: {
         )}
         {error && <div className="error-text">{error}</div>}
       </section>
-      {room.kind === "group" && (
-        <section className="d-section">
-          <h4>谁会回复</h4>
-          <ul className="rules">
-            <li>
-              <b>@名字</b> 只有被 @ 的 Agent 回复
-            </li>
-            <li>
-              <b>不 @</b> 按话题自动选一个 Agent
-            </li>
-            <li>
-              <b>@所有人</b> 每个 Agent 各回复一次
-            </li>
-            <li>
-              <b>交接</b> Agent 可以把任务交给另一个 Agent
-            </li>
-            <li>
-              <b>打断</b> 回复中发新消息会停止当前回复
-            </li>
-          </ul>
-        </section>
-      )}
       {stats.replies > 0 && (
         <section className="d-section">
-          <h4>本会话模型使用</h4>
+          <h4>模型</h4>
           <div className="usage">
             {stats.models.map(([id, n]) => (
               <div key={id} className="usage-row">
@@ -824,9 +788,8 @@ function RoomInfo(props: {
           </div>
           <p className="d-note">
             {stats.replies} 条回复
-            {stats.picked > 0 && ` · ${stats.picked} 条按话题选中`}
             {stats.handoffs > 0 && ` · ${stats.handoffs} 次交接`}
-            {stats.fallbacks > 0 && ` · ${stats.fallbacks} 条发生模型回退`}
+            {stats.fallbacks > 0 && ` · ${stats.fallbacks} 次切换模型`}
             {stats.failed > 0 && ` · ${stats.failed} 条失败`}
           </p>
         </section>
@@ -916,7 +879,6 @@ function Composer(props: {
                 <AgentAvatar agent={a as Agent} size={22} />
               )}
               <span>{a.name}</span>
-              {a === EVERYONE && <span className="muted pop-hint">每个 Agent 各回复一次</span>}
             </button>
           ))}
         </div>
@@ -953,19 +915,7 @@ function Composer(props: {
         {props.members.length > 0 && props.value.trim() ? (
           <Recipients text={props.value} members={props.members} interrupts={props.interrupts} />
         ) : (
-          <span className="hint">
-            <span>
-              <kbd>Enter</kbd> 发送
-            </span>
-            <span>
-              <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行
-            </span>
-            {props.members.length > 0 && (
-              <span>
-                <kbd>@</kbd> 提及 Agent
-              </span>
-            )}
-          </span>
+          <span className="grow" />
         )}
         <button
           type="button"
@@ -998,23 +948,24 @@ function Recipients(props: { text: string; members: Agent[]; interrupts: boolean
   const everyone = EVERYONE_RE.test(props.text);
   return (
     <span className="recipients" aria-live="polite">
-      <span className="label">回复</span>
       {everyone ? (
         <span className="rcpt">
           <Users size={12} />
-          所有人 · {props.members.length}
+          所有人
         </span>
-      ) : named.length > 0 ? (
+      ) : (
         named.map((a) => (
-          <span key={a.id} className="rcpt">
+          <span key={a.id} className="rcpt" title={`发给 ${a.name}`}>
             <AgentAvatar agent={a} size={14} />
             {a.name}
           </span>
         ))
-      ) : (
-        <span className="rcpt auto">按话题自动选一位</span>
       )}
-      {props.interrupts && <span className="interrupt-note">发送会打断当前回复</span>}
+      {props.interrupts && (
+        <span className="interrupt-note" title="发送会打断当前回复" role="img" aria-label="发送会打断当前回复">
+          <CircleStop size={13} />
+        </span>
+      )}
     </span>
   );
 }

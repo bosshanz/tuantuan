@@ -256,11 +256,6 @@ export function App() {
               <Bot size={24} />
             </div>
             <h2>{agents.length ? "选择一个 Agent 进行编辑" : "创建你的第一个 Agent"}</h2>
-            <p>
-              Agent 由系统 Prompt、工具、Skills 和模型策略组成。
-              <br />
-              在群聊里 @名称 即可召唤。
-            </p>
             <button type="button" className="btn primary" onClick={() => go("a/new")}>
               <Plus size={16} />
               新建 Agent
@@ -433,14 +428,12 @@ function Welcome({
     {
       done: agents.length > 0,
       title: "创建一个 Agent",
-      sub: "设置 Prompt，选择工具、Skills 和模型策略",
       cta: "新建 Agent",
       path: "a/new",
     },
     {
       done: rooms.some((r) => !r.deviceId),
       title: "开始一个会话",
-      sub: "建群把多个 Agent 拉进来，用 @ 指定谁来回答",
       cta: "新建会话",
       path: "c/new",
       needs: agents.length > 0,
@@ -448,7 +441,6 @@ function Welcome({
     {
       done: rooms.some((r) => r.deviceId),
       title: "试试桌面机器人",
-      sub: "用语音和绑定的 Agent 对话，它会做表情和动作",
       cta: "打开机器人",
       path: "robot",
       needs: agents.length > 0,
@@ -460,14 +452,12 @@ function Welcome({
         <Sparkles size={24} />
       </div>
       <h2>{agents.length === 0 ? "欢迎使用 Agent Hub" : "选择一个会话"}</h2>
-      <p>组合 Prompt、工具和 Skills 创建 Agent，让它们在群聊里协作。</p>
       <ol className="steps">
         {steps.map((s, i) => (
           <li key={s.title} className={`step ${s.done ? "done" : ""}`}>
             <span className="num">{s.done ? "✓" : i + 1}</span>
             <span className="step-body">
               <div className="step-title">{s.title}</div>
-              <div className="step-sub">{s.sub}</div>
             </span>
             <button
               type="button"
@@ -480,17 +470,9 @@ function Welcome({
           </li>
         ))}
       </ol>
-      {meta && (
+      {meta?.configSource === "builtin-mock" && (
         <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-          {meta.configSource === "builtin-mock"
-            ? "当前使用内置 mock 模型，无需 API Key"
-            : `模型配置：${meta.configSource}`}{" "}
-          · 每条消息最多 {meta.limits.maxAgentHops} 次 Agent 互相 @ ·{" "}
-          <kbd className="combo">
-            {IS_MAC ? "⌘" : <span>Ctrl</span>}
-            <span>K</span>
-          </kbd>{" "}
-          快速切换
+          演示模式 · 内置 mock 模型
         </p>
       )}
     </div>
