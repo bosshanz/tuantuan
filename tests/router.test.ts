@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { classifyByRules } from "../server/classify";
-import { type AppConfig, describeProviders, MOCK_CONFIG, parseConfig } from "../server/config";
+import { type AppConfig, configFromEnv, describeProviders, MOCK_CONFIG, parseConfig } from "../server/config";
 import { ProviderError } from "../server/llm";
 import {
   type Attempt,
@@ -198,5 +198,69 @@ describe("provider baseUrl resolution", () => {
     expect((byId.newapi as { baseUrl: string }).baseUrl).toBe("https://relay.example/v1");
     expect((byId.deepseek as { baseUrl: string }).baseUrl).toBe("https://api.deepseek.com/v1");
     expect(describeProviders(c, { DEEPSEEK_API_KEY: "x" }).join("\n")).toContain("缺少 ARK_API_KEY");
+  });
+});
+
+describe("AGENT_HUB_MODELS env selection", () => {
+  const keys = { DEEPSEEK_API_KEY: "d", DASHSCOPE_API_KEY: "q", ARK_API_KEY: "a", NEWAPI_API_KEY: "n" };
+  const fromEnv = (models: string, extra: Record<string, string> = {}) =>
+    configFromEnv({ ...keys, AGENT_HUB_MODELS: models, ...extra });
+
+  test("builds providers and models from the catalog", () => {
+    const c = fromEnv("deepseek/deepseek-chat, qwen/qwen-plus");
+    expect(c.models.map((m) => m.id)).toEqual(["deepseek/deepseek-chat", "qwen/qwen-plus"]);
+    expect(c.providers.map((p) => p.id)).toEqual(["deepseek", "qwen"]);
+    expect((c.providers[0] as { baseUrl: string }).baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(c.router.classifierModel).toBeUndefined();
+  });
+  test("0 and 6 real models are rejected; mock does not count", () => {
+    expect(() => fromEnv("mock/small")).toThrow("需要 1–5 个真实模型（mock 不计），当前 0 个");
+    expect(() =>
+      fromEnv(
+        "deepseek/deepseek-chat,deepseek/deepseek-reasoner,qwen/qwen-turbo,qwen/qwen-plus,qwen/qwen-max,qwen/qwen-long",
+      ),
+    ).toThrow("当前 6 个");
+    expect(fromEnv("mock/small,deepseek/deepseek-chat").models).toHaveLength(2);
+  });
+  test("duplicates, bad format, unknown provider", () => {
+    expect(() => fromEnv("deepseek/deepseek-chat,deepseek/deepseek-chat")).toThrow("模型重复: deepseek/deepseek-chat");
+    expect(() => fromEnv("deepseek-chat")).toThrow("格式应为 provider/模型名");
+    expect(() => fromEnv("openai/gpt-4o")).toThrow("provider openai 未知");
+  });
+  test("unknown model needs overrides; overrides are validated", () => {
+    expect(() => fromEnv("newapi/gpt-4o", { NEWAPI_BASE_URL: "https://relay.example/v1" })).toThrow(
+      "请设置 AGENT_HUB_MODEL_1_TAGS、AGENT_HUB_MODEL_1_TIER、AGENT_HUB_MODEL_1_CONTEXT",
+    );
+    const c = fromEnv("newapi/gpt-4o", {
+      NEWAPI_BASE_URL: "https://relay.example/v1",
+      AGENT_HUB_MODEL_1_TAGS: "chat,vision",
+      AGENT_HUB_MODEL_1_TIER: "3",
+      AGENT_HUB_MODEL_1_CONTEXT: "128000",
+    });
+    expect(c.models[0]).toMatchObject({ model: "gpt-4o", tags: ["chat", "vision"], costTier: 3 });
+    expect(() => fromEnv("deepseek/deepseek-chat", { AGENT_HUB_MODEL_1_TAGS: "chat,magic" })).toThrow("未知标签 magic");
+    expect(() => fromEnv("deepseek/deepseek-chat", { AGENT_HUB_MODEL_1_TIER: "7" })).toThrow("1–3");
+  });
+  test("missing key or base URL names the env var", () => {
+    expect(() => configFromEnv({ AGENT_HUB_MODELS: "deepseek/deepseek-chat" })).toThrow(
+      "请在 .env 设置 DEEPSEEK_API_KEY",
+    );
+    expect(() => fromEnv("newapi/deepseek-chat")).toThrow("NEWAPI_BASE_URL");
+  });
+  test("classifier model must be in the active set", () => {
+    expect(fromEnv("qwen/qwen-turbo", { AGENT_HUB_CLASSIFIER_MODEL: "qwen/qwen-turbo" }).router.classifierModel).toBe(
+      "qwen/qwen-turbo",
+    );
+    expect(() => fromEnv("qwen/qwen-plus", { AGENT_HUB_CLASSIFIER_MODEL: "qwen/qwen-turbo" })).toThrow(
+      "必须是 AGENT_HUB_MODELS",
+    );
+  });
+  test("providers.json supplies providers/models but the env selection wins", async () => {
+    const file = await Bun.file("config/providers.example.json").json();
+    expect(() => configFromEnv({ ...keys, AGENT_HUB_MODELS: "doubao/doubao-seed-1-6" })).toThrow("不在内置目录");
+    const c2 = configFromEnv({ ...keys, AGENT_HUB_MODELS: "doubao/doubao-seed-1-6" }, file);
+    expect(c2.models[0]?.model).toBe("doubao-seed-1-6-250615");
+    expect(c2.router.classifierModel).toBeUndefined(); // file classifier qwen/qwen-turbo not active → dropped
+    expect(c2.limits.maxAgentHops).toBe(5);
   });
 });

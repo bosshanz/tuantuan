@@ -13,6 +13,7 @@
 | `server/main.ts` | 读取配置与 Skills，启动服务 |
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件 |
 | `server/orchestrator.ts` | **运行时编排**：房间队列、@ 触发链、跳数上限、取消、单个 Agent 回合（上下文构建 → 路由 → 工具循环 → 持久化/推送） |
+| `server/decision.ts` | 百炼决策模型（systemone）客户端：构造问题、超时、严格解析返回 |
 | `server/router.ts` | 任务分类（LLM 分类器 + 规则回退）、候选模型排序、按候选回退调用 |
 | `server/classify.ts` | 确定性规则分类（router 与 mock 分类器共用） |
 | `server/tool-loop.ts` | function-calling 循环 |
@@ -55,13 +56,20 @@
 
 ```
 信号(text, contextTokens≈字符/3, toolCount, hasImages)
-  → 分类：classifierModel（JSON 输出，严格校验枚举）── 失败/未配置 → 规则分类（记录失败原因）
+  → 分类：决策模型 systemone（若设置 DECISION_BASE_URL）
+            一次请求问 task_type(choice+other) / difficulty(score 3 级) / needs_tools(noul)
+            失败/超时/格式错 → 下一级；单项置信度 < DECISION_MIN_CONFIDENCE 或 other → 仅该项用下一级结果
+        → classifierModel（JSON 输出，严格校验枚举）── 失败/未配置 → 规则分类（记录失败原因）
   → 候选：具备该 task_type 标签且 contextWindow ≥ 1.2×contextTokens 的模型
           （无标签匹配则退回所有容量够的模型，并在理由中写明）
           排序：成本档 ≥ minTier[difficulty] 的按档位升序在前，低于的按档位降序在后
   → 调用：按候选顺序；仅当 provider 在输出任何内容前失败（ProviderError：HTTP 错误、连接失败、缺 Key）才换下一个
 ```
 
+- 低置信度时选择"该项回退到下一级分类器"而不是"难度上调一档"：上调会在模型拿不准时系统性地选更贵的模型，而且这种代价不可见；回退更能如实反映实际用的是谁的判断，UI 和路由记录都会写明原因。
+- needs_tools 只做一项调整：最终类型是 chat、Agent 有工具且 P(yes) ≥ 0.7 时改为 tool_heavy（记录在 note 里）。
+- 决策模型的 score 是各等级下标按概率加权的期望（可能是 1.43 这样的小数），四舍五入到最近的等级。
+- 启用的模型集合：设置了 `AGENT_HUB_MODELS` 时以它为准（1–5 个真实模型；provider 来自内置的 newapi/deepseek/qwen/doubao，或 providers.json 中的同名定义；标签/成本档/上下文来自内置目录、providers.json 或 `AGENT_HUB_MODEL_<n>_*` 覆盖）；否则用 providers.json；都没有就用 mock。固定到未启用模型的 Agent 会在编辑页和列表中标出，回复时如实报错。
 - 固定模型的 Agent 跳过分类，只有一个候选，**不回退**（固定即意味着用户要这个模型）。
 - 工具循环的后续轮次从上一轮成功的模型开始，避免同一回答中途换模型。
 - 流开始后的错误不回退（否则会重复输出），直接以 `error` 状态结束并保留已生成内容。

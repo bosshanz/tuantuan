@@ -504,8 +504,37 @@ function MessageDetails({ m, d }: { m: Message; d?: RoutingDecision }) {
                 <dd>
                   {TYPE_LABEL[c.taskType]} · {DIFF_LABEL[c.difficulty]}
                   <div className="muted" style={{ fontSize: 12 }}>
-                    {c.source === "llm" ? `由 ${c.classifierModel} 分类` : "规则分类"}
+                    {c.source === "systemone"
+                      ? `由决策模型 ${c.decision?.model ?? ""} 分类`
+                      : c.source === "llm"
+                        ? `由 ${c.classifierModel} 分类`
+                        : "规则分类"}
                   </div>
+                  {c.decision && !c.decision.error && (
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {c.decision.taskType && (
+                        <>
+                          类型 {c.decision.taskType.choice} 置信度 {c.decision.taskType.confidence.toFixed(2)}
+                          {c.decision.taskType.used ? "" : "（未采用）"}
+                        </>
+                      )}
+                      {c.decision.difficulty && (
+                        <>
+                          {" · "}难度 {c.decision.difficulty.score.toFixed(2)} 置信度{" "}
+                          {c.decision.difficulty.confidence.toFixed(2)}
+                          {c.decision.difficulty.used ? "" : "（未采用）"}
+                        </>
+                      )}
+                      {c.decision.needsTools !== undefined && <> · 需工具 {c.decision.needsTools.toFixed(2)}</>}
+                      {c.decision.latencyMs !== undefined && <> · {Math.round(c.decision.latencyMs)}ms</>}
+                    </div>
+                  )}
+                  {c.fallbackReason && <div className="warn-text">{c.fallbackReason}</div>}
+                  {c.note && (
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {c.note}
+                    </div>
+                  )}
                   {c.classifierError && <div className="error-text">分类模型失败，已改用规则：{c.classifierError}</div>}
                 </dd>
               </>

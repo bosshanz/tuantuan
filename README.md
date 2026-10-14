@@ -37,6 +37,27 @@ mock 模型根据文本中的指令给出确定性结果，方便不接 Key 就�
 
 ## 接入真实模型
 
+### 只改 .env（推荐）
+
+在 `.env` 里写 `AGENT_HUB_MODELS=provider/模型,...`（1–5 个），并填好对应 provider 的 `*_API_KEY`（以及 newapi 的 `NEWAPI_BASE_URL`），不需要 providers.json。可用的 provider 有 `newapi`、`deepseek`、`qwen`、`doubao`。
+
+- 内置目录里已知的模型有 deepseek-chat、deepseek-reasoner、qwen-turbo、qwen-plus、qwen-max、qwen-long、qwen-vl-plus、doubao-seed-1-6-250615、doubao-seed-1-6-flash-250615，它们的标签、成本档和上下文长度都已预设。
+- 其他模型需要在 `.env` 里写 `AGENT_HUB_MODEL_<序号>_TAGS / _TIER / _CONTEXT` 三项，序号从 1 开始。这三项也可以用来覆盖已知模型的预设值。
+- 启动时会校验：数量必须在 1–5 之间、不能重复、provider 必须存在、Key 和地址必须齐全。出错时启动失败，并用中文指出是哪个变量有问题。
+- `AGENT_HUB_CLASSIFIER_MODEL`（可选）：指定一个已启用的模型作为 LLM 分类器。
+- 如果同时存在 providers.json，模型集合仍以 `AGENT_HUB_MODELS` 为准；providers.json 里的 provider 定义、模型元数据、router 和 limits 会被沿用。
+
+### 决策模型（Auto 路由分类器，可选）
+
+设置 `DECISION_BASE_URL=https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com`（填业务空间地址，程序会自动拼接 `/compatible-mode/v1/systemone`；直接填完整 endpoint 也可以），就会启用百炼 `decision-model-preview` 来判断任务类型和难度。
+
+- Key 用 `DECISION_API_KEY`，没填时用 `DASHSCOPE_API_KEY`。
+- 其他可选项：`DECISION_MODEL`、`DECISION_MIN_CONFIDENCE`（默认 0.6）、`DECISION_TIMEOUT_MS`（默认 3000）。
+- 调用失败、超时或返回格式不对时，按 LLM 分类器 → 规则 依次回退。某一项置信度太低时，只有这一项回退。
+- 回复详情面板里会显示用了哪个分类器、各项置信度和回退原因。
+
+### 使用 providers.json
+
 ```bash
 cp config/providers.example.json config/providers.json   # 已被 .gitignore 忽略
 cp .env.example .env                                     # 填入对应的 API Key
@@ -56,7 +77,7 @@ cp .env.example .env                                     # 填入对应的 API K
 
 ## 环境变量
 
-见 `.env.example`：`PORT`、`DB_PATH`（默认 `data/agent-hub.db`）、`SKILLS_DIR`（默认 `skills`）、`AGENT_HUB_CONFIG`、`MOCK_CHUNK_DELAY_MS`，以及各 Provider 的 Key。
+见 `.env.example`：`PORT`、`DB_PATH`（默认 `data/agent-hub.db`）、`SKILLS_DIR`（默认 `skills`）、`AGENT_HUB_CONFIG`、`MOCK_CHUNK_DELAY_MS`，以及各 Provider 的 Key / BASE_URL、`AGENT_HUB_MODELS`、`AGENT_HUB_MODEL_<n>_*`、`AGENT_HUB_CLASSIFIER_MODEL`、`DECISION_*`。
 
 ## Skills
 

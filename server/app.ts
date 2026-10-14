@@ -103,6 +103,7 @@ export function createApp(deps: AppDeps) {
           contextWindow,
         })),
         classifierModel: deps.config.router.classifierModel ?? null,
+        decisionModel: deps.config.decision?.model ?? null,
         limits: deps.config.limits,
         builtinTools: Object.values(BUILTIN_TOOLS).map((t) => ({
           id: `builtin:${t.spec.function.name}`,

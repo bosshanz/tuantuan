@@ -202,8 +202,11 @@ export function App() {
               <span className="li-body">
                 <span className="li-title">{a.name}</span>
                 <span className="li-sub">
-                  {a.modelMode === "auto" ? "Auto 路由" : a.pinnedModel} · {a.tools.length} 工具 · {a.skills.length}{" "}
-                  Skills
+                  {a.modelMode === "auto" ? "Auto 路由" : a.pinnedModel}
+                  {a.modelMode === "pinned" && meta && !meta.models.some((m) => m.id === a.pinnedModel) && (
+                    <span className="warn-text">（未启用）</span>
+                  )}{" "}
+                  · {a.tools.length} 工具 · {a.skills.length} Skills
                 </span>
               </span>
             </button>

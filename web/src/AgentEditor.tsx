@@ -85,6 +85,8 @@ export function AgentEditor(props: {
     }
   };
 
+  const pinnedMissing =
+    form.modelMode === "pinned" && !!form.pinnedModel && !meta.models.some((m) => m.id === form.pinnedModel);
   return (
     <>
       <header className="main-head">
@@ -214,12 +216,23 @@ export function AgentEditor(props: {
                     value={form.pinnedModel ?? ""}
                     onChange={(e) => set("pinnedModel", e.target.value)}
                   >
+                    {pinnedMissing && (
+                      <option value={form.pinnedModel ?? ""} disabled>
+                        {form.pinnedModel}（当前未启用）
+                      </option>
+                    )}
                     {meta.models.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.id} · 成本档 {m.costTier} · {Math.round(m.contextWindow / 1000)}k 上下文
                       </option>
                     ))}
                   </select>
+                  {pinnedMissing && (
+                    <span className="error-text" role="alert">
+                      固定模型 {form.pinnedModel} 不在当前启用的模型中（.env 的 AGENT_HUB_MODELS 或
+                      providers.json），这个 Agent 回复会失败。请改选一个已启用的模型，或切回 Auto 路由。
+                    </span>
+                  )}
                 </label>
               )}
             </div>

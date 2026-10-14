@@ -7,6 +7,7 @@ export interface Meta {
   configSource: string;
   models: { id: string; tags: string[]; costTier: number; contextWindow: number }[];
   classifierModel: string | null;
+  decisionModel: string | null;
   limits: { maxAgentHops: number; maxToolIterations: number; contextMessages: number; contextChars: number };
   builtinTools: { id: string; name: string; description: string }[];
   skills: { name: string; description: string }[];

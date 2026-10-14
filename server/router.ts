@@ -1,12 +1,32 @@
 import { type Classification, classifyByRules, type TaskSignals } from "./classify";
 import { type AppConfig, DIFFICULTIES, type Difficulty, type ModelConfig, TASK_TYPES, type TaskType } from "./config";
+import { callDecisionModel, decisionTaskType } from "./decision";
 import { type ChatRequest, type ChatResult, chat, ProviderError } from "./llm";
 
+export interface DecisionTrace {
+  model: string;
+  minConfidence: number;
+  requestId?: string;
+  latencyMs?: number;
+  taskType?: { choice: string; confidence: number; used: boolean };
+  difficulty?: { score: number; level: Difficulty; confidence: number; used: boolean };
+  /** P(yes) that tools are needed. */
+  needsTools?: number;
+  /** Set when the call failed (timeout, HTTP, malformed). */
+  error?: string;
+}
+
 export interface ClassifierOutcome extends Classification {
-  source: "llm" | "rules";
+  /** Classifier that produced the final answer (systemone even if one field fell back). */
+  source: "systemone" | "llm" | "rules";
   classifierModel?: string;
   /** Why the LLM classifier was not used / failed; undefined when it succeeded or none configured. */
   classifierError?: string;
+  decision?: DecisionTrace;
+  /** Why (part of) the decision model answer was replaced by the next classifier. */
+  fallbackReason?: string;
+  /** Adjustments applied after classification, e.g. needs_tools → tool_heavy. */
+  note?: string;
 }
 
 export interface RoutingPlan {
@@ -29,7 +49,72 @@ const DEFAULT_MIN_TIER: Record<Difficulty, number> = { easy: 1, medium: 2, hard:
 const CLASSIFIER_PROMPT = `你是任务路由分类器。根据用户给出的 JSON（text 为任务文本，contextTokens 为上下文估算 token 数，toolCount 为可用工具数，hasImages 表示是否带图片），
 只输出一个 JSON 对象：{"task_type": one of ${TASK_TYPES.join("|")}, "difficulty": one of ${DIFFICULTIES.join("|")}, "reason": 简短中文理由}。`;
 
+const NEEDS_TOOLS_THRESHOLD = 0.7;
+
+/**
+ * Chain: systemone (if configured) → LLM classifier (if configured) → rules.
+ * A systemone field whose confidence is below DECISION_MIN_CONFIDENCE (or task_type "other")
+ * is replaced by the next classifier's answer for that field only.
+ */
 export async function classify(
+  config: AppConfig,
+  signals: TaskSignals,
+  signal?: AbortSignal,
+): Promise<ClassifierOutcome> {
+  const d = config.decision;
+  if (!d) return classifyFallback(config, signals, signal);
+  const trace: DecisionTrace = { model: d.model, minConfidence: d.minConfidence };
+  let answer: Awaited<ReturnType<typeof callDecisionModel>>;
+  try {
+    answer = await callDecisionModel(d, signals, signal);
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    const fb = await classifyFallback(config, signals, signal);
+    trace.error = (e as Error).message;
+    return { ...fb, decision: trace, fallbackReason: `决策模型失败（${trace.error}），改用${label(fb)}` };
+  }
+  const mapped = decisionTaskType(answer.taskType.choice);
+  const taskOk = !!mapped && answer.taskType.confidence >= d.minConfidence;
+  const diffOk = answer.difficulty.confidence >= d.minConfidence;
+  Object.assign(trace, {
+    requestId: answer.requestId,
+    latencyMs: answer.latencyMs,
+    taskType: { ...answer.taskType, used: taskOk },
+    difficulty: { ...answer.difficulty, used: diffOk },
+    needsTools: answer.needsTools,
+  });
+  let out: ClassifierOutcome;
+  if (taskOk && diffOk) {
+    out = { taskType: mapped, difficulty: answer.difficulty.level, source: "systemone", decision: trace };
+  } else {
+    const fb = await classifyFallback(config, signals, signal);
+    const why: string[] = [];
+    if (!taskOk)
+      why.push(
+        mapped
+          ? `任务类型置信度 ${answer.taskType.confidence.toFixed(2)} < ${d.minConfidence}`
+          : `任务类型为 ${answer.taskType.choice}`,
+      );
+    if (!diffOk) why.push(`难度置信度 ${answer.difficulty.confidence.toFixed(2)} < ${d.minConfidence}`);
+    out = {
+      ...fb,
+      taskType: taskOk ? (mapped as TaskType) : fb.taskType,
+      difficulty: diffOk ? answer.difficulty.level : fb.difficulty,
+      source: taskOk || diffOk ? "systemone" : fb.source,
+      decision: trace,
+      fallbackReason: `${why.join("；")}，该项改用${label(fb)}`,
+    };
+  }
+  if (out.taskType === "chat" && signals.toolCount > 0 && answer.needsTools >= NEEDS_TOOLS_THRESHOLD) {
+    out.taskType = "tool_heavy";
+    out.note = `needs_tools=${answer.needsTools.toFixed(2)} ≥ ${NEEDS_TOOLS_THRESHOLD}，按 tool_heavy 路由`;
+  }
+  return out;
+}
+
+const label = (c: ClassifierOutcome) => (c.source === "llm" ? ` LLM 分类器（${c.classifierModel}）` : "规则分类");
+
+async function classifyFallback(
   config: AppConfig,
   signals: TaskSignals,
   signal?: AbortSignal,

@@ -112,6 +112,7 @@ input[type="color"]:focus-visible { box-shadow: var(--focus); }
 .field > .label { font-size: var(--fs-sm); font-weight: 500; color: var(--text); }
 .field > .help { font-size: var(--fs-xs); color: var(--text-3); }
 .muted { color: var(--text-3); }
+.warn-text { color: var(--warn); font-size: var(--fs-xs); }
 .error-text { color: var(--danger); font-size: var(--fs-sm); }
 kbd { display: inline-flex; align-items: center; justify-content: center; gap: 1px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--border); border-bottom-width: 2px; background: var(--surface); color: var(--text-2); font-size: 11px; line-height: 1; vertical-align: middle; white-space: nowrap; }
 .badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 5px; font-size: 11px; font-weight: 500; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }

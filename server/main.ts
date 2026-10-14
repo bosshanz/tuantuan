@@ -17,8 +17,14 @@ console.log(
 );
 console.log(
   source === "builtin-mock"
-    ? `未找到配置文件 ${process.env.AGENT_HUB_CONFIG ?? "config/providers.json"}，使用内置 mock（.env 里的 Key/URL 不会生效）`
+    ? `未设置 AGENT_HUB_MODELS，也没有 ${process.env.AGENT_HUB_CONFIG ?? "config/providers.json"}，使用内置 mock`
     : `Providers:\n${describeProviders(config).join("\n")}`,
+);
+if (source !== "builtin-mock") console.log(`启用模型: ${config.models.map((m) => m.id).join(", ")}`);
+console.log(
+  config.decision
+    ? `Auto 分类器: 决策模型 ${config.decision.model}（${config.decision.endpoint}，最低置信度 ${config.decision.minConfidence}，超时 ${config.decision.timeoutMs}ms）→ ${config.router.classifierModel ?? "规则"}`
+    : `Auto 分类器: ${config.router.classifierModel ?? "规则"}（未设置 DECISION_BASE_URL，未启用决策模型）`,
 );
 console.log(`Skills: ${skills.skills.map((s) => s.name).join(", ") || "无"}`);
 for (const e of skills.errors) console.warn(`Skill 加载失败 ${e.dir}: ${e.error}`);
