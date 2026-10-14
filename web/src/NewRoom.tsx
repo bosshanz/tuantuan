@@ -1,6 +1,6 @@
 import { ChevronLeft, Hash, MessageCircle } from "lucide-react";
 import { useState } from "react";
-import { workspaceSlug } from "../../shared/workspace";
+import { workspaceRel } from "../../shared/workspace";
 import { type Agent, api, type Room } from "./api";
 import { PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
@@ -125,25 +125,23 @@ export function NewRoom({
             />
           </div>
           {kind === "group" && (
-            <>
-              <label className="field">
-                <span className="label">主 Agent</span>
-                <select
-                  className="select"
-                  aria-label="主 Agent"
-                  value={mainId}
-                  disabled={selected.length === 0}
-                  onChange={(e) => setMain(e.target.value)}
-                >
-                  {selected.length === 0 && <option value="">先选择成员</option>}
-                  {selected.map((id) => (
-                    <option key={id} value={id}>
-                      {agents.find((a) => a.id === id)?.name ?? id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
+            <label className="field">
+              <span className="label">主 Agent</span>
+              <select
+                className="select"
+                aria-label="主 Agent"
+                value={mainId}
+                disabled={selected.length === 0}
+                onChange={(e) => setMain(e.target.value)}
+              >
+                {selected.length === 0 && <option value="">先选择成员</option>}
+                {selected.map((id) => (
+                  <option key={id} value={id}>
+                    {agents.find((a) => a.id === id)?.name ?? id}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
           <div className="field">
             <span className="label">工作目录</span>
@@ -168,7 +166,7 @@ export function NewRoom({
             ) : (
               <span className="muted mono" style={{ fontSize: 12 }}>
                 {workspacesRoot}/
-                {workspaceSlug(name.trim() || (kind === "dm" && dmAgent ? `与 ${dmAgent.name} 私聊` : ""))}
+                {workspaceRel(kind, name.trim() || (dmAgent ? `与 ${dmAgent.name} 私聊` : ""), dmAgent?.name)}
               </span>
             )}
           </div>

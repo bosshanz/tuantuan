@@ -33,7 +33,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 1. 首次启动自动打开「新手引导」（只出现一次，完成或跳过后记在数据库里）；之后在左侧「Harness」（`#/harness`）管理：检测本机已安装的 Harness，显示版本、安装命令和登录方式，可以填绝对路径覆盖、点「测试」做 ACP 握手。
 2. 「Agents → + 新建」创建 Agent：选 Harness、权限策略、身份文档、MCP 服务器和环境变量。
-3. 「会话 → + 新建」建群聊或私聊。每个会话有自己的**工作目录**：默认自动创建在 `~/Tuantuan/<会话名>`（环境变量 `TUANTUAN_WORKSPACES` 可改根目录），也可选已有文件夹；之后在详情面板修改。群聊还可设**主 Agent**。
+3. 「会话 → + 新建」建群聊或私聊。每个会话有自己的**工作目录**：默认自动创建：私聊 `~/Tuantuan/dm/<Agent 名>`，群聊 `~/Tuantuan/groups/<群名>`（环境变量 `TUANTUAN_WORKSPACES` 可改根目录），也可选已有文件夹；之后在详情面板修改。群聊还可设**主 Agent**。
 
 生产方式：`bun run build && bun start`（API 同时托管 `web/dist`，访问 http://localhost:8787）。
 
@@ -104,6 +104,50 @@ bun run test       # 仅测试
 bun run build      # 构建前端
 bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本机 Chrome；CHROME_PATH 可指定）
 ```
+
+
+## 自定义 API（BYOK）
+
+![Agent 编辑：自定义 API（BYOK）](docs/screenshots/agent-byok.png)
+
+新建 Agent 时 Harness 选「自定义 API（BYOK）」：接口格式（OpenAI Chat Completions / OpenAI Responses / Anthropic Messages）、Base URL、API Key、模型，可点「测试连接」。
+
+- 团团内置的轻量 harness，只做对话：SSE 流式、身份文档作系统提示、群聊转述；群里的 `handoff` / `list_members` 以原生 function/tool call 提供（与 MCP 走同一处理逻辑）。**没有文件读写和终端。**
+- API Key 只存服务端（SQLite），接口只返回掩码（如 `sk-••••abcd`），不写日志；编辑时留空即保持原 Key。
+
+## Skills
+
+每个 Agent 有自己的 Skills，按通用约定存放：`skills/<name>/SKILL.md`（frontmatter `name` / `description`，可带附属文件），兼容旧的 `commands/*.md`。在 Agent 页「Skills」里可从 `.claude` / `.agents` / 插件目录（含 `.claude-plugin/plugin.json` 的根目录）或 git 地址导入，逐个启用/停用。
+
+会话开始时，启用的 Skills 以符号链接放进会话目录里该 Harness 原生扫描的位置（同名已存在则跳过，不覆盖）：
+
+| Harness | 位置 | 方式 |
+| --- | --- | --- |
+| Claude Code | `<会话目录>/.claude/skills` | 原生 |
+| Codex | `<会话目录>/.agents/skills` | 原生（`$` 调用） |
+| OpenCode | `<会话目录>/.agents/skills` | 原生 |
+| Grok Build | `<会话目录>/.agents/skills` | 未见官方说明，按通用约定 |
+| 自定义 API | 不写文件 | 模拟：系统提示列出名称和描述，`load_skill` 工具按需加载正文 |
+
+不改 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`：它们同时存放 Harness 的登录信息，隔离会导致需要重新登录。会话目录里已有的 `.claude/` / `.agents/` / `.opencode/` Skills 也会被发现。
+
+输入框里 `/` 弹出 Harness 通过 ACP `available_commands_update` 提供的命令，`$` 弹出 Skills；方向键选择，Tab / Enter 补全，Esc 关闭。
+
+
+### ACP 能力对照（各 Harness）
+
+输入框：`/` 弹出 `available_commands_update` 里的命令；`$` 弹出 Skills（Codex 会把 skill 以 `$name` 形式放进同一列表，团团会拆开）。
+
+| | Claude Code | Codex | OpenCode | Grok | 自定义 API |
+| --- | --- | --- | --- | --- | --- |
+| Skills 发现 | `<cwd>/.claude/skills` | `<cwd>/.agents/skills`、`~/.agents/skills` | `.agents` / `.claude` / `.opencode` | 未见文档，按 `.agents/skills` | `load_skill` 工具（模拟） |
+| `/` 命令 | 原生（含 skill 名） | 原生（`/skills`、`/review`…） | 原生 | 需登录 | 无 |
+| `$` Skills | 无（skill 走 `/`） | 原生（`$demo`…） | 无（skill 走 `/` 或 `@`） | — | 无（用工具） |
+| 会话 list/resume/fork | 有 | 有 | 有 | 视登录 | 无 |
+| configOptions | mode/model/effort… | mode/collaboration_mode/model | model/mode | — | 无 |
+| 未接进 UI | providers、additionalDirectories、subagents、elicitation 表单、session.compaction | 同上；`/review-branch` 等已在命令列表可选 | MCP sse、自定义 skill tool 的单独面板 | 登录后能力未探 | 文件/终端 |
+
+**用户本地配置（CC Switch / Codex provider）**：团团**从不**设置 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`。Skill 只链到会话目录；进程继承登录 shell 的 `ANTHROPIC_*` / `OPENAI_*`；`CODEX_CONFIG` 只合并 `developer_instructions`，不覆盖 `model_provider`。
 
 ## 常见问题
 

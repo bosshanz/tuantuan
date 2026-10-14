@@ -6,7 +6,7 @@ import json from "highlight.js/lib/languages/json";
 import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
-import { Bot, Hash, User } from "lucide-react";
+import { Hash, User } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -23,7 +23,7 @@ hljs.registerAliases(["js", "jsx"], { languageName: "javascript" });
 hljs.registerAliases(["sh", "shell"], { languageName: "bash" });
 hljs.registerAliases(["py"], { languageName: "python" });
 
-const EMOJI = /\p{Extended_Pictographic}/u;
+const _EMOJI = /\p{Extended_Pictographic}/u;
 
 export function AgentAvatar({
   agent,

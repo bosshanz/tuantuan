@@ -1,12 +1,21 @@
 import { AlertTriangle, Check, ChevronLeft, MessageCircle, Plug, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
+import { CUSTOM_FORMATS, DEFAULT_BASE_URL } from "../../server/custom";
 import { AvatarPicker } from "./AvatarPicker";
-import { type Agent, type AgentInput, api, IDENTITY_DELIVERY, type McpServer, type Meta } from "./api";
+import {
+  type Agent,
+  type AgentInput,
+  api,
+  type CustomInput,
+  IDENTITY_DELIVERY,
+  type McpServer,
+  type Meta,
+} from "./api";
 import { type PickItem, PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
-type Form = AgentInput & { color: string; avatarShape: AvatarShape };
+type Form = Omit<AgentInput, "custom"> & { color: string; avatarShape: AvatarShape; custom: CustomInput | null };
 
 /** A new agent gets a random-but-stable look up front so the preview matches what is saved. */
 const draftSeed = () => crypto.randomUUID();
@@ -23,6 +32,7 @@ function emptyAgent(seed: string): Form {
     env: {},
     mcpServerIds: [],
     permissionPolicy: "ask",
+    custom: null,
   };
 }
 
@@ -54,6 +64,7 @@ const comparable = (a: Form) =>
     a.env,
     [...a.mcpServerIds].sort(),
     a.permissionPolicy,
+    a.custom,
   ]);
 
 export function AgentEditor(props: {
@@ -68,7 +79,15 @@ export function AgentEditor(props: {
 }) {
   const { meta, agent } = props;
   const seed = useMemo(() => agent?.id ?? draftSeed(), [agent]);
-  const initial = useMemo<Form>(() => (agent ? { ...agent } : emptyAgent(seed)), [agent, seed]);
+  const initial = useMemo<Form>(() => {
+    if (!agent) return emptyAgent(seed);
+    return {
+      ...agent,
+      custom: agent.custom
+        ? { format: agent.custom.format, baseUrl: agent.custom.baseUrl, model: agent.custom.model, apiKey: "" }
+        : null,
+    };
+  }, [agent, seed]);
   const [form, setForm] = useState<Form>(initial);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -95,6 +114,13 @@ export function AgentEditor(props: {
       const body = {
         ...form,
         avatar: form.avatar.trim() || [...form.name.trim()][0] || "A",
+        custom:
+          form.harness === "custom" && form.custom
+            ? {
+                ...form.custom,
+                apiKey: form.custom.apiKey?.trim() ? form.custom.apiKey : undefined,
+              }
+            : null,
       };
       const saved = agent
         ? await api<Agent>("PUT", `/api/agents/${agent.id}`, body)
@@ -129,7 +155,9 @@ export function AgentEditor(props: {
           <AgentAvatar agent={form} size={28} />
           <div className="editor-title">
             <h2>{agent ? agent.name : form.name.trim() || "新建 Agent"}</h2>
-            <div className="sub">{harness ? harness.name : "未绑定 Harness"}</div>
+            <div className="sub">
+              {form.harness === "custom" ? "自定义 API" : harness ? harness.name : "未绑定 Harness"}
+            </div>
           </div>
         </div>
         {agent && (
@@ -175,7 +203,7 @@ export function AgentEditor(props: {
             <div className="card-head">
               <h3>Harness</h3>
               <p>
-                由哪个编码 Agent 来驱动它；Skills、工具和模型都归 Harness 管。<a href="#/setup">检测与登录</a>
+                由哪个编码 Agent 来驱动它；也可选自定义 API（仅对话，无文件/终端）。<a href="#/harness">检测与登录</a>
               </p>
             </div>
             <div className="card-body">
@@ -185,9 +213,16 @@ export function AgentEditor(props: {
                   className="select"
                   aria-label="Harness"
                   value={form.harness}
-                  onChange={(e) => set("harness", e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    set("harness", v);
+                    if (v === "custom" && !form.custom)
+                      set("custom", { format: "openai-chat", baseUrl: "", model: "", apiKey: "" });
+                    if (v !== "custom") set("custom", null);
+                  }}
                 >
                   <option value="">未绑定</option>
+                  <option value="custom">自定义 API（BYOK）</option>
                   {meta.harnesses.map((h) => (
                     <option key={h.id} value={h.id}>
                       {h.name}
@@ -195,25 +230,35 @@ export function AgentEditor(props: {
                   ))}
                 </select>
               </label>
-              <div className="field">
-                <span className="label">工具授权</span>
-                <fieldset className="segmented" aria-label="工具授权">
-                  <button
-                    type="button"
-                    aria-pressed={form.permissionPolicy === "ask"}
-                    onClick={() => set("permissionPolicy", "ask")}
-                  >
-                    每次询问
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={form.permissionPolicy === "allow"}
-                    onClick={() => set("permissionPolicy", "allow")}
-                  >
-                    自动允许
-                  </button>
-                </fieldset>
-              </div>
+              {form.harness === "custom" && form.custom && (
+                <CustomFields
+                  value={form.custom}
+                  keyHint={agent?.custom?.keyHint ?? ""}
+                  onChange={(c) => set("custom", c)}
+                  agentId={agent?.id}
+                />
+              )}
+              {form.harness !== "custom" && (
+                <div className="field">
+                  <span className="label">工具授权</span>
+                  <fieldset className="segmented" aria-label="工具授权">
+                    <button
+                      type="button"
+                      aria-pressed={form.permissionPolicy === "ask"}
+                      onClick={() => set("permissionPolicy", "ask")}
+                    >
+                      每次询问
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={form.permissionPolicy === "allow"}
+                      onClick={() => set("permissionPolicy", "allow")}
+                    >
+                      自动允许
+                    </button>
+                  </fieldset>
+                </div>
+              )}
             </div>
           </section>
 
@@ -222,7 +267,9 @@ export function AgentEditor(props: {
               <h3>身份文档</h3>
               <p>
                 团团独立维护，不写进项目目录。
-                {harness && `${harness.name}：${IDENTITY_DELIVERY[harness.identity]}。`}
+                {form.harness === "custom"
+                  ? "作为系统提示发送。"
+                  : harness && `${harness.name}：${IDENTITY_DELIVERY[harness.identity]}。`}
               </p>
             </div>
             <div className="card-body">
@@ -264,6 +311,8 @@ export function AgentEditor(props: {
               />
             </div>
           </section>
+
+          {agent && <SkillsCard agentId={agent.id} />}
 
           {agent && (
             <section className="card">
@@ -417,6 +466,192 @@ function McpSection(props: {
           selected={props.selected}
           onToggle={props.toggle}
         />
+      </div>
+    </section>
+  );
+}
+
+const FORMAT_LABEL: Record<(typeof CUSTOM_FORMATS)[number], string> = {
+  "openai-chat": "OpenAI Chat Completions",
+  "openai-responses": "OpenAI Responses",
+  anthropic: "Anthropic Messages",
+};
+
+function CustomFields(props: {
+  value: CustomInput;
+  keyHint: string;
+  onChange: (c: CustomInput) => void;
+  agentId?: string;
+}) {
+  const { value: c, onChange } = props;
+  const set = <K extends keyof CustomInput>(k: K, v: CustomInput[K]) => onChange({ ...c, [k]: v });
+  const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const runTest = async () => {
+    setBusy(true);
+    setTest(null);
+    try {
+      const r = await api<{ ok: boolean; reply?: string; error?: string }>("POST", "/api/custom/test", {
+        ...c,
+        agentId: props.agentId,
+      });
+      setTest(r.ok ? { ok: true, text: r.reply || "ok" } : { ok: false, text: r.error || "失败" });
+    } catch (e) {
+      setTest({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <label className="field">
+        <span className="label">接口格式</span>
+        <select
+          className="select"
+          aria-label="接口格式"
+          value={c.format}
+          onChange={(e) => {
+            const format = e.target.value as CustomInput["format"];
+            onChange({ ...c, format, baseUrl: c.baseUrl || DEFAULT_BASE_URL[format] });
+          }}
+        >
+          {CUSTOM_FORMATS.map((f) => (
+            <option key={f} value={f}>
+              {FORMAT_LABEL[f]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span className="label">Base URL</span>
+        <input
+          className="input mono"
+          aria-label="Base URL"
+          value={c.baseUrl}
+          onChange={(e) => set("baseUrl", e.target.value)}
+          placeholder={DEFAULT_BASE_URL[c.format]}
+          spellCheck={false}
+        />
+      </label>
+      <label className="field">
+        <span className="label">API Key{props.keyHint ? ` · 已保存 ${props.keyHint}` : ""}</span>
+        <input
+          className="input mono"
+          aria-label="API Key"
+          type="password"
+          value={c.apiKey ?? ""}
+          onChange={(e) => set("apiKey", e.target.value)}
+          placeholder={props.keyHint ? "留空则保持原 Key" : "sk-…"}
+          spellCheck={false}
+          autoComplete="off"
+        />
+      </label>
+      <label className="field">
+        <span className="label">模型</span>
+        <input
+          className="input mono"
+          aria-label="模型"
+          value={c.model}
+          onChange={(e) => set("model", e.target.value)}
+          placeholder="gpt-4.1 / claude-sonnet-4-5"
+          spellCheck={false}
+        />
+      </label>
+      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <button type="button" className="btn sm" disabled={busy || !c.model} onClick={() => void runTest()}>
+          {busy ? "测试中…" : "测试连接"}
+        </button>
+        {test && (
+          <span className={test.ok ? "muted" : "error-text"} style={{ fontSize: 12 }}>
+            {test.ok ? `✓ ${test.text.slice(0, 80)}` : test.text}
+          </span>
+        )}
+      </div>
+      <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+        仅对话；群聊可交接。无文件与终端。
+      </p>
+    </>
+  );
+}
+
+function SkillsCard({ agentId }: { agentId: string }) {
+  const [list, setList] = useState<{ name: string; description: string; enabled: boolean; source: string }[]>([]);
+  const [path, setPath] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [_tick, setTick] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void api<{ agent: typeof list }>("GET", `/api/agents/${agentId}/skills`).then(
+      (r) => {
+        if (!cancelled) setList(r.agent);
+      },
+      (e) => {
+        if (!cancelled) setErr((e as Error).message);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId]);
+  const refresh = () => setTick((t) => t + 1);
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h3>Skills</h3>
+        <p>SKILL.md 约定；可从 .claude / .agents 导入。</p>
+      </div>
+      <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {list.length === 0 && (
+          <span className="muted" style={{ fontSize: 12 }}>
+            还没有 Skill
+          </span>
+        )}
+        {list.map((sk) => (
+          <label key={sk.name} className="row" style={{ gap: 8, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={sk.enabled}
+              onChange={() =>
+                void api("POST", `/api/agents/${agentId}/skills`, {
+                  action: sk.enabled ? "disable" : "enable",
+                  name: sk.name,
+                }).then(refresh)
+              }
+            />
+            <span className="grow">
+              <code>{sk.name}</code>
+              <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                {sk.description}
+              </span>
+            </span>
+          </label>
+        ))}
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            className="input mono grow"
+            aria-label="导入路径"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            placeholder="~/proj/.agents 或含 skills/ 的目录"
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="btn sm"
+            disabled={!path.trim()}
+            onClick={() =>
+              void api("POST", `/api/agents/${agentId}/skills`, { action: "import", path: path.trim() })
+                .then(() => {
+                  setPath("");
+                  refresh();
+                })
+                .catch((e) => setErr((e as Error).message))
+            }
+          >
+            导入
+          </button>
+        </div>
+        {err && <div className="error-text">{err}</div>}
       </div>
     </section>
   );

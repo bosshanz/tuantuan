@@ -1,4 +1,4 @@
-import { Bot, Plus, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent, Room } from "./api";
 import { AgentAvatar, RoomIcon } from "./ui";

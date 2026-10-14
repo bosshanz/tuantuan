@@ -1,6 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import { applyUpdate, emptyTimeline, type Handoff, type Timeline, timelineText } from "../shared/timeline";
 import type { TerminalSnapshot } from "./acp";
+import { CUSTOM_HARNESS } from "./custom";
 import { harnessSpec } from "./harness";
 import type { HarnessHost, PermissionAsk, SessionView } from "./host";
 import { mentionsEveryone, parseMentions } from "./mentions";
@@ -374,7 +375,7 @@ export class Orchestrator implements ToolProvider {
           .map(
             (m) =>
               `@${m.name}${m.id === ctx.agentId ? "（你）" : ""}${m.id === room.mainAgentId ? "（主 Agent）" : ""} · ${
-                harnessSpec(m.harness)?.name ?? "未绑定 Harness"
+                (m.harness === CUSTOM_HARNESS ? "自定义 API" : harnessSpec(m.harness)?.name) ?? "未绑定 Harness"
               }`,
           )
           .join("\n");

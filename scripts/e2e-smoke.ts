@@ -63,6 +63,36 @@ try {
   };
   await createAgent("Alice", "你是产品经理。");
   await createAgent("Bob", "你是工程师。");
+
+  // BYOK custom agent against a local mock OpenAI-compatible server.
+  const byok = Bun.serve({
+    port: 0,
+    fetch: async (req) => {
+      const _body = await req.json();
+      const stream =
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "byok-ok" } }] })}\n\n` +
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n` +
+        `data: [DONE]\n\n`;
+      return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+    },
+  });
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
+  await page.getByLabel("名称").fill("BYOK");
+  await page.getByLabel("Harness", { exact: true }).selectOption({ label: "自定义 API（BYOK）" });
+  await page.getByLabel("接口格式").selectOption({ label: "OpenAI Chat Completions" });
+  await page.getByLabel("Base URL").fill(`http://127.0.0.1:${byok.port}/v1`);
+  await page.getByLabel("API Key").fill("sk-e2e-test");
+  await page.getByLabel("模型").fill("mock");
+  await page.getByRole("button", { name: "测试连接" }).waitFor();
+  await shot("agent-byok");
+  await page.getByRole("button", { name: "创建 Agent" }).click();
+  await page.getByText("所有修改已保存").waitFor();
+  const byokAgent = app.store.listAgents().find((a) => a.name === "BYOK");
+  if (!byokAgent?.custom?.keyHint || byokAgent.custom.keyHint.includes("sk-e2e-test"))
+    throw new Error("API key was not masked");
+  byok.stop(true);
+
   await shot("agent-editor");
 
   await page.getByRole("button", { name: "会话", exact: true }).click();
@@ -74,13 +104,13 @@ try {
   await pick("Bob").check();
   // The main agent is chosen when creating the group; its folder is auto-created by default.
   await page.getByLabel("主 Agent").selectOption({ label: "Bob" });
-  await page.getByText(`${workspaces}/冒烟群`).waitFor();
+  await page.getByText(`${workspaces}/groups/冒烟群`).waitFor();
   await shot("new-group");
   await page.getByRole("button", { name: "创建会话" }).click();
   await page.getByRole("heading", { name: "冒烟群" }).waitFor();
   const group = app.store.listRooms().find((r) => r.name === "冒烟群");
   const bobId = app.store.listAgents().find((a) => a.name === "Bob")?.id;
-  if (group?.mainAgentId !== bobId || group?.cwd !== join(workspaces, "冒烟群") || !existsSync(group.cwd))
+  if (group?.mainAgentId !== bobId || group?.cwd !== join(workspaces, "groups", "冒烟群") || !existsSync(group.cwd))
     throw new Error("new group lost main agent / auto folder");
 
   // Group: no @ -> the main agent (Bob) answers; @Alice -> Alice.
@@ -303,7 +333,7 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → onboarding once → new group with main agent + auto folder → DM in a chosen folder → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
+    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → BYOK form → onboarding once → new group with main agent + auto folder → DM in a chosen folder → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
   );
 } catch (e) {
   failed = true;

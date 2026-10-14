@@ -62,6 +62,84 @@ beforeAll(async () => {
   await new Promise((r) => ws.addEventListener("open", r, { once: true }));
 });
 
+describe("BYOK agent", () => {
+  test("key is masked, replies stream, and handoff runs as a native tool call", async () => {
+    let round = 0;
+    const llm = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        const body = (await req.json()) as { messages: { role: string }[]; tools?: unknown[] };
+        const hasTool = body.messages.some((m) => m.role === "tool");
+        round++;
+        const chunks =
+          body.tools && !hasTool
+            ? [
+                {
+                  choices: [
+                    {
+                      delta: {
+                        tool_calls: [
+                          {
+                            index: 0,
+                            id: "t1",
+                            function: { name: "handoff", arguments: '{"agent":"Mate","task":"接手"}' },
+                          },
+                        ],
+                      },
+                    },
+                  ],
+                },
+                { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+              ]
+            : [{ choices: [{ delta: { content: "byok 回复" } }] }, { choices: [{ delta: {}, finish_reason: "stop" }] }];
+        return new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", {
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    });
+    try {
+      const r = await api<Agent>("POST", "/api/agents", {
+        ...agentInput("Byok"),
+        harness: "custom",
+        custom: {
+          format: "openai-chat",
+          baseUrl: `http://127.0.0.1:${llm.port}/v1`,
+          model: "m",
+          apiKey: "sk-secret-123456",
+        },
+      });
+      expect(r.status).toBe(201);
+      expect(JSON.stringify(r.data)).not.toContain("sk-secret-123456");
+      expect(r.data.custom?.keyHint).toBe("sk-••••3456");
+      // Saving without a key keeps the stored one.
+      const u = await api<Agent>("PUT", `/api/agents/${r.data.id}`, {
+        ...agentInput("Byok"),
+        harness: "custom",
+        custom: { format: "openai-chat", baseUrl: `http://127.0.0.1:${llm.port}/v1`, model: "m2" },
+      });
+      expect(u.data.custom?.keyHint).toBe("sk-••••3456");
+      const t = await api<{ ok: boolean; reply: string }>("POST", "/api/custom/test", {
+        format: "openai-chat",
+        baseUrl: `http://127.0.0.1:${llm.port}/v1`,
+        model: "m",
+        agentId: r.data.id,
+      });
+      expect(t.data).toMatchObject({ ok: true, reply: "byok 回复" });
+
+      const dmRoom = await createRoom("byok-dm", "dm", [r.data.id]);
+      expect((await say(dmRoom.id, "你好")).at(-1)?.content).toBe("byok 回复");
+
+      const mate = await createAgent("Mate");
+      const g = await createRoom("byok-g", "group", [r.data.id, mate.id], { mainAgentId: r.data.id });
+      const ms = await say(g.id, "开始");
+      expect(ms.some((m) => m.senderName === "Mate" && m.status === "done")).toBe(true);
+      expect(round).toBeGreaterThan(2);
+    } finally {
+      llm.stop(true);
+    }
+  });
+});
+
 describe("onboarding", () => {
   test("shows until finished or skipped, then stays done", async () => {
     expect((await api<{ onboarded: boolean }>("GET", "/api/meta")).data.onboarded).toBe(false);
@@ -76,9 +154,25 @@ describe("room working directories", () => {
     const r1 = await createRoom("产品 研发/群", "group", [a.id]);
     const r2 = await createRoom("产品 研发/群", "group", [a.id]);
     const d = await createRoom("与 WsBot 私聊", "dm", [a.id]);
-    expect(r1.cwd).toBe(join(WORKSPACES, "产品-研发-群"));
-    expect(r2.cwd).toBe(join(WORKSPACES, "产品-研发-群-2"));
+    expect(r1.cwd).toBe(join(WORKSPACES, "groups", "产品-研发-群"));
+    expect(r2.cwd).toBe(join(WORKSPACES, "groups", "产品-研发-群-2"));
+    expect(d.cwd).toBe(join(WORKSPACES, "dm", "WsBot"));
     for (const r of [r1, r2, d]) expect(existsSync(r.cwd)).toBe(true);
+  });
+
+  test("old flat auto-folders move to dm/ or groups/ only when empty and outside sessions", async () => {
+    const { migrateAutoWorkspace } = await import("../server/workspace");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const empty = join(WORKSPACES, "与-Old-私聊");
+    mkdirSync(empty, { recursive: true });
+    expect(migrateAutoWorkspace(empty, "dm", "与 Old 私聊", "Old")).toBe(join(WORKSPACES, "dm", "Old"));
+    expect(existsSync(empty)).toBe(false);
+    const used = join(WORKSPACES, "旧群");
+    mkdirSync(used, { recursive: true });
+    writeFileSync(join(used, "a.txt"), "x");
+    expect(migrateAutoWorkspace(used, "group", "旧群")).toBe(used);
+    const outside = mkdtempSync(join(tmpdir(), "tuantuan-own-"));
+    expect(migrateAutoWorkspace(outside, "group", "x")).toBe(outside);
   });
 
   test("a chosen folder must exist; changing it (DMs too) forgets the harness session", async () => {

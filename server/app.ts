@@ -1,19 +1,33 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { methods as acpMethods } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
 import { replayTurns } from "../shared/timeline";
 import { AcpProcess, withTimeout } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
+import { CUSTOM_FORMATS, CUSTOM_HARNESS, testConnection } from "./custom";
 import { detectHarness, harnessSpec, loginShellEnv, visibleHarnesses } from "./harness";
 import { HarnessHost } from "./host";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
+import * as skills from "./skills";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 import { TuantuanMcp } from "./tuantuan-mcp";
-import { createWorkspace, existingFolder, workspacesRoot } from "./workspace";
+import { createWorkspace, existingFolder, migrateAutoWorkspace, workspacesRoot } from "./workspace";
+
+const CustomSchema = z.object({
+  format: z.enum(CUSTOM_FORMATS),
+  baseUrl: z
+    .string()
+    .trim()
+    .max(512)
+    .refine((u) => u === "" || /^https?:\/\/\S+$/.test(u), "Base URL 需以 http(s):// 开头")
+    .default(""),
+  model: z.string().trim().max(200).default(""),
+  apiKey: z.string().max(4000).optional(),
+});
 
 const AgentInputSchema = z.object({
   name: z
@@ -39,6 +53,7 @@ const AgentInputSchema = z.object({
     .default({}),
   mcpServerIds: z.array(z.string()).max(32).default([]),
   permissionPolicy: z.enum(PERMISSION_POLICIES).default("ask"),
+  custom: CustomSchema.nullable().optional(),
 });
 
 const RoomInputSchema = z.object({
@@ -72,6 +87,8 @@ type WsData = { kind: "ui"; rooms: Set<string> };
 
 export function createApp(deps: AppDeps) {
   const store = new Store(deps.dbPath);
+  const dataDir =
+    deps.dbPath === ":memory:" ? join(tmpdir(), `tuantuan-data-${process.pid}`) : dirname(resolve(deps.dbPath));
   let server: Server<WsData> | null = null;
   const publish = (roomId: string, event: RoomEvent) => {
     server?.publish(`room:${roomId}`, JSON.stringify(event));
@@ -79,6 +96,7 @@ export function createApp(deps: AppDeps) {
   const mcp = new TuantuanMcp();
   const host = new HarnessHost(
     store,
+    dataDir,
     {
       session: (roomId, agentId, view) => publish(roomId, { type: "session", roomId, agentId, view }),
       permission: (a) =>
@@ -93,13 +111,28 @@ export function createApp(deps: AppDeps) {
   mcp.provider = orchestrator;
 
   // Every conversation owns a working directory; older rooms without one get a workspace now.
-  for (const r of store.listRooms()) if (!r.cwd) store.updateRoom(r.id, { cwd: createWorkspace(r.name) });
+  // Flat auto-folders under the root that are still empty move into dm/ or groups/.
+  for (const r of store.listRooms()) {
+    const agent = r.agentIds[0] ? store.getAgent(r.agentIds[0]) : null;
+    if (!r.cwd) store.updateRoom(r.id, { cwd: createWorkspace(r.kind, r.name, agent?.name) });
+    else if (r.agentIds.every((id) => !store.getAcpSession(r.id, id))) {
+      // Only when no harness session would be lost (moving clears acp_sessions).
+      const next = migrateAutoWorkspace(r.cwd, r.kind, r.name, agent?.name);
+      if (next !== r.cwd) store.updateRoom(r.id, { cwd: next });
+    }
+  }
 
   const json = (data: unknown, status = 200) => Response.json(data, { status });
 
   function validateAgent(raw: unknown): AgentInput {
     const a = AgentInputSchema.parse(raw);
-    if (a.harness && !harnessSpec(a.harness)) throw new ValidationError(`未知 Harness：${a.harness}`);
+    if (a.harness === CUSTOM_HARNESS) {
+      if (!a.custom) throw new ValidationError("请填写自定义 API 设置");
+      if (!a.custom.model) throw new ValidationError("请填写模型");
+    } else {
+      if (a.harness && !harnessSpec(a.harness)) throw new ValidationError(`未知 Harness：${a.harness}`);
+      a.custom = null;
+    }
     const mcpIds = new Set(store.listMcpServers().map((s) => s.id));
     for (const m of a.mcpServerIds) if (!mcpIds.has(m)) throw new ValidationError(`未知 MCP 服务：${m}`);
     return { ...a, avatar: a.avatar ?? ([...a.name][0] as string) };
@@ -220,6 +253,24 @@ export function createApp(deps: AppDeps) {
         })),
       });
 
+    // BYOK connection test: one short request. The key comes from the form, or the saved agent's key.
+    if (resource === "custom" && id === "test" && method === "POST") {
+      const c = CustomSchema.extend({ agentId: z.string().optional() }).parse(await body());
+      const saved = c.agentId ? store.getCustomSecret(c.agentId) : null;
+      const cfg = {
+        format: c.format,
+        baseUrl: c.baseUrl,
+        model: c.model,
+        apiKey: c.apiKey?.trim() || saved?.apiKey || "",
+      };
+      try {
+        const reply = await testConnection(cfg, AbortSignal.timeout(30_000));
+        return json({ ok: true, reply });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message });
+      }
+    }
+
     if (resource === "harnesses") {
       if (!id && method === "GET") return json(await harnessStatuses());
       if (id && sub === "path" && method === "PUT") {
@@ -248,6 +299,32 @@ export function createApp(deps: AppDeps) {
       if (id && method === "PUT") return json(store.updateAgent(id, validateAgent(await body())));
       if (id && method === "DELETE")
         return store.deleteAgent(id) ? json({ ok: true }) : json({ error: "Agent 不存在" }, 404);
+      if (id && sub === "skills" && method === "GET") {
+        if (!store.getAgent(id)) throw new ValidationError("Agent 不存在", 404);
+        const roomId = new URL(req.url).searchParams.get("roomId");
+        const room = roomId ? store.getRoom(roomId) : null;
+        return json({
+          agent: skills.listAgentSkills(dataDir, id),
+          room: room ? skills.listRoomSkills(room.cwd) : [],
+        });
+      }
+      if (id && sub === "skills" && method === "POST") {
+        if (!store.getAgent(id)) throw new ValidationError("Agent 不存在", 404);
+        const b = z
+          .object({
+            action: z.enum(["import", "enable", "disable"]),
+            path: z.string().optional(),
+            name: z.string().optional(),
+          })
+          .parse(await body());
+        if (b.action === "import") {
+          if (!b.path) throw new ValidationError("请填写导入路径");
+          return json(skills.importSkills(dataDir, id, b.path));
+        }
+        if (!b.name) throw new ValidationError("请填写 skill 名称");
+        skills.setSkillEnabled(dataDir, id, b.name, b.action === "enable");
+        return json(skills.listAgentSkills(dataDir, id));
+      }
     }
 
     if (resource === "mcp-servers") {
@@ -266,7 +343,8 @@ export function createApp(deps: AppDeps) {
         const r = RoomInputSchema.parse(await body());
         if (r.kind === "dm" && r.agentIds.length !== 1) throw new ValidationError("私聊必须且只能包含 1 个 Agent");
         // A chosen folder must exist; otherwise the room gets a fresh workspace folder.
-        const cwd = r.cwd?.trim() ? existingFolder(r.cwd) : createWorkspace(r.name);
+        const agentName = r.agentIds[0] ? store.getAgent(r.agentIds[0])?.name : undefined;
+        const cwd = r.cwd?.trim() ? existingFolder(r.cwd) : createWorkspace(r.kind, r.name, agentName);
         return json(store.createRoom(r.name, r.kind, r.agentIds, { mainAgentId: r.mainAgentId, cwd }), 201);
       }
       const room = id ? store.getRoom(id) : null;
@@ -291,8 +369,7 @@ export function createApp(deps: AppDeps) {
       // Per-agent harness session controls: /api/rooms/:id/agents/:agentId/<action>
       if (room && sub === "agents" && subId) {
         const t = agentIn(room.id, subId);
-        if (action === "session" && method === "GET")
-          return json(await host.session(t.room, t.agent, t.identity).then((x) => x.slot.view));
+        if (action === "session" && method === "GET") return json(await host.sessionView(t.room, t.agent, t.identity));
         if (action === "session" && method === "POST") {
           const { sessionId } = z.object({ sessionId: z.string().nullable() }).parse(await body());
           return json(await host.switchSession(t.room, t.agent, t.identity, sessionId));

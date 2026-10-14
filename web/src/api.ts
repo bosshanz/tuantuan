@@ -1,12 +1,16 @@
 import type { TerminalSnapshot } from "../../server/acp";
+import type { CustomFormat } from "../../server/custom";
 import type { HarnessStatus } from "../../server/harness";
 import type { PermissionAsk, SessionView } from "../../server/host";
 import type { RoomEvent, RoomState } from "../../server/orchestrator";
-import type { Agent, AgentInput, McpServer, Message, Room } from "../../server/store";
+import type { Agent, AgentInput, CustomInput, CustomPublic, McpServer, Message, Room } from "../../server/store";
 
 export type {
   Agent,
   AgentInput,
+  CustomFormat,
+  CustomInput,
+  CustomPublic,
   HarnessStatus,
   McpServer,
   Message,

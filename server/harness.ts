@@ -109,6 +109,11 @@ export function visibleHarnesses(): HarnessSpec[] {
 
 let loginEnv: Promise<Record<string, string>> | null = null;
 
+/** Test-only: drop the cached login-shell env so a new ANTHROPIC_* / CODEX_* is picked up. */
+export function resetLoginShellEnv() {
+  loginEnv = null;
+}
+
 /**
  * GUI apps on macOS start with a bare PATH, so harness CLIs installed via npm/brew/curl are not found.
  * Ask the user's login shell once for its environment and merge it over ours.

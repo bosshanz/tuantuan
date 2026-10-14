@@ -17,7 +17,7 @@
   1. @ 了具体 Agent → 只有这些成员回复。
   2. 没有 @ → 群的**主 Agent**回复（建群时默认第一个成员，可在详情面板修改）。
   3. `@所有人`（或 `@all`、`@everyone`）→ 每个成员按顺序各回复一次。
-  4. 每个会话（群聊或私聊）有自己的工作目录：默认在 `~/Tuantuan/<会话名>` 自动创建（`TUANTUAN_WORKSPACES` 可改），也可选已有文件夹，之后可修改；群内 Agent 共用它；Agent 收到的是它上次发言之后的群聊转述（最多 30 条 / 约 8000 字，保留最新的并注明省略条数，单条超过 2000 字截断）。
+  4. 每个会话（群聊或私聊）有自己的工作目录：默认自动创建在 `~/Tuantuan/dm/<Agent>` 或 `~/Tuantuan/groups/<群名>`（`TUANTUAN_WORKSPACES` 可改），也可选已有文件夹，之后可修改；群内 Agent 共用它；Agent 收到的是它上次发言之后的群聊转述（最多 30 条 / 约 8000 字，保留最新的并注明省略条数，单条超过 2000 字截断）。
   5. Agent 之间只能通过团团注入的 `tuantuan` MCP 服务器上的 `handoff(agent, task)` 交接：只能交给群里的其他成员，不能交给自己；本条消息里已在排队的不重复触发；`@所有人` 这一轮已回复过的不再触发；每条人类消息最多 5 次交接，超出时停止并提示；回复失败或被取消时它发起的交接作废。正文里的 @ 永远不触发。
   6. 新消息打断当前回复链，未执行的触发（含交接）列在系统消息里后丢弃。
 - 私聊：每条消息都由该 Agent 回复；新消息排队。私聊不注入 `tuantuan` 工具。
@@ -67,3 +67,7 @@
 - 资源：`web/public/favicon.svg`（随系统深浅色切换）、`favicon-32.png`、`apple-touch-icon.png`，字标在 `docs/brand/`。
 - 仓库：`bosshanz/tuantuan`（原 `agent-hub`，旧地址自动跳转）。
 - 兼容：`AGENT_HUB_*` 环境变量、默认数据库文件名和 localStorage 键保持不变。
+
+- 自定义 API（BYOK）：内置的轻量对话 harness（OpenAI Chat / Responses / Anthropic），支持交接；无文件和终端。用户明确要求后加入，对「不做内置 Harness」的决定是一处有意的例外。
+- Skills：每个 Agent 一套，SKILL.md 约定，可导入、启停；`/` 命令、`$` Skills 补全。
+- Skills 物化不隔离用户 Harness 配置（不设 CLAUDE_CONFIG_DIR/CODEX_HOME）；CC Switch 的 ANTHROPIC_* 与 Codex config.toml model_provider 原样继承。

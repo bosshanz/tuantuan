@@ -374,8 +374,11 @@ export function ChatView(props: {
             onSubmit={() => void send()}
             members={room.kind === "group" ? members : []}
             interrupts={room.kind === "group" && running}
-            placeholder={primaryView?.commands.length ? "发消息，/ 查看命令…" : "发消息…"}
+            placeholder={
+              primaryView?.commands.length || primaryView?.skills.length ? "发消息，/ 命令 · $ Skills…" : "发消息…"
+            }
             commands={primaryView?.commands ?? []}
+            skills={primaryView?.skills ?? []}
             images={images}
             onImages={setImages}
             imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
@@ -885,6 +888,7 @@ function Composer(props: {
   interrupts: boolean;
   placeholder: string;
   commands: { name: string; description: string }[];
+  skills: { name: string; description: string }[];
   images: ImageAttachment[];
   onImages: (imgs: ImageAttachment[]) => void;
   /** null = the harness does not take images (button hidden). */
@@ -909,14 +913,19 @@ function Composer(props: {
     query && !dismissed
       ? [...(everyone ? [EVERYONE] : []), ...props.members.filter((a) => a.name.toLowerCase().includes(q))]
       : [];
-  // Slash commands come from the harness (available_commands_update); typed at the very start.
+  // / = harness commands (available_commands_update); $ = skills (Codex and Tuantuan-managed).
   const slash = /^\/(\S*)$/.exec(props.value.slice(0, caret));
+  const dollar = /^\$(\S*)$/.exec(props.value.slice(0, caret));
   const commands =
     slash && !dismissed && options.length === 0
       ? props.commands.filter((c) => c.name.toLowerCase().startsWith((slash[1] ?? "").toLowerCase())).slice(0, 12)
       : [];
-  const pickCommand = (name: string) => {
-    const v = `/${name} `;
+  const skillHits =
+    dollar && !dismissed && options.length === 0
+      ? props.skills.filter((c) => c.name.toLowerCase().startsWith((dollar[1] ?? "").toLowerCase())).slice(0, 12)
+      : [];
+  const pickCommand = (name: string, prefix: "/" | "$") => {
+    const v = `${prefix}${name} `;
     props.onChange(v + props.value.slice(caret));
     setCaret(v.length);
     requestAnimationFrame(() => {
@@ -924,6 +933,11 @@ function Composer(props: {
       ref.current?.setSelectionRange(v.length, v.length);
     });
   };
+  const picker = commands.length
+    ? { kind: "cmd" as const, items: commands, prefix: "/" as const, title: "命令" }
+    : skillHits.length
+      ? { kind: "skill" as const, items: skillHits, prefix: "$" as const, title: "Skills" }
+      : null;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resize on value change
   useEffect(() => {
@@ -954,22 +968,25 @@ function Composer(props: {
         void addFiles(e.dataTransfer.files);
       }}
     >
-      {commands.length > 0 && (
-        <div className="popover mention-pop slash-pop" role="listbox" aria-label="斜杠命令">
-          <div className="pop-title">命令</div>
-          {commands.map((c, i) => (
+      {picker && (
+        <div className="popover mention-pop slash-pop" role="listbox" aria-label={picker.title}>
+          <div className="pop-title">{picker.title}</div>
+          {picker.items.map((c, i) => (
             <button
               type="button"
               role="option"
-              aria-selected={i === active % commands.length}
+              aria-selected={i === active % picker.items.length}
               key={c.name}
               className="pop-item"
               onMouseDown={(e) => {
                 e.preventDefault();
-                pickCommand(c.name);
+                pickCommand(c.name, picker.prefix);
               }}
             >
-              <code className="slash-name">/{c.name}</code>
+              <code className="slash-name">
+                {picker.prefix}
+                {c.name}
+              </code>
               <span className="muted">{c.description}</span>
             </button>
           ))}
@@ -1040,19 +1057,19 @@ function Composer(props: {
           }
         }}
         onKeyDown={(e) => {
-          if (commands.length > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+          if (picker && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
             e.preventDefault();
-            setActive((i) => (i + (e.key === "ArrowDown" ? 1 : commands.length - 1)) % commands.length);
-          } else if (commands.length > 0 && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
-            const c = commands[active % commands.length] as { name: string };
-            if (props.value.trim() !== `/${c.name}`) {
+            setActive((i) => (i + (e.key === "ArrowDown" ? 1 : picker.items.length - 1)) % picker.items.length);
+          } else if (picker && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
+            const c = picker.items[active % picker.items.length] as { name: string };
+            if (props.value.trim() !== `${picker.prefix}${c.name}`) {
               e.preventDefault();
-              pickCommand(c.name);
+              pickCommand(c.name, picker.prefix);
             } else if (e.key === "Enter") {
               e.preventDefault();
               props.onSubmit();
             }
-          } else if (commands.length > 0 && e.key === "Escape") {
+          } else if (picker && e.key === "Escape") {
             setDismissed(true);
           } else if (options.length > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
             e.preventDefault();

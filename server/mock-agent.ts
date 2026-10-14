@@ -322,6 +322,9 @@ acp
       } else if (cmd === "members") {
         const [, out] = await tool("list_members", {});
         await chunk(`成员：${out.replaceAll("\n", "；")}。`);
+      } else if (cmd === "env") {
+        const key = arg.trim() || "ANTHROPIC_BASE_URL";
+        await chunk(`${key}=${process.env[key] ?? ""}`);
       }
       if (cmd === "plan") {
         const steps = ["读需求", "写代码", "跑测试"];

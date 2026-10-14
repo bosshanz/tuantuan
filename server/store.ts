@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { emptyTimeline, type Timeline } from "../shared/timeline";
 import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
+import { type CustomFormat, type CustomSecret, maskKey } from "./custom";
 
 /** SQLite is the source of truth for agents, rooms, messages and ACP session bindings. */
 
@@ -124,6 +125,8 @@ export const MIGRATIONS: string[] = [
      SELECT a.cwd FROM agents a JOIN room_agents ra ON ra.agent_id = a.id WHERE ra.room_id = rooms.id LIMIT 1), '')
    WHERE kind = 'dm' AND cwd = '';
    ALTER TABLE agents DROP COLUMN cwd;`,
+  // BYOK「自定义」harness settings (format, base URL, model, API key) as JSON; the key never leaves the server.
+  `ALTER TABLE agents ADD COLUMN custom TEXT;`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -144,11 +147,30 @@ export interface Agent {
   mcpServerIds: string[];
   /** "ask" shows the permission dialog; "allow" picks the agent's first allow option automatically. */
   permissionPolicy: PermissionPolicy;
+  /** BYOK settings when harness is "custom"; the API key is only ever exposed masked. */
+  custom: CustomPublic | null;
   createdAt: number;
   updatedAt: number;
 }
 
-export type AgentInput = Omit<Agent, "id" | "createdAt" | "updatedAt" | "avatarShape" | "color"> & {
+export interface CustomPublic {
+  format: CustomFormat;
+  baseUrl: string;
+  model: string;
+  /** Masked key, e.g. "sk-••••abcd"; "" = none saved. */
+  keyHint: string;
+}
+
+/** On save: apiKey "" / omitted keeps the stored key. */
+export interface CustomInput {
+  format: CustomFormat;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+}
+
+export type AgentInput = Omit<Agent, "id" | "createdAt" | "updatedAt" | "avatarShape" | "color" | "custom"> & {
+  custom?: CustomInput | null;
   /** Omitted or "" => deterministic default from the agent id. */
   color?: string;
   avatarShape?: AvatarShape;
@@ -261,8 +283,24 @@ export class Store {
     return this.getAgent(id) as Agent;
   }
 
+  /** Full BYOK settings including the key — server-side use only. */
+  getCustomSecret(agentId: string): CustomSecret | null {
+    const r = this.db.query("SELECT custom FROM agents WHERE id = ?").get(agentId) as Row | null;
+    return r?.custom ? (JSON.parse(r.custom as string) as CustomSecret) : null;
+  }
+
   private writeAgent(id: string, a: AgentInput, createdAt: number, updatedAt: number, op: "insert" | "update") {
+    const old = op === "update" ? this.getCustomSecret(id) : null;
+    const custom: CustomSecret | null = a.custom
+      ? {
+          format: a.custom.format,
+          baseUrl: a.custom.baseUrl.trim(),
+          model: a.custom.model.trim(),
+          apiKey: a.custom.apiKey?.trim() || old?.apiKey || "",
+        }
+      : null;
     const params = {
+      custom: custom ? JSON.stringify(custom) : null,
       id,
       name: a.name,
       color: a.color || defaultAvatar(id).color,
@@ -281,10 +319,10 @@ export class Store {
     };
     const sql =
       op === "insert"
-        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,tools,skills,model_mode,created_at,updated_at)
-             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$tools,$skills,$model_mode,$created_at,$updated_at)`
+        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,tools,skills,model_mode,created_at,updated_at,custom)
+             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$tools,$skills,$model_mode,$created_at,$updated_at,$custom)`
         : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,identity=$identity,harness=$harness,env=$env,
-             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
+             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,custom=$custom,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
     try {
       this.db.query(sql).run(params);
     } catch (e) {
@@ -498,6 +536,10 @@ export class Store {
   }
 }
 
+function publicCustom(c: CustomSecret): CustomPublic {
+  return { format: c.format, baseUrl: c.baseUrl, model: c.model, keyHint: maskKey(c.apiKey) };
+}
+
 function toAgent(r: Row): Agent {
   return {
     id: r.id as string,
@@ -510,6 +552,7 @@ function toAgent(r: Row): Agent {
     env: JSON.parse(r.env as string),
     mcpServerIds: JSON.parse(r.mcp_server_ids as string),
     permissionPolicy: r.permission_policy as PermissionPolicy,
+    custom: r.custom ? publicCustom(JSON.parse(r.custom as string)) : null,
     createdAt: r.created_at as number,
     updatedAt: r.updated_at as number,
   };
