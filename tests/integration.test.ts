@@ -187,10 +187,13 @@ describe("ACP harness integration (mock ACP agent)", () => {
     const b = await createAgent("Bob");
     const g = await createRoom("群", "group", [a.id, b.id], { mainAgentId: b.id });
     let ms = await say(g.id, "大家好");
-    expect(ms.at(-1)).toMatchObject({ senderName: "Bob", content: "收到：「[Andy]: 大家好」（mock-fast）" });
+    expect(ms.at(-1)).toMatchObject({ senderName: "Bob", content: "收到：「大家好」（mock-fast）" });
     ms = await say(g.id, "@Alice 你来");
     expect(ms.at(-1)?.senderName).toBe("Alice");
-    expect(ms.at(-1)?.content).toContain("[Bob]: 收到");
+    expect(ms.at(-1)?.content).toBe("收到：「@Alice 你来」（mock-fast）");
+    // The relay (群聊转述) reaches the harness: the mock echoes its prompt as a thought.
+    const thought = ms.at(-1)?.timeline?.parts.find((p) => p.kind === "thought");
+    expect(thought && "text" in thought ? thought.text : "").toContain("[Bob（Agent）]: 收到");
     const patched = (await api<Room>("PATCH", `/api/rooms/${g.id}`, { mainAgentId: a.id })).data;
     expect(patched.mainAgentId).toBe(a.id);
     expect((await say(g.id, "再来")).at(-1)?.senderName).toBe("Alice");

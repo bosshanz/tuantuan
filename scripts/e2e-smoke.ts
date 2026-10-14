@@ -8,6 +8,9 @@ import { chromium } from "playwright-core";
 import { serve } from "../server/app";
 
 process.env.TUANTUAN_MOCK_HARNESS = "1";
+// The mock harness starts logged out; onboarding logs in through ACP `authenticate`, which creates this file.
+const authFile = join(tmpdir(), `tuantuan-e2e-auth-${Date.now()}`);
+process.env.MOCK_AGENT_AUTH_FILE = authFile;
 const dbPath = join(tmpdir(), `agent-hub-e2e-${Date.now()}.db`);
 const cwd = mkdtempSync(join(tmpdir(), "tuantuan-e2e-cwd-"));
 writeFileSync(join(cwd, "mock-edit.txt"), "hello\n");
@@ -26,11 +29,14 @@ try {
   await page.goto(`http://localhost:${server.port}/`);
   await page.locator(".rail .dot.ok").waitFor();
 
-  // Onboarding: the mock harness is detected and the ACP handshake succeeds.
+  // Onboarding: the mock harness is detected, the handshake shows it logged out, and its own
+  // (agent-driven) login method logs in; the re-test then reports logged in.
   await page.getByRole("button", { name: "引导", exact: true }).click();
   const mockRow = page.locator(".harness-row", { hasText: "Mock（测试）" });
   await mockRow.getByRole("button", { name: "握手测试" }).click();
-  await mockRow.getByText(/ACP v1 · Mock/).waitFor();
+  await mockRow.getByText(/ACP v1 · Mock.*未登录/).waitFor();
+  await mockRow.getByRole("button", { name: "用「Mock 登录」登录" }).click();
+  await mockRow.getByText(/ACP v1 · Mock.*已登录/).waitFor();
   await shot("setup");
 
   const createAgent = async (name: string, identity: string) => {
@@ -54,21 +60,29 @@ try {
     page.locator(".pick", { has: page.locator(".pick-name", { hasText: new RegExp(`^${name}$`) }) }).locator("input");
   await pick("Alice").check();
   await pick("Bob").check();
+  // Main agent and shared working directory are chosen when creating the group.
+  await page.getByLabel("主 Agent").selectOption({ label: "Bob" });
+  await page.getByLabel("共享工作目录").fill(cwd);
   await page.getByRole("button", { name: "创建会话" }).click();
   await page.getByRole("heading", { name: "冒烟群" }).waitFor();
+  const group = app.store.listRooms().find((r) => r.name === "冒烟群");
+  const bobId = app.store.listAgents().find((a) => a.name === "Bob")?.id;
+  if (group?.mainAgentId !== bobId || group?.cwd !== cwd) throw new Error("new group lost main agent / cwd");
 
-  // Group: no @ -> the main agent (first member) answers; @Bob -> Bob, who sees what Alice said.
+  // Group: no @ -> the main agent (Bob) answers; @Alice -> Alice.
   const input = page.getByLabel("消息输入框");
   await input.fill("大家好");
   await input.press("Enter");
-  await page.locator(".msg-group", { hasText: "Alice" }).getByText("收到：「[我]: 大家好」").waitFor();
-  await input.fill("@Bob 你来");
+  await page.locator(".msg-group", { hasText: "Bob" }).getByText("收到：「大家好」").waitFor();
+  await input.fill("@Alice 你来");
   await input.press("Enter");
-  await page
-    .locator(".msg-group", { hasText: "Bob" })
-    .locator("p", { hasText: /\[Alice\]: 收到/ })
-    .first()
-    .waitFor();
+  await page.locator(".msg-group", { hasText: "Alice" }).getByText("收到：「@Alice 你来」").waitFor();
+  // Hand-off through Tuantuan's MCP tool: Bob (main agent) hands the task to Alice.
+  await input.fill("/handoff Alice 写一份需求文档");
+  await input.press("Enter");
+  await page.locator(".handoff-card", { hasText: "交接给 @Alice" }).waitFor();
+  await page.locator(".handoff-from", { hasText: "接 @Bob 的交接：写一份需求文档" }).waitFor();
+  await page.getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
   await shot("group");
 
   // Private chat with Bob: every ACP capability the mock harness exercises.
@@ -287,7 +301,7 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake → agents on mock ACP harness → group main agent + @ → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → robot turn → live updates under slow snapshot → robot via Vite proxy)",
+    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → new group with main agent + cwd → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → robot turn → live updates under slow snapshot → robot via Vite proxy)",
   );
 } catch (e) {
   failed = true;
@@ -298,6 +312,7 @@ try {
   server.stop(true);
   rmSync(cwd, { recursive: true, force: true });
   rmSync(dbPath, { force: true });
+  rmSync(authFile, { force: true });
   rmSync(`${dbPath}-wal`, { force: true });
   rmSync(`${dbPath}-shm`, { force: true });
 }
