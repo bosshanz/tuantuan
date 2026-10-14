@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
 import type { AppConfig } from "./config";
+import { type DeviceConn, DeviceHub } from "./device";
 import { McpConnections } from "./mcp";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import type { SkillLoadResult } from "./skills";
@@ -45,15 +46,29 @@ export interface AppDeps {
   skills: SkillLoadResult;
   dbPath: string;
   staticDir?: string;
+  deviceAckTimeoutMs?: number;
 }
+
+/** UI clients subscribe to room topics; device clients speak the device protocol. */
+type WsData = { kind: "ui"; rooms: Set<string> } | { kind: "device"; conn: DeviceConn | null };
 
 export function createApp(deps: AppDeps) {
   const store = new Store(deps.dbPath);
   const mcp = new McpConnections();
-  let server: Server<{ rooms: Set<string> }> | null = null;
-  const orchestrator = new Orchestrator(store, deps.config, deps.skills.skills, mcp, (roomId, event: RoomEvent) => {
-    server?.publish(`room:${roomId}`, JSON.stringify(event));
-  });
+  let server: Server<WsData> | null = null;
+  const devices = new DeviceHub(store, deps.deviceAckTimeoutMs);
+  const orchestrator = new Orchestrator(
+    store,
+    deps.config,
+    deps.skills.skills,
+    mcp,
+    (roomId, event: RoomEvent) => {
+      server?.publish(`room:${roomId}`, JSON.stringify(event));
+      devices.onRoomEvent(roomId, event);
+    },
+    devices,
+  );
+  devices.orchestrator = orchestrator;
 
   const json = (data: unknown, status = 200) => Response.json(data, { status });
 
@@ -171,14 +186,19 @@ export function createApp(deps: AppDeps) {
   return {
     store,
     orchestrator,
+    devices,
     mcp,
-    attach(s: Server<{ rooms: Set<string> }>) {
+    attach(s: Server<WsData>) {
       server = s;
     },
-    async fetch(req: Request, srv: Server<{ rooms: Set<string> }>): Promise<Response | undefined> {
+    async fetch(req: Request, srv: Server<WsData>): Promise<Response | undefined> {
       const url = new URL(req.url);
       if (url.pathname === "/ws") {
-        if (srv.upgrade(req, { data: { rooms: new Set<string>() } })) return undefined;
+        if (srv.upgrade(req, { data: { kind: "ui", rooms: new Set<string>() } })) return undefined;
+        return new Response("WebSocket upgrade failed", { status: 400 });
+      }
+      if (url.pathname === "/device") {
+        if (srv.upgrade(req, { data: { kind: "device", conn: null } })) return undefined;
         return new Response("WebSocket upgrade failed", { status: 400 });
       }
       if (url.pathname.startsWith("/api/")) {
@@ -200,7 +220,19 @@ export function createApp(deps: AppDeps) {
       return new Response("Not found", { status: 404 });
     },
     websocket: {
-      message(ws: ServerWebSocket<{ rooms: Set<string> }>, raw: string | Buffer) {
+      open(ws: ServerWebSocket<WsData>) {
+        if (ws.data.kind === "device")
+          ws.data.conn = devices.open({ send: (d) => ws.send(d), close: (c, r) => ws.close(c, r) });
+      },
+      close(ws: ServerWebSocket<WsData>) {
+        if (ws.data.kind === "device" && ws.data.conn) devices.close(ws.data.conn);
+      },
+      message(ws: ServerWebSocket<WsData>, raw: string | Buffer) {
+        if (ws.data.kind === "device") {
+          if (ws.data.conn) devices.handle(ws.data.conn, String(raw));
+          return;
+        }
+        const data = ws.data;
         let msg: { type?: string; roomId?: string };
         try {
           msg = JSON.parse(String(raw));
@@ -214,11 +246,11 @@ export function createApp(deps: AppDeps) {
         }
         if (msg.type === "subscribe") {
           ws.subscribe(`room:${msg.roomId}`);
-          ws.data.rooms.add(msg.roomId);
+          data.rooms.add(msg.roomId);
           ws.send(JSON.stringify({ type: "subscribed", roomId: msg.roomId, state: orchestrator.state(msg.roomId) }));
         } else if (msg.type === "unsubscribe") {
           ws.unsubscribe(`room:${msg.roomId}`);
-          ws.data.rooms.delete(msg.roomId);
+          data.rooms.delete(msg.roomId);
         } else {
           ws.send(JSON.stringify({ type: "error", error: `未知消息类型 ${String(msg.type)}` }));
         }
@@ -229,7 +261,7 @@ export function createApp(deps: AppDeps) {
 
 export function serve(deps: AppDeps, port: number) {
   const app = createApp(deps);
-  const server = Bun.serve<{ rooms: Set<string> }>({
+  const server = Bun.serve<WsData>({
     port,
     fetch: (req, srv) => app.fetch(req, srv),
     websocket: app.websocket,

@@ -1,3 +1,4 @@
+import { ROBOT_ACTIONS, ROBOT_EXPRESSIONS } from "./device-protocol";
 import type { ToolSpec } from "./llm";
 import type { McpConnections } from "./mcp";
 import type { Skill } from "./skills";
@@ -121,6 +122,13 @@ export interface McpServerRef {
   url: string;
 }
 
+/** Sends a body command to the device of the current room and resolves with its ack. */
+export interface DeviceControl {
+  command(kind: "expression" | "action", name: string, signal?: AbortSignal): Promise<string>;
+}
+
+export const ROBOT_TOOL_NAMES = ["robot_express", "robot_action"] as const;
+
 export interface ToolRuntime {
   specs: ToolSpec[];
   /** Runs a tool by its function name; throws with a truthful message on any failure. */
@@ -137,6 +145,8 @@ export async function buildToolRuntime(opts: {
   skills: Skill[];
   mcpServers: McpServerRef[];
   mcp: McpConnections;
+  /** Present when the conversation belongs to a device; adds robot_express / robot_action. */
+  device?: DeviceControl;
 }): Promise<{ runtime: ToolRuntime; warnings: string[] }> {
   const specs: ToolSpec[] = [];
   const handlers = new Map<string, (args: Record<string, unknown>, signal?: AbortSignal) => Promise<string>>();
@@ -199,6 +209,23 @@ export async function buildToolRuntime(opts: {
       if (!skill) throw new Error(`没有名为 ${String(args.name)} 的 Skill`);
       return skill.body;
     });
+  }
+
+  if (opts.device) {
+    const device = opts.device;
+    specs.push(
+      fn(
+        "robot_express",
+        "设置桌面机器人的表情，用来配合你的回复表达情绪",
+        { expression: { type: "string", enum: [...ROBOT_EXPRESSIONS] } },
+        ["expression"],
+      ),
+      fn("robot_action", "让桌面机器人做一个身体动作", { action: { type: "string", enum: [...ROBOT_ACTIONS] } }, [
+        "action",
+      ]),
+    );
+    handlers.set("robot_express", (args, signal) => device.command("expression", String(args.expression), signal));
+    handlers.set("robot_action", (args, signal) => device.command("action", String(args.action), signal));
   }
 
   return {

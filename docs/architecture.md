@@ -22,7 +22,9 @@
 | `server/mentions.ts` | `@名字` 解析 |
 | `server/llm.ts` / `server/mock.ts` | OpenAI 兼容流式客户端 / 确定性假模型 |
 | `server/store.ts` | SQLite 迁移与读写 |
-| `web/src/*` | React 前端：会话列表、Agent 编辑、聊天视图 |
+| `server/device.ts` / `server/device-protocol.ts` | `/device` 设备协议：DeviceHub 管理设备连接、会话房间、由房间事件推导的会话状态、带 ack 超时的表情/动作下发（见 [device-protocol.md](device-protocol.md)） |
+| `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind） |
+| `web/src/robot/*` | 虚拟桌面机器人：设备客户端（协议 v1）、Web Speech 封装、SVG 脸部与动作 |
 
 前端直接 `import type` 后端的数据类型（`Agent`、`Message`、`RoomEvent`…），契约只有一份定义。
 

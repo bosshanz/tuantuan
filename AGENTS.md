@@ -17,6 +17,7 @@
 | --- | --- | --- |
 | `docs/product.md` | 用户任务、业务规则（@ 触发、跳数上限、取消语义）、关键状态与验收条件 | 改变用户可见行为或规则时 |
 | `docs/architecture.md` | 模块职责、数据与状态归属、路由机制、技术取舍 | 改变模块边界、存储结构、路由或编排机制时 |
+| `docs/device-protocol.md` | 设备 WebSocket 协议、消息、错误码、ack 语义 | 改变 `/device` 消息或机器人工具时 |
 | `README.md` | 运行方式、配置、mock 指令 | 改变启动方式、脚本或配置键时 |
 | `config/providers.example.json`、`.env.example` | 配置契约示例（不含密钥） | 改变配置结构时 |
 

@@ -34,16 +34,36 @@ export async function mockChat(model: ModelConfig, req: ChatRequest): Promise<Ch
   if (toolResults.length === 0) {
     const calls: ToolCall[] = [];
     const missing: string[] = [];
+    // On a robot body, react with an expression and an action before speaking.
+    if (available.has("robot_express") && available.has("robot_action")) {
+      const cue = mockRobotCue(lastUser);
+      calls.push(
+        {
+          id: "mock_robot_0",
+          type: "function",
+          function: { name: "robot_express", arguments: JSON.stringify({ expression: cue.expression }) },
+        },
+        {
+          id: "mock_robot_1",
+          type: "function",
+          function: { name: "robot_action", arguments: JSON.stringify({ action: cue.action }) },
+        },
+      );
+    }
     for (const [i, m] of [...lastUser.matchAll(/\[\[tool:([\w-]+)\s*(\{.*?\})?\]\]/g)].entries()) {
       const name = m[1] ?? "";
       if (!available.has(name)) missing.push(name);
       else calls.push({ id: `mock_call_${i}`, type: "function", function: { name, arguments: m[2] ?? "{}" } });
     }
-    if (calls.length > 0) return { content: "", toolCalls: calls };
+    if (missing.length === 0 && calls.length > 0) return { content: "", toolCalls: calls };
     if (missing.length > 0) return stream(`我没有可用的工具：${missing.join("、")}。`, req);
   }
 
-  if (toolResults.length > 0) {
+  // Robot body tools are side effects, not information: answer normally after them.
+  const robotOnly = afterUser.every(
+    (m) => m.role !== "assistant" || (m.tool_calls ?? []).every((c) => c.function.name.startsWith("robot_")),
+  );
+  if (toolResults.length > 0 && !robotOnly) {
     const summary = toolResults.map((m) => (m.role === "tool" ? m.content.slice(0, 200) : "")).join("；");
     return stream(`工具返回：${summary}`, req);
   }
@@ -55,6 +75,16 @@ export async function mockChat(model: ModelConfig, req: ChatRequest): Promise<Ch
   const name = /你的名字是「(.+?)」/.exec(system)?.[1] ?? "助手";
   const snippet = lastUser.replace(/^\[[^\]]*\]:\s*/, "").slice(0, 60);
   return stream(`我是 ${name}（mock/${model.model}），收到：「${snippet}」`, req);
+}
+
+/** Deterministic expression/action for a robot utterance (keyword based). */
+export function mockRobotCue(text: string): { expression: string; action: string } {
+  if (/跳舞|dance/i.test(text)) return { expression: "happy", action: "dance" };
+  if (/你好|嗨|hello|hi\b/i.test(text)) return { expression: "happy", action: "wave" };
+  if (/难过|伤心|失败|糟/.test(text)) return { expression: "sad", action: "shake_head" };
+  if (/真的|居然|吗[?？]?$|[?？]$/.test(text)) return { expression: "surprised", action: "tilt" };
+  if (/看看|周围|哪/.test(text)) return { expression: "neutral", action: "look_around" };
+  return { expression: "happy", action: "nod" };
 }
 
 async function stream(text: string, req: ChatRequest): Promise<ChatResult> {

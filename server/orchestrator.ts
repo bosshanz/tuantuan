@@ -7,7 +7,7 @@ import { type Skill, skillCatalogPrompt } from "./skills";
 import type { Agent, Message, RoutingDecision, Store } from "./store";
 import { ValidationError } from "./store";
 import { runToolLoop, type ToolCallRecord } from "./tool-loop";
-import { buildToolRuntime } from "./tools";
+import { buildToolRuntime, type DeviceControl } from "./tools";
 
 export type RoomEvent =
   | { type: "message"; message: Message }
@@ -48,6 +48,7 @@ export class Orchestrator {
     private skills: Skill[],
     private mcp: McpConnections,
     private publish: (roomId: string, event: RoomEvent) => void,
+    private devices: { controlFor(roomId: string): DeviceControl | null } | null = null,
   ) {}
 
   postHumanMessage(roomId: string, senderName: string, content: string): Message {
@@ -199,7 +200,8 @@ export class Orchestrator {
 
     const skills = this.skills.filter((s) => agent.skills.includes(s.name));
     const room = this.store.getRoom(human.roomId);
-    const systemPrompt = buildSystemPrompt(agent, members, room?.kind ?? "group", skills);
+    const device = this.devices?.controlFor(human.roomId) ?? undefined;
+    const systemPrompt = buildSystemPrompt(agent, members, room?.kind ?? "group", skills, device !== undefined);
     const messages = buildContext(systemPrompt, agent, history, limits.contextChars);
     const trigger = [...history].reverse().find((m) => m.senderKind !== "system" && m.senderId !== agent.id);
 
@@ -225,6 +227,7 @@ export class Orchestrator {
         skills,
         mcpServers: this.store.listMcpServers(),
         mcp: this.mcp,
+        device,
       });
       const contextChars = messages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0);
       plan = await planRoute(
@@ -288,17 +291,25 @@ export class Orchestrator {
   }
 }
 
-export function buildSystemPrompt(agent: Agent, members: Agent[], kind: "group" | "dm", skills: Skill[]): string {
+export function buildSystemPrompt(
+  agent: Agent,
+  members: Agent[],
+  kind: "group" | "dm",
+  skills: Skill[],
+  onDevice = false,
+): string {
   const others = members.filter((m) => m.id !== agent.id).map((m) => `@${m.name}`);
   const parts = [
     `你的名字是「${agent.name}」。`,
-    kind === "dm"
-      ? "你正在和用户私聊。"
-      : `你在一个群聊中，消息以「[发言者]: 内容」的形式给出。${
-          others.length > 0
-            ? `群里的其他 Agent：${others.join("、")}。需要他们协助时，在回复中写 @名字 即可触发对方；不需要时不要 @。`
-            : ""
-        }`,
+    onDevice
+      ? "你正通过一台桌面机器人和用户语音对话：回复要简短、口语化，适合朗读；可以调用 robot_express 设置表情、robot_action 做动作来配合表达。"
+      : kind === "dm"
+        ? "你正在和用户私聊。"
+        : `你在一个群聊中，消息以「[发言者]: 内容」的形式给出。${
+            others.length > 0
+              ? `群里的其他 Agent：${others.join("、")}。需要他们协助时，在回复中写 @名字 即可触发对方；不需要时不要 @。`
+              : ""
+          }`,
     agent.systemPrompt,
     skillCatalogPrompt(skills),
   ];

@@ -72,6 +72,9 @@ bun run e2e        # 浏览器冒烟（需先 build，需要本机 Chrome；CHRO
 
 - [docs/product.md](docs/product.md)：产品规则与验收条件
 - [docs/architecture.md](docs/architecture.md)：模块、状态归属、路由机制与取舍
+- [docs/device-protocol.md](docs/device-protocol.md)：桌面机器人 / 硬件设备的 WebSocket 协议
+
+打开 `#/robot` 可以体验虚拟桌面机器人：语音需要浏览器支持 Web Speech（Chrome），也可以用文字输入；mock 模型下说「你好」「跳舞」会触发对应的表情和动作。
 
 ## License
 
