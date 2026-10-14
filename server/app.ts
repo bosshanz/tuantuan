@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
+import { AVATAR_SHAPES } from "./avatars";
 import type { AppConfig } from "./config";
 import { type DeviceConn, DeviceHub } from "./device";
 import { McpConnections } from "./mcp";
@@ -22,8 +23,12 @@ const AgentInputSchema = z.object({
       (s) => !(EVERYONE_NAMES as readonly string[]).includes(s.toLowerCase()),
       `名称不能是 ${EVERYONE_NAMES.join(" / ")}（保留给 @所有人）`,
     ),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "颜色格式应为 #RRGGBB"),
-  avatar: z.string().trim().min(1).max(4),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "颜色格式应为 #RRGGBB")
+    .optional(),
+  avatar: z.string().trim().min(1).max(4).optional(),
+  avatarShape: z.enum(AVATAR_SHAPES).optional(),
   systemPrompt: z.string().max(20000),
   tools: z.array(z.string()).max(64),
   skills: z.array(z.string()).max(64),
@@ -89,7 +94,11 @@ export function createApp(deps: AppDeps) {
     for (const s of a.skills) if (!skillNames.has(s)) throw new ValidationError(`未知 Skill：${s}`);
     if (a.modelMode === "pinned" && !deps.config.models.some((m) => m.id === a.pinnedModel))
       throw new ValidationError(`固定模型不存在：${a.pinnedModel ?? "(空)"}`);
-    return { ...a, pinnedModel: a.modelMode === "pinned" ? a.pinnedModel : null };
+    return {
+      ...a,
+      avatar: a.avatar ?? ([...a.name][0] as string),
+      pinnedModel: a.modelMode === "pinned" ? a.pinnedModel : null,
+    };
   }
 
   async function handleApi(req: Request, url: URL): Promise<Response> {

@@ -23,7 +23,7 @@ describe("Store", () => {
       s1.db.close();
       const s2 = new Store(path);
       expect(s2.getMessage(m.id)).toMatchObject({ status: "interrupted", error: "服务重启，回复中断" });
-      expect(s2.db.query("PRAGMA user_version").get()).toEqual({ user_version: 3 });
+      expect(s2.db.query("PRAGMA user_version").get()).toEqual({ user_version: 4 });
       s2.db.close();
     } finally {
       for (const f of [path, `${path}-wal`, `${path}-shm`]) rmSync(f, { force: true });
@@ -33,7 +33,7 @@ describe("Store", () => {
   test("pinned_model must be set exactly when mode is pinned (DB CHECK)", () => {
     const s = new Store(":memory:");
     expect(() =>
-      s.db.query("INSERT INTO agents VALUES ('a','n','#000000','x','', '[]','[]','pinned',NULL,0,0)").run(),
+      s.db.query("INSERT INTO agents VALUES ('a','n','#000000','x','', '[]','[]','pinned',NULL,0,0,'orb')").run(),
     ).toThrow("CHECK");
   });
 
@@ -82,7 +82,7 @@ describe("Store", () => {
       });
       const empty = s1.deviceRoom("web-robot-bbbb2222", agent);
       s1.db.exec("UPDATE device_sessions SET created_at = 1 WHERE room_id = '" + old.id + "'");
-      s1.db.exec("PRAGMA user_version = 2");
+      s1.db.exec("ALTER TABLE agents DROP COLUMN avatar_shape; PRAGMA user_version = 2");
       s1.db.close();
       const s2 = new Store(path);
       expect(s2.getRoom(empty.id)).toBeFalsy();

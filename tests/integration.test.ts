@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { serve } from "../server/app";
+import { defaultAvatar } from "../server/avatars";
 import { loadSkills } from "../server/skills";
 import type { Agent, Message, Room, RoutingDecision } from "../server/store";
 import { testConfig } from "./helpers";
@@ -69,6 +70,27 @@ describe("HTTP + WS integration (mock provider)", () => {
     while (!events.some((e) => e.type === "subscribed")) await Bun.sleep(5);
   });
   afterAll(() => ws.close());
+
+  test("agent avatars: default derived from id, chosen shape+colour persisted, unknown shape rejected", async () => {
+    const { color: _c, ...noColor } = agentBody("AvatarDefault");
+    const r = await api<Agent>("POST", "/api/agents", noColor);
+    expect(r.status).toBe(201);
+    expect(r.data.avatarShape).toBe(defaultAvatar(r.data.id).shape);
+    expect(r.data.color).toBe(defaultAvatar(r.data.id).color);
+    const put = await api<Agent>("PUT", `/api/agents/${r.data.id}`, {
+      ...agentBody("AvatarDefault"),
+      avatarShape: "hex",
+      color: "#2f4a6d",
+    });
+    expect(put.data).toMatchObject({ avatarShape: "hex", color: "#2f4a6d" });
+    const listed = (await api<Agent[]>("GET", "/api/agents")).data.find((a) => a.id === r.data.id);
+    expect(listed?.avatarShape).toBe("hex");
+    const bad = await api("PUT", `/api/agents/${r.data.id}`, {
+      ...agentBody("AvatarDefault"),
+      avatarShape: "triangle!",
+    });
+    expect(bad.status).toBe(400);
+  });
 
   test("human @A -> A @B -> B replies, streamed over WS with routing recorded", async () => {
     const { messages, routing } = await say(room.id, "@Alice 帮忙看下");

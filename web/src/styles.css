@@ -695,3 +695,28 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 .attempts li { line-height: 20px; } .attempts li svg { margin-top: 3.5px; }
 .kv dd.cand { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; row-gap: 0; line-height: 20px; }
 .kv dd.cand svg { margin: 0; }
+
+/* ================= bot avatars ================= */
+.avatar.bot { background: none !important; box-shadow: none; border-radius: 0; overflow: visible; }
+.bot-avatar { display: block; overflow: visible; --fill: var(--c); }
+.bot-avatar .ba-body > * { fill: var(--fill); stroke: var(--fill); }
+.bot-avatar .ba-body > *:not(.ba-stroke) { stroke-width: 0; }
+.bot-avatar .ba-eyes line { stroke: var(--paper); stroke-width: 7.5; stroke-linecap: round; }
+@media (prefers-color-scheme: dark) {
+  .bot-avatar { --fill: color-mix(in srgb, var(--c) 72%, #efe6d4); }
+}
+.avatar-edit { position: relative; display: flex; align-items: center; gap: var(--s4); }
+.avatar-btn { border: none; background: none; padding: 6px; border-radius: 8px; line-height: 0; box-shadow: inset 0 0 0 1px var(--border); }
+.avatar-btn:hover { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.avatar-pop { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: 332px; padding: var(--s4); background: var(--surface); border-radius: 6px; box-shadow: var(--shadow-2); }
+.avatar-pop-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s3); }
+.avatar-pop-head h4 { margin: 0; font-family: var(--display); font-size: 15px; }
+.shape-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.shape-opt { display: flex; align-items: center; justify-content: center; height: 56px; border: none; background: none; border-radius: 6px; }
+.shape-opt:hover { background: var(--surface-hover); }
+.shape-opt[aria-checked="true"] { box-shadow: inset 0 0 0 1.5px var(--text-2); }
+.color-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--border); justify-items: center; }
+.color-opt { width: 28px; height: 28px; border-radius: 50%; border: none; padding: 0; }
+.color-opt[aria-checked="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-2); }
+.color-opt { box-shadow: inset 0 0 0 1px var(--border); }
+.color-opt[aria-checked="true"] { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-2); }

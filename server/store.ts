@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
 import type { Attempt, RoutingPlan } from "./router";
 import type { ToolCallRecord } from "./tool-loop";
 
@@ -80,6 +81,8 @@ const MIGRATIONS: string[] = [
      AND NOT EXISTS (SELECT 1 FROM device_sessions d0 WHERE d0.device_id = 'web-robot' AND d0.agent_id = device_sessions.agent_id)
      AND created_at = (SELECT MAX(d2.created_at) FROM device_sessions d2
                        WHERE d2.agent_id = device_sessions.agent_id AND d2.device_id LIKE 'web-robot-%');`,
+  // SVG bot avatars; '' is backfilled with a per-id default right after migrating.
+  `ALTER TABLE agents ADD COLUMN avatar_shape TEXT NOT NULL DEFAULT '';`,
 ];
 
 export interface Agent {
@@ -87,6 +90,7 @@ export interface Agent {
   name: string;
   color: string;
   avatar: string;
+  avatarShape: AvatarShape;
   systemPrompt: string;
   tools: string[];
   skills: string[];
@@ -96,7 +100,11 @@ export interface Agent {
   updatedAt: number;
 }
 
-export type AgentInput = Omit<Agent, "id" | "createdAt" | "updatedAt">;
+export type AgentInput = Omit<Agent, "id" | "createdAt" | "updatedAt" | "avatarShape" | "color"> & {
+  /** Omitted or "" => deterministic default from the agent id. */
+  color?: string;
+  avatarShape?: AvatarShape;
+};
 
 export interface Room {
   id: string;
@@ -160,6 +168,8 @@ export class Store {
     this.db = new Database(path, { strict: true });
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     this.migrate();
+    for (const { id } of this.db.query("SELECT id FROM agents WHERE avatar_shape = ''").all() as { id: string }[])
+      this.db.query("UPDATE agents SET avatar_shape = ? WHERE id = ?").run(defaultAvatar(id).shape, id);
     // Streams cannot survive a restart: mark them so the UI does not show a forever-typing message.
     this.db
       .query("UPDATE messages SET status = 'interrupted', error = '服务重启，回复中断' WHERE status = 'streaming'")
@@ -204,8 +214,9 @@ export class Store {
     const params = {
       id,
       name: a.name,
-      color: a.color,
+      color: a.color || defaultAvatar(id).color,
       avatar: a.avatar,
+      avatar_shape: isAvatarShape(a.avatarShape) ? a.avatarShape : defaultAvatar(id).shape,
       system_prompt: a.systemPrompt,
       tools: JSON.stringify(a.tools),
       skills: JSON.stringify(a.skills),
@@ -216,8 +227,9 @@ export class Store {
     };
     const sql =
       op === "insert"
-        ? `INSERT INTO agents VALUES ($id,$name,$color,$avatar,$system_prompt,$tools,$skills,$model_mode,$pinned_model,$created_at,$updated_at)`
-        : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,system_prompt=$system_prompt,tools=$tools,skills=$skills,
+        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,system_prompt,tools,skills,model_mode,pinned_model,created_at,updated_at)
+             VALUES ($id,$name,$color,$avatar,$avatar_shape,$system_prompt,$tools,$skills,$model_mode,$pinned_model,$created_at,$updated_at)`
+        : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,system_prompt=$system_prompt,tools=$tools,skills=$skills,
              model_mode=$model_mode,pinned_model=$pinned_model,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
     try {
       this.db.query(sql).run(params);
@@ -406,6 +418,7 @@ function toAgent(r: Row): Agent {
     name: r.name as string,
     color: r.color as string,
     avatar: r.avatar as string,
+    avatarShape: r.avatar_shape as AvatarShape,
     systemPrompt: r.system_prompt as string,
     tools: JSON.parse(r.tools as string),
     skills: JSON.parse(r.skills as string),

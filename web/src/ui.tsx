@@ -10,7 +10,9 @@ import { Bot, Hash, User } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import type { Agent, Room } from "./api";
+import { BotAvatar } from "./BotAvatar";
 
 for (const [name, lang] of Object.entries({ bash, go, javascript, json, python, sql, typescript }))
   hljs.registerLanguage(name, lang);
@@ -26,7 +28,7 @@ export function AgentAvatar({
   size = 32,
   name,
 }: {
-  agent?: Pick<Agent, "avatar" | "color" | "name">;
+  agent?: Pick<Agent, "color" | "name"> & { avatarShape?: AvatarShape };
   size?: number;
   name?: string;
 }) {
@@ -37,13 +39,10 @@ export function AgentAvatar({
       </span>
     );
   }
+  const fallback = defaultAvatar(agent.name);
   return (
-    <span
-      className={EMOJI.test(agent.avatar) ? "avatar emoji" : "avatar"}
-      style={{ ["--tint" as string]: agent.color, ["--size" as string]: `${size}px` }}
-      aria-hidden
-    >
-      {agent.avatar}
+    <span className="avatar bot" style={{ ["--size" as string]: `${size}px` }} aria-hidden>
+      <BotAvatar shape={agent.avatarShape ?? fallback.shape} color={agent.color || fallback.color} size={size} />
     </span>
   );
 }

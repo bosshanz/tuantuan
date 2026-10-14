@@ -1,15 +1,22 @@
 import { AlertTriangle, Check, ChevronLeft, MessageCircle, Plug, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { type AvatarShape, defaultAvatar } from "../../server/avatars";
+import { AvatarPicker } from "./AvatarPicker";
 import { type Agent, type AgentInput, api, type McpServer, type McpTool, type Meta } from "./api";
 import { type PickItem, PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
-const COLORS = ["#2f4a6d", "#b0432a", "#3d6b4f", "#b0812a", "#6d3f5b", "#2f6b6b", "#7a5a3c", "#4f5d63", "#3a3833"];
+type Form = AgentInput & { color: string; avatarShape: AvatarShape };
 
-function emptyAgent(): AgentInput {
+/** A new agent gets a random-but-stable look up front so the preview matches what is saved. */
+const draftSeed = () => crypto.randomUUID();
+
+function emptyAgent(seed: string): Form {
+  const d = defaultAvatar(seed);
   return {
     name: "",
-    color: COLORS[0] as string,
+    color: d.color,
+    avatarShape: d.shape,
     avatar: "",
     systemPrompt: "",
     tools: [],
@@ -19,11 +26,11 @@ function emptyAgent(): AgentInput {
   };
 }
 
-const comparable = (a: AgentInput) =>
+const comparable = (a: Form) =>
   JSON.stringify([
     a.name,
     a.color,
-    a.avatar,
+    a.avatarShape,
     a.systemPrompt,
     [...a.tools].sort(),
     [...a.skills].sort(),
@@ -42,26 +49,30 @@ export function AgentEditor(props: {
   onStartChat: (a: Agent) => void;
 }) {
   const { meta, agent } = props;
-  const initial = useMemo<AgentInput>(() => (agent ? { ...agent } : emptyAgent()), [agent]);
-  const [form, setForm] = useState<AgentInput>(initial);
+  const seed = useMemo(() => agent?.id ?? draftSeed(), [agent]);
+  const initial = useMemo<Form>(() => (agent ? { ...agent } : emptyAgent(seed)), [agent, seed]);
+  const [form, setForm] = useState<Form>(initial);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const dirty = comparable(form) !== comparable(initial);
-  const set = <K extends keyof AgentInput>(k: K, v: AgentInput[K]) => {
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => {
     setJustSaved(false);
     setForm((f) => ({ ...f, [k]: v }));
   };
   const toggleIn = (k: "tools" | "skills", v: string) =>
     set(k, form[k].includes(v) ? form[k].filter((x) => x !== v) : [...form[k], v]);
-  const avatar = form.avatar.trim() || form.name.trim().slice(0, 1) || "A";
 
   const save = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setSaving(true);
     setError(null);
     try {
-      const body = { ...form, avatar, pinnedModel: form.modelMode === "pinned" ? form.pinnedModel : null };
+      const body = {
+        ...form,
+        avatar: form.avatar.trim() || [...form.name.trim()][0] || "A",
+        pinnedModel: form.modelMode === "pinned" ? form.pinnedModel : null,
+      };
       const saved = agent
         ? await api<Agent>("PUT", `/api/agents/${agent.id}`, body)
         : await api<Agent>("POST", "/api/agents", body);
@@ -94,7 +105,7 @@ export function AgentEditor(props: {
           <ChevronLeft size={18} />
         </button>
         <div className="preview-head title">
-          <AgentAvatar agent={{ avatar, color: form.color, name: form.name }} size={36} />
+          <AgentAvatar agent={form} size={36} />
           <div style={{ minWidth: 0 }}>
             <h2>{agent ? agent.name : form.name.trim() || "新建 Agent"}</h2>
             <div className="sub">
@@ -117,7 +128,16 @@ export function AgentEditor(props: {
               <h3>基本信息</h3>
             </div>
             <div className="card-body">
-              <div className="row wrap-sm">
+              <div className="row wrap-sm" style={{ alignItems: "flex-end" }}>
+                <AvatarPicker
+                  shape={form.avatarShape}
+                  color={form.color}
+                  onChange={(shape, color) => setForm((f) => ({ ...f, avatarShape: shape, color }))}
+                  onReset={() => {
+                    const d = defaultAvatar(seed);
+                    setForm((f) => ({ ...f, avatarShape: d.shape, color: d.color }));
+                  }}
+                />
                 <label className="field grow">
                   <span className="label">名称</span>
                   <input
@@ -129,39 +149,6 @@ export function AgentEditor(props: {
                     placeholder="例如：产品经理Alice"
                   />
                 </label>
-                <label className="field" style={{ width: 96 }}>
-                  <span className="label">头像字符</span>
-                  <input
-                    className="input"
-                    value={form.avatar}
-                    onChange={(e) => set("avatar", e.target.value)}
-                    maxLength={4}
-                    placeholder={avatar}
-                  />
-                </label>
-              </div>
-              <div className="field">
-                <span className="label">颜色</span>
-                <div className="swatches">
-                  {COLORS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className="swatch"
-                      style={{ background: c }}
-                      aria-pressed={form.color === c}
-                      aria-label={`颜色 ${c}`}
-                      onClick={() => set("color", c)}
-                    />
-                  ))}
-                  <input
-                    type="color"
-                    value={form.color}
-                    onChange={(e) => set("color", e.target.value)}
-                    aria-label="自定义颜色"
-                    style={{ width: 28, height: 28, padding: 0, border: "none", background: "none" }}
-                  />
-                </div>
               </div>
             </div>
           </section>
