@@ -1,6 +1,6 @@
 # 团团：桌面客户端 + 独立 Harness（ACP）改造计划（待 Andy 评审）
 
-> 状态：已评审（2026-10-14），M1 实施中。凡标「未核实」的条目需要实测。
+> 状态：已评审（2026-10-14）。M1 已完成主体（见 §8 M1 状态）。凡标「未核实」的条目需要实测。
 
 ## 0. Andy 的决定（2026-10-14）
 1. 桌面框架：**Electrobun**。
@@ -147,6 +147,7 @@
   - Claude Code、Codex、Grok Build、OpenCode 私聊：流式、思考、工具卡片（diff + 终端）、plan、权限、configOptions（模式/模型/档位）、斜杠命令、图片与 @文件、取消、会话恢复（按能力降级）、usage。
   - mock ACP Agent + e2e：覆盖每种 update 的渲染、权限流程、取消、恢复；每个真实 Harness 一个手动验收清单（需要 Andy 的账号）。
   - 删除 Auto 路由及相关配置、文档。
+  - **M1 状态（2026-10-14）**：已完成 SDK 在 Bun 下验证、注册表与检测、每 Agent 进程、会话映射与恢复、cwd 限制、权限弹窗、私聊完整能力 UI、Agent 编辑字段、基础新手引导、删除 Auto 路由、mock ACP agent + e2e、迁移 6。握手实测：Claude Code（claude-agent-acp 0.90.0）与 OpenCode 1.19.0 无账号可建会话；Codex（codex-acp 2.2.2）与 Grok 1.0.52 初始化成功、建会话需登录。未完成：ACP `authenticate` 流程（目前只显示登录提示）、session/load 回放显示、机器人 Agent 按 Harness 过滤、新建群时直接设主 Agent / cwd。
 - **M2：群聊 + 交接 MCP**：成员 session 管理、转述上下文、@ 路由、默认回复人（按决策）、handoff MCP、跳数与打断、机器人房间改走 ACP。
 - **M3：桌面打包**：Electrobun 壳、登录 shell 环境解析、钥匙串、签名公证、自动更新、首次运行引导（检测并提示安装 Harness）。
 - **M4：更多 Harness 与扩展**：Gemini CLI、Goose / Kimi / Qwen Code；私有扩展（Claude 子 Agent / goal、Grok `x.ai/*` 回退、OpenCode fork）；视情况评估 ACP v2。

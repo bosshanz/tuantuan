@@ -2,29 +2,25 @@
 
 ## 背景与约束
 
-- 单人/小团队本地使用的 MVP：一个 Bun 进程 + 一个 SQLite 文件，无鉴权、无多实例。
-- 必须在没有任何 API Key 时完整可运行、可测试 → 内置确定性 `mock` provider。
-- 所有真实模型都走 OpenAI 兼容的 `chat/completions`（流式 + function calling），不引入各家 SDK。
+- 本机使用：一个 Bun 进程 + 一个 SQLite 文件，无鉴权、无多实例。桌面壳（Electrobun，主进程即 Bun）在 M3。
+- 团团不调用模型。每个 Agent 绑定一个编码 Harness，通过 ACP（JSON-RPC over stdio，`@agentclientprotocol/sdk` 1.8.0）驱动；模型、Key、登录归 Harness。
+- 没有任何账号也必须可测试 → `server/mock-agent.ts` 是一个确定性的 ACP agent（`TUANTUAN_MOCK_HARNESS=1` 时可选）。
 
 ## 模块
 
 | 文件 | 职责 |
 | --- | --- |
-| `server/main.ts` | 读取配置与 Skills，启动服务 |
+| `server/main.ts` | 打开数据库，启动服务；退出时关闭所有 Harness 进程 |
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件 |
-| `server/orchestrator.ts` | **运行时编排**：房间队列、初始触发（@ / @所有人 / 按话题选择）、handoff 交接链、跳数上限、打断与取消、单个 Agent 回合（上下文构建 → 路由 → 工具循环 → 持久化/推送） |
-| `server/decision.ts` | 百炼决策模型（systemone）客户端：构造问题、超时、严格解析返回 |
-| `server/picker.ts` | 群聊没有 @ 时按话题选一个成员（决策模型 → LLM → 关键词规则 → 第一个成员） |
-| `server/router.ts` | 任务分类（决策模型 → LLM 分类器 → 规则回退）、候选模型排序、按候选回退调用 |
-| `server/classify.ts` | 确定性规则分类（router 与 mock 分类器共用） |
-| `server/tool-loop.ts` | function-calling 循环 |
-| `server/tools.ts` | 内置工具、为某个 Agent 组装工具集（内置 / MCP / `load_skill` / 群聊的 `handoff` / 设备房间的 `robot_express`、`robot_action`） |
-| `server/mcp.ts` | MCP Streamable HTTP 客户端连接（官方 SDK） |
-| `server/skills.ts` | 读取 `SKILL.md`、生成 Skill 目录提示 |
+| `server/harness.ts` | Harness 注册表（Claude Code / Codex / Grok Build / OpenCode / mock）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖 |
+| `server/acp.ts` | `AcpProcess`：`Bun.spawn` 一个 Harness，用 SDK 的 `ndJsonStream` 建连接、`initialize`；处理 agent 发来的 `fs/*`（限制在 cwd 内）、`terminal/*`、`session/request_permission`；保留 stderr 末尾用于报错 |
+| `server/host.ts` | `HarnessHost`：按「Agent + cwd」复用进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；权限请求挂起直到用户回答 |
+| `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
+| `server/orchestrator.ts` | 房间队列、触发（私聊 / @ / @所有人 / 主 Agent）、单个 Agent 回合（拼 prompt + 身份文档 → host.prompt → 推送 update → 持久化时间线）、取消 |
 | `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
-| `server/llm.ts` / `server/mock.ts` | OpenAI 兼容流式客户端 / 确定性假模型 |
 | `server/store.ts` | SQLite 迁移与读写 |
-| `server/device.ts` / `server/device-protocol.ts` | `/device` 设备协议：DeviceHub 管理设备连接、会话房间、由房间事件推导的会话状态、带 ack 超时的表情/动作下发（见 [device-protocol.md](device-protocol.md)） |
+| `server/device.ts` / `server/device-protocol.ts` | `/device` 设备协议：DeviceHub 管理设备连接、会话房间、由房间事件推导的会话状态（见 [device-protocol.md](device-protocol.md)）；表情 / 动作工具在 M2 改为 MCP |
+| `web/src/Harness.tsx` / `Setup.tsx` | 时间线渲染（工具卡片、diff、终端、计划）、权限弹窗、会话栏；新手引导页 |
 | `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
@@ -39,71 +35,35 @@
 
 | 状态 | 所有者 | 说明 |
 | --- | --- | --- |
-| Agent、MCP 服务、房间与成员、消息、路由决策 | SQLite（`Store`） | 唯一权威来源；前端刷新后从 API 重建 |
-| 进行中的运行（每房间当前链 + 排队的人类消息 + AbortController） | `Orchestrator` 内存 | 进程退出即丢失；启动时把残留的 `streaming` 消息标记为 `interrupted`，不伪装成完成 |
-| 流式增量文本 | 仅经 WebSocket 推送 | 消息完成（done / error / cancelled）时才把全文写库；刷新页面时进行中的消息显示为空直到完成 |
-| Provider / 模型 / 路由表 / 限制 | `.env`（`AGENT_HUB_MODELS`、`DECISION_*` 等）+ 可选 providers.json（只读） | 启动时校验，非法直接失败；Key 只存在环境变量 |
-| Skills | `skills/` 目录（只读） | 启动时加载；加载失败逐条报告 |
-| 当前用户显示名 | 浏览器 localStorage | 无账号体系 |
+| Agent（Harness、cwd、env、权限策略、身份文档、MCP 服务器）、房间（主 Agent、cwd）、消息（含时间线 JSON）、ACP 会话映射、设置（Harness 路径覆盖） | SQLite（`Store`） | 唯一权威来源 |
+| Harness 进程、挂起的权限请求、终端输出 | `HarnessHost` 内存 | 进程退出即丢失；重启后用 `acp_sessions` 里的 sessionId resume / load |
+| ACP session 自身的对话历史 | Harness | 团团不重放 Harness 的历史（load 时的回放 update 被忽略），只显示自己存的消息 |
+| 模型、Key、登录 | Harness | 团团不保存凭据 |
 
-表：`agents`、`mcp_servers`、`rooms`、`room_agents`、`messages`（`run_id` = 触发这条链的人类消息 id，`hop` = 0 人类 / 1 被人类触发 / ≥2 被 Agent 触发）、`routing_decisions`（每条 Agent 消息一条：plan JSON、attempts JSON、chosen_model）。迁移按 `PRAGMA user_version` 顺序执行，只追加：
+迁移按 `PRAGMA user_version` 顺序执行，只追加：
 
 | 版本 | 内容 |
 | --- | --- |
 | 1–2 | 初始表、路由决策与设备会话 |
-| 3 | 合并网页机器人会话：删除旧的空 `web-robot-%` 设备会话，每个 Agent 保留最新一个并改为固定 id `web-robot` |
-| 4 | `agents.avatar_shape`；启动时为空值的 Agent 补上确定性默认轮廓 |
-| 5 | 视觉更新：把纸墨时期的低饱和头像颜色映射到新的鲜亮色板（同色系，见 `LEGACY_AVATAR_COLORS`），自定义颜色不变 |
+| 3 | 合并网页机器人会话 |
+| 4 | `agents.avatar_shape` |
+| 5 | 头像颜色映射到新色板 |
+| 6 | ACP：`system_prompt` → `identity`；agents 加 `harness`、`cwd`、`env`、`permission_policy`、`mcp_server_ids`（从旧的 `mcp:` 工具 id 迁移）；rooms 加 `main_agent_id`（回填第一个成员）、`cwd`；messages 加 `timeline`；删除 `routing_decisions`；新表 `acp_sessions`、`settings` |
 
 头像动画只用 CSS transform：≥32px 完整动画、更小只眨眼；`prefers-reduced-motion` 全部关闭；离屏（IntersectionObserver）和标签页隐藏（`html[data-tab-hidden]`）时暂停。
 
 ## 编排
 
-1. 人类消息写库并入房间队列；每个房间同时只执行一条链。群聊里新消息到达时，用原因「被新消息打断」中止当前链：正在流式输出的回复以 `cancelled` 保存已生成部分，未执行的交接写一条系统消息后丢弃。私聊不打断，按顺序排队。不同房间并行。
-2. 初始触发：
-   - 私聊 → 唯一的 Agent。
-   - 群聊 @所有人 → 全部成员（按成员顺序）。这一轮里已经回复过的 Agent 不会再被交接触发。
-   - 群聊 @具体成员 → 这些成员（不在房间的 Agent 不触发）。
-   - 群聊没有 @ → `server/picker.ts` 选一个成员：决策模型对成员做一次 choice（置信度不足或选了 other 时回退）→ classifierModel 输出 JSON → 关键词（拉丁词 + 中文二元组）与"名称 + Prompt"的重叠数 → 第一个成员。选择结果写入该回复路由记录的 `plan.selection`。mock 分类器对选择请求用同一套关键词规则，因此结果是确定的。
-3. 触发按 FIFO 顺序**串行**执行。Agent 回复成功后，把它本条回复里成功调用的 `handoff` 工具目标（排除自己、去重、跳过已在排队的）加入队列，`hop + 1`，并带上 task，写入接手方的系统提示。回复文本里的 @ 不解析。之所以用工具而不是解析文本：真实模型经常写"我可以让 @X 接手"这类提议，文本规则怎么改都会误判，工具调用才是明确的意图。handoff 只提供给非设备群聊房间，不计入路由的 toolCount。代价是模型必须支持 function calling（不支持时回退到下一个候选模型）。
-4. `hop ≥ 2` 的每次执行计 1 次交接；达到 `maxAgentHops` 后停止整条链，并发一条系统消息列出未执行的触发。
-5. 取消：中止当前链（正在流的消息以 `cancelled` 保存已生成部分）并清空该房间排队的人类消息（发系统消息说明数量）。
-
-上下文：取房间最近 `contextMessages` 条消息，从新到旧累计不超过 `contextChars` 字符；自己的消息作 `assistant`，其他人作 `user` 并带 `[发言者]:` 前缀。系统提示包含名字、房间类型、其他成员、handoff 的使用规则（只有用户这次的请求确实需要对方现在动手时才交接，正文里的 @ 不会触发）、交接来的 task（如有）、Agent 自己的 Prompt、Skill 目录。
-
-## 模型路由
-
-```
-信号(text, contextTokens≈字符/3, toolCount, hasImages)
-  → 分类：决策模型 systemone（若设置 DECISION_BASE_URL）
-            一次请求问 task_type(choice+other) / difficulty(score 3 级) / needs_tools(noul)
-            失败/超时/格式错 → 下一级；单项置信度 < DECISION_MIN_CONFIDENCE 或 other → 仅该项用下一级结果
-        → classifierModel（JSON 输出，严格校验枚举）── 失败/未配置 → 规则分类（记录失败原因）
-  → 候选：具备该 task_type 标签且 contextWindow ≥ 1.2×contextTokens 的模型
-          （无标签匹配则退回所有容量够的模型，并在理由中写明）
-          排序：成本档 ≥ minTier[difficulty] 的按档位升序在前，低于的按档位降序在后
-  → 调用：按候选顺序；仅当 provider 在输出任何内容前失败（ProviderError：HTTP 错误、连接失败、缺 Key）才换下一个
-```
-
-- 低置信度时选择"该项回退到下一级分类器"而不是"难度上调一档"：上调会在模型拿不准时系统性地选更贵的模型，而且这种代价不可见；回退更能如实反映实际用的是谁的判断，UI 和路由记录都会写明原因。
-- needs_tools 只做一项调整：最终类型是 chat、Agent 有工具且 P(yes) ≥ 0.7 时改为 tool_heavy（记录在 note 里）。
-- 决策模型的 score 是各等级下标按概率加权的期望（可能是 1.43 这样的小数），四舍五入到最近的等级。
-- 启用的模型集合：设置了 `AGENT_HUB_MODELS` 时以它为准（1–5 个真实模型；provider 来自内置的 newapi/deepseek/qwen/doubao，或 providers.json 中的同名定义；标签/成本档/上下文来自内置目录、providers.json 或 `AGENT_HUB_MODEL_<n>_*` 覆盖）；否则用 providers.json；都没有就用 mock。固定到未启用模型的 Agent 会在编辑页和列表中标出，回复时如实报错。
-- 固定模型的 Agent 跳过分类，只有一个候选，**不回退**（固定即意味着用户要这个模型）。
-- 工具循环的后续轮次从上一轮成功的模型开始，避免同一回答中途换模型。
-- 流开始后的错误不回退（否则会重复输出），直接以 `error` 状态结束并保留已生成内容。
-- 每条 Agent 消息记录：信号、分类结果与来源、分类器错误、候选顺序、理由、每次尝试结果、最终模型。前端在消息下方显示一行弱化的来源（按话题选中 / 接 X 的交接 · 模型 · 已回退），点击在详情面板查看全部；会话信息面板汇总本会话的模型使用与回退次数。
-
-## 工具与 Skills
-
-- 工具 id：`builtin:<name>` 或 `mcp:<serverId>:<toolName>`。保存 Agent 时校验 id 是否存在；MCP 工具在每个回合实时 `tools/list`，服务端不再提供的工具作为警告写入路由理由，不静默消失。
-- 工具循环最多 `maxToolIterations` 轮；工具异常以 `{"error": "..."}` 原样返回给模型，并在 UI 中标为失败。超过轮数时消息以 `error` 结束。
-- Skills 渐进披露：系统提示只列 `name: description`；Agent 有 Skill 时自动获得 `load_skill` 工具，调用后才得到正文。
+1. 人类消息写库并入房间队列，每个房间同时只执行一条链，不同房间并行。
+2. 触发：私聊 → 该 Agent；群聊 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 主 Agent。串行执行。
+3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session；群聊 prompt = 该 Agent 上次发言之后的群聊记录（带发言者），私聊 = 用户消息（含图片）。身份文档按 Harness 传递（见 README）；不支持的 Harness 附加在会话第一条 prompt 前的 `<tuantuan-identity>` 中。
+4. `session/update` 实时以 `update` 事件推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。
+5. 取消：`session/cancel`，保留已生成部分并标为 `cancelled`。
+6. 交接（handoff MCP）、跳数上限、群聊打断在 M2。
 
 ## 取舍
 
-- **SQLite + 单进程内存编排**：满足 MVP，部署最简单；代价是不能多实例、重启中断进行中的回复。需要横向扩展时，运行状态应迁到持久队列。
-- **链内串行**：保证消息顺序可读、跳数计数确定；代价是多个被 @ 的 Agent 不并行。
-- **只在首个输出前回退**：保证用户看到的内容不重复；代价是流中途失败不能自动恢复。
-- **MCP 每回合列工具**：反映服务端当前状态；代价是一次额外请求。
-- **未做鉴权 / 多用户**：仅适合本机或可信网络。
+- **每个 Agent 一个进程**：会话隔离清楚、可分别设置 env 和 cwd；代价是内存。同一 Agent 在不同 cwd（不同群）会各开一个进程。
+- **身份文档不落盘**：不改用户仓库；拒绝了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 方案，因为它们会把登录态也换掉，每个 Agent 要各自登录。
+- **fs / terminal 限制在 cwd**：只约束经过团团的请求；Harness 自己的内置工具按它自己的沙箱与权限运行。
+- **未做鉴权 / 多用户**：仅适合本机。
