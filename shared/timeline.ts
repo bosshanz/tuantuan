@@ -26,6 +26,19 @@ export interface Timeline {
   tools: Record<string, ToolState>;
   plan: acp.PlanEntry[] | null;
   stopReason?: string | null;
+  /** Hand-offs this reply made through Tuantuan's `handoff` MCP tool (group chats). */
+  handoffs?: Handoff[];
+  /** Set on a reply that was triggered by another agent's hand-off. */
+  handoffFrom?: Handoff;
+  /** What the robot said aloud for this reply (`speak` tool), when it differs from the text. */
+  spoken?: string;
+}
+
+export interface Handoff {
+  /** The other agent: the target on `handoffs`, the sender on `handoffFrom`. */
+  agentId: string;
+  agentName: string;
+  task: string;
 }
 
 export const emptyTimeline = (): Timeline => ({ parts: [], tools: {}, plan: null });
@@ -91,4 +104,33 @@ export function applyUpdate(t: Timeline, u: acp.SessionUpdate): Timeline {
     default:
       return t;
   }
+}
+
+/** One turn of harness-side history replayed by session/load: what the user sent and how the agent replied. */
+export interface ReplayTurn {
+  user: string;
+  reply: Timeline;
+}
+
+/** Groups replayed session/update notifications into turns; Tuantuan's own wrappers are stripped from user text. */
+export function replayTurns(updates: acp.SessionUpdate[]): ReplayTurn[] {
+  const turns: ReplayTurn[] = [];
+  let cur: ReplayTurn | null = null;
+  for (const u of updates) {
+    if (u.sessionUpdate === "user_message_chunk") {
+      if (!cur || cur.reply.parts.length > 0) {
+        cur = { user: "", reply: emptyTimeline() };
+        turns.push(cur);
+      }
+      if (u.content.type === "text") cur.user += (cur.user ? "\n" : "") + u.content.text;
+      continue;
+    }
+    if (!cur) {
+      cur = { user: "", reply: emptyTimeline() };
+      turns.push(cur);
+    }
+    cur.reply = applyUpdate(cur.reply, u);
+  }
+  for (const t of turns) t.user = t.user.replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "").trim();
+  return turns;
 }

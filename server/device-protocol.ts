@@ -40,6 +40,8 @@ export type DeviceOutbound = { seq: number } & (
       messageId: string;
       status: "done" | "error" | "cancelled" | "interrupted";
       text: string;
+      /** What to say aloud: the agent's `speak` text, else a short spoken version of `text`. Optional for older servers. */
+      spoken?: string;
       error: string | null;
     }
   | { type: "expression"; id: string; name: RobotExpression; durationMs: number }
@@ -50,3 +52,24 @@ export type DeviceOutbound = { seq: number } & (
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 export type DeviceOutboundBody = DistributiveOmit<DeviceOutbound, "seq">;
+
+/** Short, speakable version of a reply: no code blocks or markdown, first sentences up to ~maxChars. */
+export function conciseForSpeech(text: string, maxChars = 160): string {
+  const plain = text
+    .replace(/```[\s\S]*?(```|$)/g, "（代码略）")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(#{1,6}|[-*+]|\d+\.|>)\s+/gm, "")
+    .replace(/[*_~|]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= maxChars) return plain;
+  const sentences = plain.match(/[^。！？!?.；;]+[。！？!?.；;]?/g) ?? [plain];
+  let out = "";
+  for (const s of sentences) {
+    if (out && out.length + s.length > maxChars) break;
+    out += s;
+  }
+  return out.length > maxChars ? `${out.slice(0, maxChars)}…` : out.trim();
+}

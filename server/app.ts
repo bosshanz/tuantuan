@@ -1,8 +1,11 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { methods as acpMethods } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
-import { AcpProcess } from "./acp";
+import { replayTurns } from "../shared/timeline";
+import { AcpProcess, withTimeout } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
 import { type DeviceConn, DeviceHub } from "./device";
 import { detectHarness, harnessSpec, loginShellEnv, visibleHarnesses } from "./harness";
@@ -10,6 +13,7 @@ import { HarnessHost } from "./host";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
+import { TuantuanMcp } from "./tuantuan-mcp";
 
 const AgentInputSchema = z.object({
   name: z
@@ -76,16 +80,23 @@ export function createApp(deps: AppDeps) {
     server?.publish(`room:${roomId}`, JSON.stringify(event));
     devices.onRoomEvent(roomId, event);
   };
-  const host = new HarnessHost(store, {
-    session: (roomId, agentId, view) => publish(roomId, { type: "session", roomId, agentId, view }),
-    permission: (a) =>
-      "resolved" in a
-        ? publish(a.roomId, { type: "permission", roomId: a.roomId, ask: null, resolvedId: a.id })
-        : publish(a.roomId, { type: "permission", roomId: a.roomId, ask: a }),
-    terminal: (roomId, terminal) => publish(roomId, { type: "terminal", roomId, terminal }),
-  });
+  const mcp = new TuantuanMcp();
+  const host = new HarnessHost(
+    store,
+    {
+      session: (roomId, agentId, view) => publish(roomId, { type: "session", roomId, agentId, view }),
+      permission: (a) =>
+        "resolved" in a
+          ? publish(a.roomId, { type: "permission", roomId: a.roomId, ask: null, resolvedId: a.id })
+          : publish(a.roomId, { type: "permission", roomId: a.roomId, ask: a }),
+      terminal: (roomId, terminal) => publish(roomId, { type: "terminal", roomId, terminal }),
+    },
+    mcp,
+  );
   const orchestrator = new Orchestrator(store, host, publish);
   devices.orchestrator = orchestrator;
+  orchestrator.device = devices;
+  mcp.provider = orchestrator;
 
   const json = (data: unknown, status = 200) => Response.json(data, { status });
 
@@ -102,35 +113,78 @@ export function createApp(deps: AppDeps) {
     return Promise.all(visibleHarnesses().map((h) => detectHarness(h, overrides[h.id] ?? null)));
   }
 
-  /** Spawns the harness once and runs the ACP handshake, so onboarding can show what works. */
-  async function testHarness(id: string) {
+  /**
+   * Spawns the harness once and runs the ACP handshake, optionally `authenticate` with one of its
+   * agent-driven auth methods, then tries session/new to tell whether it is logged in.
+   */
+  async function probeHarness(id: string, methodId?: string) {
     const spec = harnessSpec(id);
     if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
     const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
-    if (!status.path) return { ok: false, error: status.error, install: spec.install };
+    if (!status.path) return { ok: false, error: status.error, install: spec.install, login: spec.login };
     const env = await loginShellEnv();
+    const scratch = mkdtempSync(join(tmpdir(), "tuantuan-probe-"));
     const p = new AcpProcess(
-      { command: status.path, args: spec.args, env, cwd: env.HOME ?? "/" },
+      { command: status.path, args: spec.args, env, cwd: scratch },
       { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
     );
     try {
       const init = await p.initialize(30_000);
+      const authMethods = (init.authMethods ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description ?? null,
+        type: "type" in m && m.type === "terminal" ? ("terminal" as const) : ("agent" as const),
+        command: "type" in m && m.type === "terminal" ? [status.path, ...spec.args, ...(m.args ?? [])].join(" ") : null,
+      }));
+      let authError: string | null = null;
+      if (methodId) {
+        const m = authMethods.find((x) => x.id === methodId);
+        if (!m) throw new ValidationError(`${spec.name} 没有登录方式 ${methodId}`);
+        if (m.type !== "agent") throw new ValidationError(`「${m.name}」需要在终端里运行：${m.command}`);
+        try {
+          // Agent-driven login may open a browser and wait for the user: allow a long time.
+          await withTimeout(
+            p.agent.request(acpMethods.agent.authenticate, { methodId }),
+            600_000,
+            "登录超时（10 分钟）",
+          );
+        } catch (e) {
+          authError = (e as Error).message;
+        }
+      }
+      let loggedIn: boolean | null = null;
+      let sessionError: string | null = null;
+      try {
+        await withTimeout(
+          p.agent.request(acpMethods.agent.session.new, { cwd: scratch, mcpServers: [] }),
+          60_000,
+          "session/new 超时",
+        );
+        loggedIn = true;
+      } catch (e) {
+        const msg = (e as { message?: string }).message ?? String(e);
+        if (/auth/i.test(msg)) loggedIn = false;
+        else sessionError = msg;
+      }
       return {
         ok: true,
         protocolVersion: init.protocolVersion,
         agentInfo: init.agentInfo ?? null,
-        authMethods: (init.authMethods ?? []).map((m) => ({
-          id: m.id,
-          name: m.name,
-          description: m.description ?? null,
-        })),
+        authMethods,
         capabilities: init.agentCapabilities ?? {},
         auth: spec.auth,
+        login: spec.login,
+        loggedIn,
+        sessionError,
+        authError,
       };
     } catch (e) {
-      return { ok: false, error: (e as Error).message };
+      if (e instanceof ValidationError) throw e;
+      return { ok: false, error: (e as Error).message, login: spec.login };
     } finally {
       p.kill();
+      rmSync(scratch, { recursive: true, force: true });
     }
   }
 
@@ -150,11 +204,12 @@ export function createApp(deps: AppDeps) {
 
     if (resource === "meta" && method === "GET")
       return json({
-        harnesses: visibleHarnesses().map(({ id, name, install, auth, docs, identity }) => ({
+        harnesses: visibleHarnesses().map(({ id, name, install, auth, login, docs, identity }) => ({
           id,
           name,
           install,
           auth,
+          login,
           docs,
           identity,
         })),
@@ -170,7 +225,11 @@ export function createApp(deps: AppDeps) {
         store.setSetting("harnessPaths", overrides);
         return json(await harnessStatuses());
       }
-      if (id && sub === "test" && method === "POST") return json(await testHarness(id));
+      if (id && sub === "test" && method === "POST") return json(await probeHarness(id));
+      if (id && sub === "authenticate" && method === "POST") {
+        const { methodId } = z.object({ methodId: z.string().min(1) }).parse(await body());
+        return json(await probeHarness(id, methodId));
+      }
     }
 
     if (resource === "permissions" && id && method === "POST") {
@@ -232,6 +291,16 @@ export function createApp(deps: AppDeps) {
           return json(await host.switchSession(t.room, t.agent, t.identity, sessionId));
         }
         if (action === "history" && method === "GET") return json(await host.listSessions(t.room, t.agent, t.identity));
+        if (action === "replay" && method === "GET") {
+          // Drop turns this room already shows (same user text), so only history Tuantuan never saw remains.
+          const seen = new Set(
+            store
+              .recentMessages(t.room.id, 500)
+              .filter((m) => m.senderKind === "human")
+              .map((m) => m.content.trim()),
+          );
+          return json(replayTurns(host.replay(t.room.id, t.agent.id)).filter((x) => !seen.has(x.user)));
+        }
         if (action === "config" && method === "POST") {
           const c = z.object({ configId: z.string(), value: z.union([z.string(), z.boolean()]) }).parse(await body());
           return json(await host.setConfig(t.room, t.agent, t.identity, c.configId, c.value));
@@ -274,8 +343,10 @@ export function createApp(deps: AppDeps) {
     orchestrator,
     devices,
     host,
+    mcp,
     attach(s: Server<WsData>) {
       server = s;
+      mcp.baseUrl = `http://127.0.0.1:${s.port}`;
     },
     async fetch(req: Request, srv: Server<WsData>): Promise<Response | undefined> {
       const url = new URL(req.url);
@@ -287,6 +358,7 @@ export function createApp(deps: AppDeps) {
         if (srv.upgrade(req, { data: { kind: "device", conn: null } })) return undefined;
         return new Response("WebSocket upgrade failed", { status: 400 });
       }
+      if (url.pathname.startsWith("/mcp/")) return mcp.handle(url.pathname.slice(5), req);
       if (url.pathname.startsWith("/api/")) {
         try {
           return await handleApi(req, url);

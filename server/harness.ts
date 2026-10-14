@@ -25,6 +25,8 @@ export interface HarnessSpec {
   versionArgs: string[];
   install: string;
   auth: string;
+  /** Terminal command that logs in, shown with a copy button when ACP `authenticate` can't do it. */
+  login: string;
   docs: string;
   identity: IdentityDelivery;
   /** Test-only harness, listed only when TUANTUAN_MOCK_HARNESS=1. */
@@ -36,6 +38,7 @@ export const MOCK_AGENT_PATH = resolve(import.meta.dir, "mock-agent.ts");
 export const HARNESSES: HarnessSpec[] = [
   {
     id: "claude-code",
+    login: "claude",
     name: "Claude Code",
     bin: "claude-agent-acp",
     args: [],
@@ -47,6 +50,7 @@ export const HARNESSES: HarnessSpec[] = [
   },
   {
     id: "codex",
+    login: "codex login",
     name: "Codex",
     bin: "codex-acp",
     args: [],
@@ -58,6 +62,7 @@ export const HARNESSES: HarnessSpec[] = [
   },
   {
     id: "grok",
+    login: "grok login",
     name: "Grok Build",
     bin: "grok",
     args: ["agent", "stdio"],
@@ -69,6 +74,7 @@ export const HARNESSES: HarnessSpec[] = [
   },
   {
     id: "opencode",
+    login: "opencode auth login",
     name: "OpenCode",
     bin: "opencode",
     args: ["acp"],
@@ -80,6 +86,7 @@ export const HARNESSES: HarnessSpec[] = [
   },
   {
     id: "mock",
+    login: "",
     name: "Mock（测试）",
     bin: process.execPath,
     args: [MOCK_AGENT_PATH],
@@ -154,6 +161,7 @@ export interface HarnessStatus {
   name: string;
   install: string;
   auth: string;
+  login: string;
   docs: string;
   /** Resolved executable, or null when not installed / not found. */
   path: string | null;
@@ -165,7 +173,15 @@ export interface HarnessStatus {
 export async function detectHarness(spec: HarnessSpec, override: string | null): Promise<HarnessStatus> {
   const env = await loginShellEnv();
   const path = override ? (existsSync(override) ? override : null) : which(spec.bin, env.PATH ?? "");
-  const base = { id: spec.id, name: spec.name, install: spec.install, auth: spec.auth, docs: spec.docs, override };
+  const base = {
+    id: spec.id,
+    name: spec.name,
+    install: spec.install,
+    auth: spec.auth,
+    login: spec.login,
+    docs: spec.docs,
+    override,
+  };
   if (!path)
     return { ...base, path: null, version: null, error: override ? `找不到 ${override}` : `PATH 中没有 ${spec.bin}` };
   if (spec.dev) return { ...base, path, version: "mock", error: null };

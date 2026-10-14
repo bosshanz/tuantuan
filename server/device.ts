@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  conciseForSpeech,
   DEVICE_PROTOCOL_VERSION,
   type DeviceInbound,
   type DeviceOutboundBody,
@@ -10,7 +11,7 @@ import {
 import type { Orchestrator, RoomEvent } from "./orchestrator";
 import type { Store } from "./store";
 
-/** Lets an agent drive the robot's face and body. Wired to agents in M2 via Tuantuan's MCP tool server. */
+/** Lets an agent drive the robot's face and body (Tuantuan MCP tools set_expression / play_action). */
 export interface DeviceControl {
   command(kind: "expression" | "action", name: string, signal?: AbortSignal): Promise<string>;
 }
@@ -211,6 +212,7 @@ export class DeviceHub {
           messageId: m.id,
           status: m.status,
           text: m.content,
+          spoken: m.timeline?.spoken ?? conciseForSpeech(m.content),
           error: m.error,
         });
     }

@@ -1,10 +1,14 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import { applyUpdate, emptyTimeline, type Timeline, timelineText } from "../shared/timeline";
+import { applyUpdate, emptyTimeline, type Handoff, type Timeline, timelineText } from "../shared/timeline";
 import type { TerminalSnapshot } from "./acp";
+import type { DeviceHub } from "./device";
+import { ROBOT_ACTIONS, ROBOT_EXPRESSIONS } from "./device-protocol";
+import { harnessSpec } from "./harness";
 import type { HarnessHost, PermissionAsk, SessionView } from "./host";
 import { mentionsEveryone, parseMentions } from "./mentions";
 import type { Agent, Message, Room, Store } from "./store";
 import { ValidationError } from "./store";
+import type { ToolCtx, ToolDef, ToolProvider } from "./tuantuan-mcp";
 
 export type RoomEvent =
   | { type: "message"; message: Message }
@@ -30,13 +34,25 @@ export interface ImageAttachment {
 interface Trigger {
   agentId: string;
   hop: number;
+  /** Set when another agent handed this turn off through the `handoff` tool. */
+  from?: Handoff;
+}
+
+/** A running agent turn; MCP tool calls from that agent land here. */
+interface TurnCtx {
+  signal: AbortSignal;
+  handoffs: Handoff[];
+  spoken: string | null;
 }
 
 const INTERJECTION = "被新消息打断";
-/** Agent-to-agent hops per human message (hand-off arrives in M2 via Tuantuan's MCP tool). */
-const MAX_AGENT_HOPS = 5;
-/** Group context sent with a prompt: messages since this agent last spoke, capped. */
+/** Agent-to-agent hand-offs per human message. */
+export const MAX_AGENT_HOPS = 5;
+/** Group relay (群聊转述): messages since this agent last spoke, at most this many / this many characters. */
 const GROUP_CONTEXT_MESSAGES = 30;
+export const RELAY_MAX_CHARS = 8000;
+const RELAY_MESSAGE_MAX_CHARS = 2000;
+const SPEAK_MAX_CHARS = 300;
 
 interface RoomRuntime {
   queue: { msg: Message; images: ImageAttachment[] }[];
@@ -49,8 +65,10 @@ interface RoomRuntime {
  * queue; in groups a new message interrupts). Each agent turn is one ACP session/prompt on that
  * agent's harness; the reply's timeline is persisted and streamed as raw ACP updates.
  */
-export class Orchestrator {
+export class Orchestrator implements ToolProvider {
   private rooms = new Map<string, RoomRuntime>();
+  private turns = new Map<string, TurnCtx>(); // `${roomId}|${agentId}`
+  device: DeviceHub | null = null;
 
   constructor(
     private store: Store,
@@ -117,13 +135,13 @@ export class Orchestrator {
       .filter((a): a is Agent => a !== null && a.id !== agent.id);
     const context =
       room.deviceId !== null
-        ? "你正通过一台桌面机器人和用户语音对话：回复要简短、口语化，适合朗读。"
+        ? "你正通过一台桌面机器人和用户语音对话：回复要简短、口语化，适合朗读。可以用 tuantuan 工具 set_expression / play_action 控制机器人的表情和动作；回复较长时用 speak 给出要朗读的一两句话。"
         : room.kind === "group"
           ? [
               `你在团团的群聊「${room.name}」里，名字是「${agent.name}」。用户的消息以「[发言者]: 内容」给出。`,
               members.length > 0 ? `群里的其他 Agent：${members.map((m) => `@${m.name}`).join("、")}。` : "",
               room.mainAgentId === agent.id ? "你是本群的主 Agent：没人被 @ 时由你回复。" : "",
-              "回复正文里的 @名字 只是普通文字，不会通知任何人。不要在回复开头写「[名字]:」。",
+              "回复正文里的 @名字 只是普通文字，不会通知任何人。需要别的成员现在动手时，调用 tuantuan 的 handoff 工具（agent=对方名字，task=要对方做的事），对方会在你这条回复结束后接手；只在用户这次的请求确实需要对方时交接，不要用来介绍别人。不要在回复开头写「[名字]:」。",
             ]
               .filter(Boolean)
               .join("")
@@ -181,6 +199,8 @@ export class Orchestrator {
     }
 
     const queue: Trigger[] = initial.map((agentId) => ({ agentId, hop: 1 }));
+    const everyone = room.kind === "group" && mentionsEveryone(human.content);
+    const replied = new Set<string>();
     let agentHops = 0;
     while (queue.length > 0) {
       if (signal.aborted) return this.noteInterjection(room.id, human.id, signal, queue);
@@ -191,8 +211,19 @@ export class Orchestrator {
       }
       const agent = this.store.getAgent(t.agentId);
       if (!agent) continue;
-      const reply = await this.runAgentTurn(room, agent, human, images, t.hop, signal);
+      const { reply, handoffs } = await this.runAgentTurn(room, agent, human, images, t, signal);
+      replied.add(agent.id);
       if (reply.status === "cancelled") return this.noteInterjection(room.id, human.id, signal, queue);
+      if (reply.status !== "done") continue;
+      for (const h of handoffs) {
+        // Already queued for this message, or (in an @所有人 round) already answered: don't trigger twice.
+        if (queue.some((q) => q.agentId === h.agentId) || (everyone && replied.has(h.agentId))) continue;
+        queue.push({
+          agentId: h.agentId,
+          hop: t.hop + 1,
+          from: { agentId: agent.id, agentName: agent.name, task: h.task },
+        });
+      }
     }
   }
 
@@ -202,19 +233,43 @@ export class Orchestrator {
     this.system(roomId, runId, 0, `${INTERJECTION}，未执行的触发：${names.join("、")}`);
   }
 
-  /** What the agent is told this turn: the human text in a DM; in a group, what happened since it last spoke. */
-  promptFor(room: Room, agent: Agent, human: Message, images: ImageAttachment[]): acp.ContentBlock[] {
+  /**
+   * What the agent is told this turn: the human text in a DM; in a group, a relay (群聊转述) of what
+   * was said since it last spoke, newest kept when over RELAY_MAX_CHARS, plus the hand-off task if any.
+   */
+  promptFor(room: Room, agent: Agent, human: Message, images: ImageAttachment[], from?: Handoff): acp.ContentBlock[] {
     const imageBlocks: acp.ContentBlock[] = images.map((i) => ({ type: "image", mimeType: i.mimeType, data: i.data }));
     if (room.kind === "dm") return [{ type: "text", text: human.content }, ...imageBlocks];
     const history = this.store.recentMessages(room.id, GROUP_CONTEXT_MESSAGES);
     const lastOwn = history.findLastIndex(
       (m) => m.senderKind === "agent" && m.senderId === agent.id && m.status === "done",
     );
-    const lines = history
+    const fresh = history
       .slice(lastOwn + 1)
       .filter((m) => m.senderKind !== "system" && m.status !== "streaming" && m.content.trim())
-      .map((m) => `[${m.senderName}]: ${m.content}`);
-    return [{ type: "text", text: lines.join("\n\n") || `[${human.senderName}]: ${human.content}` }, ...imageBlocks];
+      .map((m) => {
+        const body = m.content.trim();
+        const clipped =
+          body.length > RELAY_MESSAGE_MAX_CHARS ? `${body.slice(0, RELAY_MESSAGE_MAX_CHARS)}…（已截断）` : body;
+        return `[${m.senderName}${m.senderKind === "agent" ? "（Agent）" : ""}]: ${clipped}`;
+      });
+    const kept: string[] = [];
+    let budget = RELAY_MAX_CHARS;
+    for (let i = fresh.length - 1; i >= 0; i--) {
+      const line = fresh[i] as string;
+      if (line.length > budget && kept.length > 0) break;
+      kept.unshift(line);
+      budget -= line.length;
+    }
+    if (kept.length === 0) kept.push(`[${human.senderName}]: ${human.content}`);
+    const omitted = fresh.length - kept.length;
+    const header = `${lastOwn >= 0 ? "你上次发言之后，群里的新消息" : "群里最近的消息"}${
+      omitted > 0 ? `（更早的 ${omitted} 条已省略）` : ""
+    }：`;
+    let text = `${header}\n\n${kept.join("\n\n")}`;
+    if (from)
+      text += `\n\n<tuantuan-handoff from="${from.agentName}">\n${from.task}\n</tuantuan-handoff>\n@${from.agentName} 用 handoff 把上面这个任务交给了你，请接手处理。`;
+    return [{ type: "text", text }, ...imageBlocks];
   }
 
   private async runAgentTurn(
@@ -222,10 +277,11 @@ export class Orchestrator {
     agent: Agent,
     human: Message,
     images: ImageAttachment[],
-    hop: number,
+    trigger: Trigger,
     signal: AbortSignal,
-  ): Promise<Message> {
-    const blocks = this.promptFor(room, agent, human, images);
+  ): Promise<{ reply: Message; handoffs: Handoff[] }> {
+    const hop = trigger.hop;
+    const blocks = this.promptFor(room, agent, human, images, trigger.from);
     const placeholder = this.store.insertMessage({
       roomId: room.id,
       runId: human.id,
@@ -237,14 +293,25 @@ export class Orchestrator {
       status: "streaming",
     });
     this.publish(room.id, { type: "message", message: placeholder });
-    let timeline: Timeline = emptyTimeline();
+    let timeline: Timeline = trigger.from ? { ...emptyTimeline(), handoffFrom: trigger.from } : emptyTimeline();
     let saved = Date.now();
+    const turnKey = `${room.id}|${agent.id}`;
+    const turn: TurnCtx = { signal, handoffs: [], spoken: null };
+    this.turns.set(turnKey, turn);
     const finish = (status: Message["status"], error: string | null, stopReason: string | null = null) => {
+      if (this.turns.get(turnKey) === turn) this.turns.delete(turnKey);
       timeline = { ...timeline, stopReason };
+      if (turn.handoffs.length > 0) timeline.handoffs = turn.handoffs;
+      if (turn.spoken) timeline.spoken = turn.spoken;
       const done = this.store.updateReply(placeholder.id, { content: timelineText(timeline), status, error, timeline });
       this.publish(room.id, { type: "message", message: done });
-      return done;
+      return { reply: done, handoffs: status === "done" ? turn.handoffs : [] };
     };
+    if (trigger.from)
+      this.publish(room.id, {
+        type: "message",
+        message: this.store.updateReply(placeholder.id, { content: "", status: "streaming", timeline }),
+      });
     try {
       const { stopReason } = await this.host.prompt(
         room,
@@ -273,6 +340,114 @@ export class Orchestrator {
     } catch (e) {
       if (signal.aborted) return finish("cancelled", (signal.reason as Error | undefined)?.message || "已取消");
       return finish("error", (e as Error).message);
+    }
+  }
+
+  // ---- Tuantuan MCP tools (server/tuantuan-mcp.ts) ----
+
+  tools(ctx: ToolCtx): ToolDef[] {
+    const room = this.store.getRoom(ctx.roomId);
+    if (!room?.agentIds.includes(ctx.agentId)) return [];
+    if (room.deviceId !== null)
+      return [
+        {
+          name: "set_expression",
+          description: `设置桌面机器人的表情（约 2.5 秒）。可选：${ROBOT_EXPRESSIONS.join(" / ")}`,
+          inputSchema: {
+            type: "object",
+            properties: { expression: { type: "string", enum: [...ROBOT_EXPRESSIONS] } },
+            required: ["expression"],
+          },
+        },
+        {
+          name: "play_action",
+          description: `让桌面机器人做一个动作。可选：${ROBOT_ACTIONS.join(" / ")}`,
+          inputSchema: {
+            type: "object",
+            properties: { action: { type: "string", enum: [...ROBOT_ACTIONS] } },
+            required: ["action"],
+          },
+        },
+        {
+          name: "speak",
+          description: `指定机器人这次要朗读的话（口语化，一两句，最多 ${SPEAK_MAX_CHARS} 字）。不调用时朗读回复的开头部分。`,
+          inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+        },
+      ];
+    if (room.kind !== "group") return [];
+    return [
+      {
+        name: "handoff",
+        description:
+          "把任务交给群里的另一个 Agent：你这条回复结束后，对方会收到 task 并接手。只在用户的请求确实需要对方现在动手时使用；回复正文里写 @名字 不会通知对方。",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agent: { type: "string", description: "对方的名字（不带 @）" },
+            task: { type: "string", description: "要对方做的事，写清楚上下文" },
+          },
+          required: ["agent", "task"],
+        },
+      },
+      {
+        name: "list_members",
+        description: "列出群里的 Agent 成员（名字、Harness、谁是主 Agent）。",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ];
+  }
+
+  async call(ctx: ToolCtx, name: string, args: Record<string, unknown>): Promise<string> {
+    const room = this.store.getRoom(ctx.roomId);
+    if (!room) throw new Error("会话不存在");
+    const turn = this.turns.get(`${ctx.roomId}|${ctx.agentId}`);
+    const members = room.agentIds.map((id) => this.store.getAgent(id)).filter((a): a is Agent => a !== null);
+    switch (name) {
+      case "list_members":
+        return members
+          .map(
+            (m) =>
+              `@${m.name}${m.id === ctx.agentId ? "（你）" : ""}${m.id === room.mainAgentId ? "（主 Agent）" : ""} · ${
+                harnessSpec(m.harness)?.name ?? "未绑定 Harness"
+              }`,
+          )
+          .join("\n");
+      case "handoff": {
+        if (!turn) throw new Error("只能在回复过程中交接");
+        const target = String(args.agent ?? "")
+          .trim()
+          .replace(/^@/, "");
+        const task = String(args.task ?? "").trim();
+        if (!task) throw new Error("task 不能为空");
+        const to = members.find((m) => m.name.toLowerCase() === target.toLowerCase());
+        if (!to)
+          throw new Error(
+            `群里没有「${target}」。可以交接给：${members
+              .filter((m) => m.id !== ctx.agentId)
+              .map((m) => m.name)
+              .join("、")}`,
+          );
+        if (to.id === ctx.agentId) throw new Error("不能交接给自己");
+        if (turn.handoffs.some((h) => h.agentId === to.id)) return `这条回复已经交接给 @${to.name} 了。`;
+        turn.handoffs.push({ agentId: to.id, agentName: to.name, task: task.slice(0, 4000) });
+        return `已交接给 @${to.name}：你这条回复结束后对方会接手。请简短告诉用户你交给了谁，不要替对方完成任务。`;
+      }
+      case "set_expression":
+      case "play_action": {
+        const control = this.device?.controlFor(room.id);
+        if (!control) throw new Error("这个会话没有连接机器人");
+        const value = String((name === "set_expression" ? args.expression : args.action) ?? "");
+        return control.command(name === "set_expression" ? "expression" : "action", value, turn?.signal);
+      }
+      case "speak": {
+        if (!turn) throw new Error("只能在回复过程中使用");
+        const text = String(args.text ?? "").trim();
+        if (!text) throw new Error("text 不能为空");
+        turn.spoken = text.slice(0, SPEAK_MAX_CHARS);
+        return "好的，机器人会朗读这段话。";
+      }
+      default:
+        throw new Error(`未知工具：${name}`);
     }
   }
 

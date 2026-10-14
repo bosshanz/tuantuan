@@ -5,8 +5,13 @@
  * It replies 「收到：「<text>」」 and exercises every client feature on request:
  *   /plan  — plan checklist        /edit — diff tool call behind a permission prompt, then writes mock-edit.txt
  *   /run   — terminal tool call    /slow — streams for ~6s (to test cancel)
- * Prompts mentioning [[handoff:Name task]] are echoed so group tests can see them.
+ * Tuantuan MCP tools (group / robot rooms), called through whatever server session/new passed in:
+ *   /handoff Name task   /members   /express happy   /act dance   /say 一句话
+ * An identity doc containing [[handoff:Name task]] makes it hand off on every turn (loop tests).
+ * Env: MOCK_AGENT_MCP_HTTP=1 advertises HTTP MCP support (default: stdio only, the ACP baseline);
+ *      MOCK_AGENT_AUTH_FILE=path requires `authenticate` (method mock-login) before session/new works.
  */
+import { existsSync } from "node:fs";
 import * as acp from "@agentclientprotocol/sdk";
 
 if (process.argv.includes("--version")) {
@@ -16,6 +21,9 @@ if (process.argv.includes("--version")) {
 
 interface Sess {
   cwd: string;
+  mcpServers: acp.McpServer[];
+  mcp: Map<string, McpClient>;
+  identity: string;
   history: acp.SessionUpdate[];
   config: Record<string, string>;
   abort: AbortController | null;
@@ -78,12 +86,112 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     });
   });
 
-function newSess(cwd: string): [string, Sess] {
+function newSess(cwd: string, mcpServers: acp.McpServer[]): [string, Sess] {
   const id = `mock-${crypto.randomUUID().slice(0, 8)}`;
-  const s: Sess = { cwd, history: [], config: {}, abort: null, title: null };
+  const s: Sess = { cwd, mcpServers, mcp: new Map(), identity: "", history: [], config: {}, abort: null, title: null };
   sessions.set(id, s);
   return [id, s];
 }
+
+/** Minimal MCP client: stdio (newline-delimited JSON-RPC) or Streamable HTTP with JSON responses. */
+interface McpClient {
+  call(method: string, params: unknown): Promise<unknown>;
+}
+
+function mcpClient(server: acp.McpServer): McpClient {
+  let nextId = 1;
+  if ("type" in server && (server.type === "http" || server.type === "sse")) {
+    const post = async (body: unknown) => {
+      const res = await fetch(server.url, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify(body),
+      });
+      return res.status === 202 ? null : ((await res.json()) as { result?: unknown; error?: { message: string } });
+    };
+    let ready: Promise<unknown> | null = null;
+    return {
+      async call(method, params) {
+        ready ??= post({
+          jsonrpc: "2.0",
+          id: nextId++,
+          method: "initialize",
+          params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "mock-agent", version: "1" } },
+        }).then(() => post({ jsonrpc: "2.0", method: "notifications/initialized" }));
+        await ready;
+        const r = await post({ jsonrpc: "2.0", id: nextId++, method, params });
+        if (r?.error) throw new Error(r.error.message);
+        return r?.result;
+      },
+    };
+  }
+  const stdio = server as acp.McpServerStdio;
+  const proc = Bun.spawn([stdio.command, ...stdio.args], {
+    env: { ...process.env, ...Object.fromEntries(stdio.env.map((e) => [e.name, e.value])) },
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "inherit",
+  });
+  const pending = new Map<number, (r: { result?: unknown; error?: { message: string } }) => void>();
+  void (async () => {
+    let buf = "";
+    for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
+      buf += new TextDecoder().decode(chunk);
+      for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line) as { id: number; result?: unknown; error?: { message: string } };
+        pending.get(msg.id)?.(msg);
+        pending.delete(msg.id);
+      }
+    }
+  })();
+  const send = (m: unknown) => {
+    (proc.stdin as import("bun").FileSink).write(`${JSON.stringify(m)}\n`);
+    (proc.stdin as import("bun").FileSink).flush();
+  };
+  const request = (method: string, params: unknown) =>
+    new Promise<unknown>((res, rej) => {
+      const id = nextId++;
+      pending.set(id, (r) => (r.error ? rej(new Error(r.error.message)) : res(r.result)));
+      send({ jsonrpc: "2.0", id, method, params });
+    });
+  const ready = request("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "mock-agent", version: "1" },
+  }).then(() => send({ jsonrpc: "2.0", method: "notifications/initialized" }));
+  return {
+    async call(method, params) {
+      await ready;
+      return request(method, params);
+    },
+  };
+}
+
+/** Calls a tool on the session's "tuantuan" MCP server; returns [ok, text]. */
+async function callTool(s: Sess, name: string, args: Record<string, unknown>): Promise<[boolean, string]> {
+  const server = s.mcpServers.find((m) => m.name === "tuantuan");
+  if (!server) return [false, "没有 tuantuan MCP 服务"];
+  let c = s.mcp.get(server.name);
+  if (!c) {
+    c = mcpClient(server);
+    s.mcp.set(server.name, c);
+  }
+  try {
+    const r = (await c.call("tools/call", { name, arguments: args })) as {
+      content: { type: string; text: string }[];
+      isError?: boolean;
+    };
+    return [!r.isError, r.content.map((x) => x.text).join("")];
+  } catch (e) {
+    return [false, (e as Error).message];
+  }
+}
+
+const authFile = process.env.MOCK_AGENT_AUTH_FILE;
+const needsAuth = () => !!authFile && !existsSync(authFile);
 
 const input = new WritableStream<Uint8Array>({
   write(chunk) {
@@ -105,13 +213,19 @@ acp
     agentCapabilities: {
       loadSession: true,
       promptCapabilities: { image: true, embeddedContext: true },
-      mcpCapabilities: { http: true },
+      mcpCapabilities: { http: process.env.MOCK_AGENT_MCP_HTTP === "1" },
       sessionCapabilities: { list: {}, resume: {} },
     },
-    authMethods: [],
+    authMethods: authFile ? [{ id: "mock-login", name: "Mock 登录", description: "立即登录（测试用）" }] : [],
   }))
+  .onRequest(acp.methods.agent.authenticate, async (ctx) => {
+    if (ctx.params.methodId !== "mock-login") throw acp.RequestError.invalidParams(ctx.params.methodId);
+    if (authFile) await Bun.write(authFile, "ok");
+    return {};
+  })
   .onRequest(acp.methods.agent.session.new, (ctx) => {
-    const [sessionId, s] = newSess(ctx.params.cwd);
+    if (needsAuth()) throw acp.RequestError.authRequired();
+    const [sessionId, s] = newSess(ctx.params.cwd, ctx.params.mcpServers);
     setTimeout(() => {
       void ctx.client.notify(acp.methods.client.session.update, {
         sessionId,
@@ -126,6 +240,8 @@ acp
   .onRequest(acp.methods.agent.session.load, async (ctx) => {
     const s = sessions.get(ctx.params.sessionId);
     if (!s) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
+    s.mcpServers = ctx.params.mcpServers;
+    s.mcp.clear();
     for (const update of s.history)
       await ctx.client.notify(acp.methods.client.session.update, { sessionId: ctx.params.sessionId, update });
     return { configOptions: configOptions(s) };
@@ -133,6 +249,8 @@ acp
   .onRequest(acp.methods.agent.session.resume, (ctx) => {
     const s = sessions.get(ctx.params.sessionId);
     if (!s) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
+    s.mcpServers = ctx.params.mcpServers ?? [];
+    s.mcp.clear();
     return { configOptions: configOptions(s) };
   })
   .onRequest(acp.methods.agent.session.setConfigOption, (ctx) => {
@@ -157,7 +275,12 @@ acp
     const blocks = ctx.params.prompt;
     const fullText = blocks.map((b) => (b.type === "text" ? b.text : "")).join("\n");
     // The identity doc arrives wrapped in <tuantuan-identity>; the user's words follow it.
-    const text = fullText.replace(/<tuantuan-[a-z]+>[\s\S]*?<\/tuantuan-[a-z]+>\s*/g, "").trim();
+    const identity = fullText.match(/<tuantuan-identity>([\s\S]*?)<\/tuantuan-identity>/)?.[1];
+    if (identity) s.identity = identity;
+    const handoffTask = fullText.match(/<tuantuan-handoff from="([^"]*)">\n?([\s\S]*?)\n?<\/tuantuan-handoff>/);
+    const text = fullText.replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "").trim();
+    // In a group the prompt is a relay of several messages; commands come from the latest one.
+    const latest = handoffTask ? "" : (text.split(/\n\n/).at(-1) ?? "").replace(/^\[[^\]]+\]: /, "").trim();
     const images = blocks.filter((b) => b.type === "image").length;
     for (const b of blocks) s.history.push({ sessionUpdate: "user_message_chunk", content: b });
     s.title ??= text.slice(0, 30);
@@ -168,7 +291,44 @@ acp
         content: { type: "text", text: `用户说「${text}」，我来处理。` },
       });
       await sleep(60, abort.signal);
-      const cmd = text.match(/^\/(\w+)/)?.[1];
+      const cmd = latest.match(/^\/(\w+)/)?.[1];
+      const arg = latest.replace(/^\/\w+\s*/, "");
+      let n = 0;
+      const tool = async (name: string, args: Record<string, unknown>) => {
+        const toolCallId = `mcp-${++n}`;
+        await send({
+          sessionUpdate: "tool_call",
+          toolCallId,
+          title: `tuantuan/${name}`,
+          kind: "other",
+          status: "in_progress",
+          rawInput: args,
+        });
+        const [ok, out] = await callTool(s, name, args);
+        await send({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: ok ? "completed" : "failed",
+          content: [{ type: "content", content: { type: "text", text: out } }],
+        });
+        return [ok, out] as const;
+      };
+      const loop = s.identity.match(/\[\[handoff:(\S+) ([^\]]+)\]\]/);
+      if (loop) {
+        await tool("handoff", { agent: loop[1], task: loop[2] });
+      } else if (cmd === "handoff") {
+        const [, who = "", task = ""] = arg.match(/^@?(\S+)\s*([\s\S]*)$/) ?? [];
+        await tool("handoff", { agent: who, task: task || "请接手" });
+      } else if (cmd === "members") {
+        const [, out] = await tool("list_members", {});
+        await chunk(`成员：${out.replaceAll("\n", "；")}。`);
+      } else if (cmd === "express") {
+        await tool("set_expression", { expression: arg });
+      } else if (cmd === "act") {
+        await tool("play_action", { action: arg });
+      } else if (cmd === "say") {
+        await tool("speak", { text: arg });
+      }
       if (cmd === "plan") {
         const steps = ["读需求", "写代码", "跑测试"];
         for (let done = 0; done <= steps.length; done++) {
@@ -238,8 +398,10 @@ acp
           await sleep(100, abort.signal);
         }
       }
-      const reply = `收到：「${text}」${images ? `，还有 ${images} 张图片` : ""}（${s.config.model ?? "mock-fast"}）`;
-      for (const part of reply.match(/.{1,6}/gsu) ?? []) {
+      const what = handoffTask ? `接手 @${handoffTask[1]} 的任务「${handoffTask[2]}」` : `收到：「${latest || text}」`;
+      const reply = `${what}${images ? `，还有 ${images} 张图片` : ""}（${s.config.model ?? "mock-fast"}）`;
+      const size = reply.length > 200 ? 400 : 6;
+      for (const part of reply.match(new RegExp(`.{1,${size}}`, "gsu")) ?? []) {
         await chunk(part);
         await sleep(15, abort.signal);
       }

@@ -6,6 +6,7 @@ import { AcpProcess, type TerminalSnapshot, withTimeout } from "./acp";
 import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./harness";
 import type { Agent, Room, Store } from "./store";
 import { ValidationError } from "./store";
+import type { TuantuanMcp } from "./tuantuan-mcp";
 
 /** Live, per-(room, agent) view of the harness session the UI needs: pickers, slash commands, usage. */
 export interface SessionView {
@@ -56,6 +57,8 @@ interface SessionSlot {
   turn: ((u: acp.SessionUpdate) => void) | null;
   /** While loading/resuming, replayed history is dropped (Tuantuan keeps its own transcript). */
   replaying: boolean;
+  /** Updates the harness replayed on session/load (history Tuantuan may not have); shown read-only. */
+  replay: acp.SessionUpdate[];
   identityPending: boolean;
 }
 
@@ -72,10 +75,19 @@ export class HarnessHost {
     { ask: PermissionAsk; resolve: (r: acp.RequestPermissionResponse) => void; signal?: AbortSignal }
   >();
 
+  /** Slots whose next attach should session/load (to get the harness's history) rather than resume. */
+  private wantLoad = new Set<string>();
+
   constructor(
     private store: Store,
     private events: HostEvents,
+    private mcp: TuantuanMcp | null = null,
   ) {}
+
+  /** History the harness replayed when this room's session was loaded (empty if none). */
+  replay(roomId: string, agentId: string): acp.SessionUpdate[] {
+    return this.slots.get(`${roomId}|${agentId}`)?.replay ?? [];
+  }
 
   /** Working directory an agent uses in this room: the group's shared cwd, else the agent's own. */
   cwdFor(room: Room, agent: Agent): string {
@@ -187,7 +199,8 @@ export class HarnessHost {
         changed = false;
     }
     if (changed) this.events.session(slot.roomId, slot.agentId, { ...v });
-    else if (!slot.replaying) slot.turn?.(u);
+    else if (slot.replaying) slot.replay.push(u);
+    else slot.turn?.(u);
   }
 
   private requestPermission(p: Proc, agentId: string, req: acp.RequestPermissionRequest) {
@@ -249,9 +262,13 @@ export class HarnessHost {
       view,
       turn: null,
       replaying: false,
+      replay: [],
       identityPending: false,
     };
     const mcpServers = this.mcpServers(agent);
+    const own = this.mcp?.serverEntry({ roomId: room.id, agentId: agent.id }, caps.mcpCapabilities);
+    if (own) mcpServers.push(own);
+    const preferLoad = this.wantLoad.delete(slotKey);
     const meta = identityMeta(proc.spec, identity);
     const saved = this.store.getAcpSession(room.id, agent.id);
     let res: { configOptions?: acp.SessionConfigOption[] | null; modes?: acp.SessionModeState | null } | null = null;
@@ -260,19 +277,20 @@ export class HarnessHost {
       view.sessionId = saved.sessionId;
       slot.replaying = true;
       try {
-        res = view.capabilities.resume
-          ? await proc.acp.agent.request(methods.agent.session.resume, {
-              sessionId: saved.sessionId,
-              cwd,
-              mcpServers,
-              _meta: meta,
-            })
-          : await proc.acp.agent.request(methods.agent.session.load, {
-              sessionId: saved.sessionId,
-              cwd,
-              mcpServers,
-              _meta: meta,
-            });
+        res =
+          view.capabilities.resume && !(preferLoad && view.capabilities.loadSession)
+            ? await proc.acp.agent.request(methods.agent.session.resume, {
+                sessionId: saved.sessionId,
+                cwd,
+                mcpServers,
+                _meta: meta,
+              })
+            : await proc.acp.agent.request(methods.agent.session.load, {
+                sessionId: saved.sessionId,
+                cwd,
+                mcpServers,
+                _meta: meta,
+              });
       } catch {
         proc.sessions.delete(saved.sessionId);
         view.sessionId = null;
@@ -307,6 +325,7 @@ export class HarnessHost {
 
   private mcpServers(agent: Agent): acp.McpServer[] {
     const all = this.store.listMcpServers();
+    // User-configured servers are HTTP; harnesses must accept them (ACP makes only stdio mandatory).
     return agent.mcpServerIds
       .map((id) => all.find((s) => s.id === id))
       .filter((s) => s !== undefined)
@@ -397,8 +416,10 @@ export class HarnessHost {
       this.slots.delete(slotKey);
       for (const p of this.procs.values()) if (old.view.sessionId) p.sessions.delete(old.view.sessionId);
     }
-    if (sessionId) this.store.setAcpSession(room.id, agent.id, agent.harness, sessionId);
-    else this.store.clearAcpSession(room.id, agent.id);
+    if (sessionId) {
+      this.store.setAcpSession(room.id, agent.id, agent.harness, sessionId);
+      this.wantLoad.add(slotKey);
+    } else this.store.clearAcpSession(room.id, agent.id);
     return (await this.session(room, agent, identity)).slot.view;
   }
 
