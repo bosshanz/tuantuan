@@ -28,7 +28,7 @@ export function CommandPalette(props: {
       ...props.rooms.map((r) => ({
         key: `r${r.id}`,
         label: r.name,
-        hint: r.deviceId ? "机器人会话" : r.kind === "dm" ? "私聊" : "群聊",
+        hint: r.kind === "dm" ? "私聊" : "群聊",
         icon: <RoomIcon room={r} agents={props.agents} size={24} />,
         path: `c/${r.id}`,
       })),
@@ -41,7 +41,6 @@ export function CommandPalette(props: {
       })),
       { key: "new-agent", label: "新建 Agent", hint: "操作", icon: <Plus size={16} />, path: "a/new" },
       { key: "new-room", label: "新建会话", hint: "操作", icon: <Plus size={16} />, path: "c/new" },
-      { key: "robot", label: "打开桌面机器人", hint: "操作", icon: <Bot size={16} />, path: "robot" },
     ];
     const s = q.trim().toLowerCase();
     return s ? all.filter((i) => i.label.toLowerCase().includes(s)) : all;

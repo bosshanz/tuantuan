@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    // Keep in sync with the server: every API and WebSocket route (incl. the robot's /device) goes to the backend.
+    // Keep in sync with the server: every API and WebSocket route goes to the backend.
     proxy: Object.fromEntries([
       ...SERVER_ROUTES.http.map((p) => [p, api]),
       ...SERVER_ROUTES.ws.map((p) => [p, { target: api.replace("http", "ws"), ws: true }]),

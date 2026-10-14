@@ -186,23 +186,6 @@ try {
   });
   if (issues.length) throw new Error(`alignment: ${issues.join("; ")}`);
 
-  // Virtual desktop robot via the text fallback (Web Speech is not available headless).
-  await page.getByRole("button", { name: "机器人", exact: true }).click();
-  await page.getByText("设备已连接").waitFor();
-  await page.locator("#robot-agent").selectOption({ label: "绑定：Bob" });
-  await page.getByLabel("文字输入").fill("你好");
-  await page.getByLabel("文字输入").press("Enter");
-  await page.locator(".turn.agent", { hasText: "收到：「你好」" }).waitFor();
-  await page.getByRole("button", { name: "会话", exact: true }).click();
-  await page.locator(".li-title", { hasText: "桌面机器人 · Bob" }).waitFor();
-  // Re-opening the robot page must reuse the same session room, not add another one.
-  await page.getByRole("button", { name: "机器人", exact: true }).click();
-  await page.getByText("设备已连接").waitFor();
-  await page.getByRole("button", { name: "会话", exact: true }).click();
-  await page.locator(".li-title", { hasText: "桌面机器人 · Bob" }).waitFor();
-  const robotRooms = await page.locator(".li-title", { hasText: "桌面机器人 · Bob" }).count();
-  if (robotRooms !== 1) throw new Error(`expected 1 robot room for Bob, got ${robotRooms}`);
-
   // Agent editor: header stays on the 56px line, opaque, and scrolled content never shows through.
   await page.getByRole("button", { name: "Agents", exact: true }).click();
   await page.locator(".list-item", { hasText: "Alice" }).first().click();
@@ -270,7 +253,7 @@ try {
   if ((await page.evaluate(() => performance.getEntriesByType("navigation").length)) !== navs)
     throw new Error("page reloaded during live checks");
 
-  // Dev setup (`bun dev`): the robot must connect through the Vite proxy too (/device WebSocket).
+  // Dev setup (`bun dev`): the UI must reach the API and its WebSocket through the Vite proxy.
   // Spawn vite's own entry (not `bunx`), so kill() stops the server itself: an orphaned vite from a
   // previous run would keep the port and proxy to a dead API, failing every other run.
   const vitePort = 5199;
@@ -291,8 +274,9 @@ try {
       await Bun.sleep(100);
     }
     const dev = await browser.newPage();
-    await dev.goto(`http://localhost:${vitePort}/#/robot`);
-    await dev.getByText("设备已连接").waitFor({ timeout: 15000 });
+    await dev.goto(`http://localhost:${vitePort}/`);
+    await dev.locator(".rail .dot.ok").waitFor({ timeout: 15000 });
+    await dev.getByText("冒烟群").first().waitFor();
     await dev.close();
   } finally {
     vite.kill();
@@ -301,7 +285,7 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → new group with main agent + cwd → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → robot turn → live updates under slow snapshot → robot via Vite proxy)",
+    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → new group with main agent + cwd → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
   );
 } catch (e) {
   failed = true;

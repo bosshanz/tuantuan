@@ -30,8 +30,6 @@ export interface Timeline {
   handoffs?: Handoff[];
   /** Set on a reply that was triggered by another agent's hand-off. */
   handoffFrom?: Handoff;
-  /** What the robot said aloud for this reply (`speak` tool), when it differs from the text. */
-  spoken?: string;
 }
 
 export interface Handoff {

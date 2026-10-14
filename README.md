@@ -9,7 +9,7 @@
 
 > 仓库已从 `bosshanz/agent-hub` 更名为 `bosshanz/tuantuan`（旧地址自动跳转）。为兼容，环境变量继续使用 `AGENT_HUB_*` 前缀，默认数据库路径仍是 `data/agent-hub.db`。
 
-团团不自带模型：每个 Agent 绑定一个本机的编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode），团团通过 [ACP（Agent Client Protocol）](https://agentclientprotocol.com) 驱动它。Agent 可以在 **群聊** 中被 @，也可以私聊，完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。还带一个用语音对话的虚拟桌面机器人。
+团团不自带模型：每个 Agent 绑定一个本机的编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode），团团通过 [ACP（Agent Client Protocol）](https://agentclientprotocol.com) 驱动它。Agent 可以在 **群聊** 中被 @，也可以私聊，完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。
 
 ![群聊：主 Agent 用 handoff 把任务交给 Alice](docs/screenshots/group-chat.png)
 
@@ -27,7 +27,7 @@ bun install
 bun dev          # 同时启动 API（:8787）和前端（:5173）
 ```
 
-开发模式下 Vite 会把 `/api`、`/ws` 和机器人用的 `/device` 转发到 API（列表在 `server/routes.ts`）。改了 `vite.config.ts` 或这个列表后要重启 `bun dev`。
+开发模式下 Vite 会把 `/api`、`/mcp` 和 `/ws` 转发到 API（列表在 `server/routes.ts`）。改了 `vite.config.ts` 或这个列表后要重启 `bun dev`。
 
 打开 http://localhost:5173 ：
 
@@ -79,7 +79,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 用 mock 演示
 
-`TUANTUAN_MOCK_HARNESS=1 bun dev` 后可以选「Mock」Harness。它回复「收到：…」，并支持 `/plan`（计划）、`/edit`（权限请求 + diff）、`/run`（终端）、`/slow`（慢回复，用于测试停止）；群聊里 `/handoff 名字 任务`、`/members`；机器人里 `/express happy`、`/act dance`、`/say 一句话`。
+`TUANTUAN_MOCK_HARNESS=1 bun dev` 后可以选「Mock」Harness。它回复「收到：…」，并支持 `/plan`（计划）、`/edit`（权限请求 + diff）、`/run`（终端）、`/slow`（慢回复，用于测试停止）；群聊里 `/handoff 名字 任务`、`/members`。
 
 ## 环境变量
 
@@ -91,17 +91,6 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 - 现代简洁风格：干净的中性底色（浅色近白 / 深色石墨），品牌色是 Logo 里的番茄珊瑚红，只用在关键动作和状态上；Agent 头像用鲜亮的彩色区分。字体为 Plus Jakarta Sans（已自托管）+ 苹方，浅色/深色跟随系统。
 - Agent 头像是 SVG Bot（13 种轮廓 × 13 种颜色），默认按 Agent id 生成，在编辑页点击头像修改。头像会根据状态变表情（思考、说话、难过、惊讶、休眠），开启「减少动态效果」时静止。预览全部表情：`/#/dev/avatars`。
-
-## 桌面机器人
-
-左侧导航「机器人」（`#/robot`）打开虚拟桌面机器人：
-
-- 先选要绑定的 Agent；脸部会显示待机、聆听、思考、说话、开心、难过/出错、惊讶等表情。
-- 按住说话或打开免提（需要支持 Web Speech 的浏览器，推荐 Chrome；Safari 支持有限），回复用 zh-CN 朗读；不支持语音时用文字输入。说话时可以直接打断。
-- 只能选择 Harness 已安装的 Agent。
-- 机器人会话里，Agent 通过 `tuantuan` MCP 服务器得到 `set_expression`、`play_action`、`speak` 三个工具：前两个映射到设备协议的表情 / 动作（等设备确认，失败如实返回），`speak` 指定这次要朗读的一两句话。不调用 `speak` 时，机器人朗读回复的简短版本（去掉代码和 Markdown，约 160 字以内）。
-- 对话保存为聊天列表里「桌面机器人」分组下的会话，每个 Agent 一个（重复打开不会新增），也可以在网页里接着聊。
-- 真实硬件可按 [docs/device-protocol.md](docs/device-protocol.md) 接入。
 
 ## 开发命令
 
@@ -119,16 +108,12 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 | 「引导」页显示未安装 | 在终端里 `which <命令>` 确认已安装；GUI 启动时找不到的话，在「引导」页填绝对路径。 |
 | 发消息后提示 Authentication required | 该 Harness 没登录：按「引导」页的登录方式在终端登录后重试。 |
 | Agent 想改文件但没反应 | 正在等你在权限弹窗里选择；或者目标路径在工作目录之外（会被拒绝）。 |
-| 机器人一直「正在连接」或显示「连不上设备服务」 | 设备 WebSocket `/device` 连不上：确认 API 在运行；开发模式下 pull 后重启 `bun dev`，让代理配置生效。 |
-| 机器人不听 / 不说话 | 浏览器需要麦克风权限和 Web Speech 支持；不行就用文字输入。 |
-| 机器人会话列表里有很多空的旧会话 | 旧版本每次打开都新建会话；升级后启动一次会自动清理（迁移 3）。 |
 | e2e 找不到浏览器 | 设置 `CHROME_PATH` 指向本机 Chrome。 |
 
 ## 文档
 
 - [docs/product.md](docs/product.md)：产品规则与验收条件
 - [docs/architecture.md](docs/architecture.md)：模块、状态归属、路由机制与取舍
-- [docs/device-protocol.md](docs/device-protocol.md)：桌面机器人 / 硬件设备的 WebSocket 协议
 
 
 ## License

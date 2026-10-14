@@ -1,8 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import { applyUpdate, emptyTimeline, type Handoff, type Timeline, timelineText } from "../shared/timeline";
 import type { TerminalSnapshot } from "./acp";
-import type { DeviceHub } from "./device";
-import { ROBOT_ACTIONS, ROBOT_EXPRESSIONS } from "./device-protocol";
 import { harnessSpec } from "./harness";
 import type { HarnessHost, PermissionAsk, SessionView } from "./host";
 import { mentionsEveryone, parseMentions } from "./mentions";
@@ -42,7 +40,6 @@ interface Trigger {
 interface TurnCtx {
   signal: AbortSignal;
   handoffs: Handoff[];
-  spoken: string | null;
 }
 
 const INTERJECTION = "被新消息打断";
@@ -52,7 +49,6 @@ export const MAX_AGENT_HOPS = 5;
 const GROUP_CONTEXT_MESSAGES = 30;
 export const RELAY_MAX_CHARS = 8000;
 const RELAY_MESSAGE_MAX_CHARS = 2000;
-const SPEAK_MAX_CHARS = 300;
 
 interface RoomRuntime {
   queue: { msg: Message; images: ImageAttachment[] }[];
@@ -68,7 +64,6 @@ interface RoomRuntime {
 export class Orchestrator implements ToolProvider {
   private rooms = new Map<string, RoomRuntime>();
   private turns = new Map<string, TurnCtx>(); // `${roomId}|${agentId}`
-  device: DeviceHub | null = null;
 
   constructor(
     private store: Store,
@@ -134,18 +129,16 @@ export class Orchestrator implements ToolProvider {
       .map((id) => this.store.getAgent(id))
       .filter((a): a is Agent => a !== null && a.id !== agent.id);
     const context =
-      room.deviceId !== null
-        ? "你正通过一台桌面机器人和用户语音对话：回复要简短、口语化，适合朗读。可以用 tuantuan 工具 set_expression / play_action 控制机器人的表情和动作；回复较长时用 speak 给出要朗读的一两句话。"
-        : room.kind === "group"
-          ? [
-              `你在团团的群聊「${room.name}」里，名字是「${agent.name}」。用户的消息以「[发言者]: 内容」给出。`,
-              members.length > 0 ? `群里的其他 Agent：${members.map((m) => `@${m.name}`).join("、")}。` : "",
-              room.mainAgentId === agent.id ? "你是本群的主 Agent：没人被 @ 时由你回复。" : "",
-              "回复正文里的 @名字 只是普通文字，不会通知任何人。需要别的成员现在动手时，调用 tuantuan 的 handoff 工具（agent=对方名字，task=要对方做的事），对方会在你这条回复结束后接手；只在用户这次的请求确实需要对方时交接，不要用来介绍别人。不要在回复开头写「[名字]:」。",
-            ]
-              .filter(Boolean)
-              .join("")
-          : `你在团团里和用户私聊，你的名字是「${agent.name}」。`;
+      room.kind === "group"
+        ? [
+            `你在团团的群聊「${room.name}」里，名字是「${agent.name}」。用户的消息以「[发言者]: 内容」给出。`,
+            members.length > 0 ? `群里的其他 Agent：${members.map((m) => `@${m.name}`).join("、")}。` : "",
+            room.mainAgentId === agent.id ? "你是本群的主 Agent：没人被 @ 时由你回复。" : "",
+            "回复正文里的 @名字 只是普通文字，不会通知任何人。需要别的成员现在动手时，调用 tuantuan 的 handoff 工具（agent=对方名字，task=要对方做的事），对方会在你这条回复结束后接手；只在用户这次的请求确实需要对方时交接，不要用来介绍别人。不要在回复开头写「[名字]:」。",
+          ]
+            .filter(Boolean)
+            .join("")
+        : `你在团团里和用户私聊，你的名字是「${agent.name}」。`;
     return [context, agent.identity.trim()].filter(Boolean).join("\n\n");
   }
 
@@ -296,13 +289,12 @@ export class Orchestrator implements ToolProvider {
     let timeline: Timeline = trigger.from ? { ...emptyTimeline(), handoffFrom: trigger.from } : emptyTimeline();
     let saved = Date.now();
     const turnKey = `${room.id}|${agent.id}`;
-    const turn: TurnCtx = { signal, handoffs: [], spoken: null };
+    const turn: TurnCtx = { signal, handoffs: [] };
     this.turns.set(turnKey, turn);
     const finish = (status: Message["status"], error: string | null, stopReason: string | null = null) => {
       if (this.turns.get(turnKey) === turn) this.turns.delete(turnKey);
       timeline = { ...timeline, stopReason };
       if (turn.handoffs.length > 0) timeline.handoffs = turn.handoffs;
-      if (turn.spoken) timeline.spoken = turn.spoken;
       const done = this.store.updateReply(placeholder.id, { content: timelineText(timeline), status, error, timeline });
       this.publish(room.id, { type: "message", message: done });
       return { reply: done, handoffs: status === "done" ? turn.handoffs : [] };
@@ -348,32 +340,6 @@ export class Orchestrator implements ToolProvider {
   tools(ctx: ToolCtx): ToolDef[] {
     const room = this.store.getRoom(ctx.roomId);
     if (!room?.agentIds.includes(ctx.agentId)) return [];
-    if (room.deviceId !== null)
-      return [
-        {
-          name: "set_expression",
-          description: `设置桌面机器人的表情（约 2.5 秒）。可选：${ROBOT_EXPRESSIONS.join(" / ")}`,
-          inputSchema: {
-            type: "object",
-            properties: { expression: { type: "string", enum: [...ROBOT_EXPRESSIONS] } },
-            required: ["expression"],
-          },
-        },
-        {
-          name: "play_action",
-          description: `让桌面机器人做一个动作。可选：${ROBOT_ACTIONS.join(" / ")}`,
-          inputSchema: {
-            type: "object",
-            properties: { action: { type: "string", enum: [...ROBOT_ACTIONS] } },
-            required: ["action"],
-          },
-        },
-        {
-          name: "speak",
-          description: `指定机器人这次要朗读的话（口语化，一两句，最多 ${SPEAK_MAX_CHARS} 字）。不调用时朗读回复的开头部分。`,
-          inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-        },
-      ];
     if (room.kind !== "group") return [];
     return [
       {
@@ -431,20 +397,6 @@ export class Orchestrator implements ToolProvider {
         if (turn.handoffs.some((h) => h.agentId === to.id)) return `这条回复已经交接给 @${to.name} 了。`;
         turn.handoffs.push({ agentId: to.id, agentName: to.name, task: task.slice(0, 4000) });
         return `已交接给 @${to.name}：你这条回复结束后对方会接手。请简短告诉用户你交给了谁，不要替对方完成任务。`;
-      }
-      case "set_expression":
-      case "play_action": {
-        const control = this.device?.controlFor(room.id);
-        if (!control) throw new Error("这个会话没有连接机器人");
-        const value = String((name === "set_expression" ? args.expression : args.action) ?? "");
-        return control.command(name === "set_expression" ? "expression" : "action", value, turn?.signal);
-      }
-      case "speak": {
-        if (!turn) throw new Error("只能在回复过程中使用");
-        const text = String(args.text ?? "").trim();
-        if (!text) throw new Error("text 不能为空");
-        turn.spoken = text.slice(0, SPEAK_MAX_CHARS);
-        return "好的，机器人会朗读这段话。";
       }
       default:
         throw new Error(`未知工具：${name}`);

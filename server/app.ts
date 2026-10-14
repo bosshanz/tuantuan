@@ -7,7 +7,6 @@ import { z } from "zod";
 import { replayTurns } from "../shared/timeline";
 import { AcpProcess, withTimeout } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
-import { type DeviceConn, DeviceHub } from "./device";
 import { detectHarness, harnessSpec, loginShellEnv, visibleHarnesses } from "./harness";
 import { HarnessHost } from "./host";
 import { EVERYONE_NAMES } from "./mentions";
@@ -66,19 +65,16 @@ const ImageSchema = z.object({
 export interface AppDeps {
   dbPath: string;
   staticDir?: string;
-  deviceAckTimeoutMs?: number;
 }
 
-/** UI clients subscribe to room topics; device clients speak the device protocol. */
-type WsData = { kind: "ui"; rooms: Set<string> } | { kind: "device"; conn: DeviceConn | null };
+/** UI clients subscribe to room topics. */
+type WsData = { kind: "ui"; rooms: Set<string> };
 
 export function createApp(deps: AppDeps) {
   const store = new Store(deps.dbPath);
   let server: Server<WsData> | null = null;
-  const devices = new DeviceHub(store, deps.deviceAckTimeoutMs);
   const publish = (roomId: string, event: RoomEvent) => {
     server?.publish(`room:${roomId}`, JSON.stringify(event));
-    devices.onRoomEvent(roomId, event);
   };
   const mcp = new TuantuanMcp();
   const host = new HarnessHost(
@@ -94,8 +90,6 @@ export function createApp(deps: AppDeps) {
     mcp,
   );
   const orchestrator = new Orchestrator(store, host, publish);
-  devices.orchestrator = orchestrator;
-  orchestrator.device = devices;
   mcp.provider = orchestrator;
 
   const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -341,7 +335,6 @@ export function createApp(deps: AppDeps) {
   return {
     store,
     orchestrator,
-    devices,
     host,
     mcp,
     attach(s: Server<WsData>) {
@@ -352,10 +345,6 @@ export function createApp(deps: AppDeps) {
       const url = new URL(req.url);
       if (url.pathname === "/ws") {
         if (srv.upgrade(req, { data: { kind: "ui", rooms: new Set<string>() } })) return undefined;
-        return new Response("WebSocket upgrade failed", { status: 400 });
-      }
-      if (url.pathname === "/device") {
-        if (srv.upgrade(req, { data: { kind: "device", conn: null } })) return undefined;
         return new Response("WebSocket upgrade failed", { status: 400 });
       }
       if (url.pathname.startsWith("/mcp/")) return mcp.handle(url.pathname.slice(5), req);
@@ -378,18 +367,7 @@ export function createApp(deps: AppDeps) {
       return new Response("Not found", { status: 404 });
     },
     websocket: {
-      open(ws: ServerWebSocket<WsData>) {
-        if (ws.data.kind === "device")
-          ws.data.conn = devices.open({ send: (d) => ws.send(d), close: (c, r) => ws.close(c, r) });
-      },
-      close(ws: ServerWebSocket<WsData>) {
-        if (ws.data.kind === "device" && ws.data.conn) devices.close(ws.data.conn);
-      },
       message(ws: ServerWebSocket<WsData>, raw: string | Buffer) {
-        if (ws.data.kind === "device") {
-          if (ws.data.conn) devices.handle(ws.data.conn, String(raw));
-          return;
-        }
         const data = ws.data;
         let msg: { type?: string; roomId?: string };
         try {

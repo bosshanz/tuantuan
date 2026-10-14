@@ -6,7 +6,7 @@ import type { Agent, Message, Room } from "../server/store";
 import type { ReplayTurn } from "../shared/timeline";
 import { agentInput, MOCK_AUTH_FILE, until } from "./helpers";
 
-const { app, server } = serve({ dbPath: ":memory:", deviceAckTimeoutMs: 1000 }, 0);
+const { app, server } = serve({ dbPath: ":memory:" }, 0);
 const base = `http://localhost:${server.port}`;
 afterAll(() => {
   app.host.shutdown();
@@ -155,47 +155,6 @@ describe("group relay (群聊转述)", () => {
     expect(t).toContain("[Talker（Agent）]");
     expect(t).toContain("[Andy]: @Reader 最后");
     expect(t.length).toBeLessThan(RELAY_MAX_CHARS + 1000);
-  });
-});
-
-describe("robot tools", () => {
-  test("set_expression / play_action reach the device and wait for its ack; speak sets what is read aloud", async () => {
-    const a = await agent("Robo");
-    const sent: { type: string; id?: string; name?: string; spoken?: string; status?: string }[] = [];
-    const conn = app.devices.open({
-      send: (d) => {
-        const m = JSON.parse(d);
-        sent.push(m);
-        if (m.type === "expression" || m.type === "action")
-          app.devices.handle(conn, JSON.stringify({ type: "ack", id: m.id, ok: true }));
-      },
-      close: () => {},
-    });
-    app.devices.handle(
-      conn,
-      JSON.stringify({
-        type: "hello",
-        protocol: 1,
-        deviceId: "dev-1",
-        agentId: a.id,
-        capabilities: { expressions: ["happy"], actions: ["dance"], asr: false, tts: true },
-      }),
-    );
-    const roomId = conn.session?.roomId as string;
-    let ms = await say(roomId, "/express happy");
-    expect(sent.find((m) => m.type === "expression")).toMatchObject({ name: "happy" });
-    expect(tools(ms.at(-1))[0]).toMatchObject({ title: "tuantuan/set_expression", status: "completed" });
-    ms = await say(roomId, "/act dance");
-    expect(sent.find((m) => m.type === "action")).toMatchObject({ name: "dance" });
-    ms = await say(roomId, "/act fly");
-    expect(tools(ms.at(-1))[0]?.status).toBe("failed");
-    ms = await say(roomId, "/say 我跳完了");
-    expect(ms.at(-1)?.timeline?.spoken).toBe("我跳完了");
-    const end = sent.filter((m) => m.type === "reply.end").at(-1);
-    expect(end?.spoken).toBe("我跳完了");
-    // Without speak, the device gets a short speakable version of the reply.
-    await say(roomId, "```js\nconsole.log(1)\n```");
-    expect(sent.filter((m) => m.type === "reply.end").at(-1)?.spoken).toContain("（代码略）");
   });
 });
 

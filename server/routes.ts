@@ -4,5 +4,5 @@
  */
 export const SERVER_ROUTES = {
   http: ["/api", "/mcp"],
-  ws: ["/ws", "/device"],
+  ws: ["/ws"],
 } as const;

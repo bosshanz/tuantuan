@@ -5,8 +5,8 @@
  * It replies 「收到：「<text>」」 and exercises every client feature on request:
  *   /plan  — plan checklist        /edit — diff tool call behind a permission prompt, then writes mock-edit.txt
  *   /run   — terminal tool call    /slow — streams for ~6s (to test cancel)
- * Tuantuan MCP tools (group / robot rooms), called through whatever server session/new passed in:
- *   /handoff Name task   /members   /express happy   /act dance   /say 一句话
+ * Tuantuan MCP tools (group rooms), called through whatever server session/new passed in:
+ *   /handoff Name task   /members
  * An identity doc containing [[handoff:Name task]] makes it hand off on every turn (loop tests).
  * Env: MOCK_AGENT_MCP_HTTP=1 advertises HTTP MCP support (default: stdio only, the ACP baseline);
  *      MOCK_AGENT_AUTH_FILE=path requires `authenticate` (method mock-login) before session/new works.
@@ -322,12 +322,6 @@ acp
       } else if (cmd === "members") {
         const [, out] = await tool("list_members", {});
         await chunk(`成员：${out.replaceAll("\n", "；")}。`);
-      } else if (cmd === "express") {
-        await tool("set_expression", { expression: arg });
-      } else if (cmd === "act") {
-        await tool("play_action", { action: arg });
-      } else if (cmd === "say") {
-        await tool("speak", { text: arg });
       }
       if (cmd === "plan") {
         const steps = ["读需求", "写代码", "跑测试"];

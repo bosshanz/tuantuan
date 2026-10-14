@@ -1,6 +1,6 @@
 {
   "name": "tuantuan",
-  "description": "团团 Tuantuan — 多 Agent 群聊工作台：自动模型路由、任务交接、桌面机器人",
+  "description": "团团 Tuantuan — 多 Agent 群聊工作台：编码 Agent（ACP Harness）群聊、任务交接",
   "repository": {
     "type": "git",
     "url": "https://github.com/bosshanz/tuantuan.git"

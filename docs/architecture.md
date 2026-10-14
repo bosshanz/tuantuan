@@ -20,7 +20,6 @@
 | `server/orchestrator.ts` | 房间队列、触发（私聊 / @ / @所有人 / 主 Agent）、单个 Agent 回合（拼 prompt + 身份文档 → host.prompt → 推送 update → 持久化时间线）、取消 |
 | `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
 | `server/store.ts` | SQLite 迁移与读写 |
-| `server/device.ts` / `server/device-protocol.ts` | `/device` 设备协议：DeviceHub 管理设备连接、会话房间、由房间事件推导的会话状态（见 [device-protocol.md](device-protocol.md)）；表情 / 动作工具在 M2 改为 MCP |
 | `web/src/Harness.tsx` / `Setup.tsx` | 时间线渲染（工具卡片、diff、终端、计划）、权限弹窗、会话栏；新手引导页 |
 | `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
@@ -28,7 +27,6 @@
 | `web/src/messageMerge.ts` | 历史快照与 WebSocket 实时事件按 id 合并（慢快照不会覆盖已收到的消息）；发送接口返回的消息立即插入 |
 | `web/src/motion.ts` | `usePresence`（退场动画期间保持挂载）、`withViewTransition`（路由切换） |
 | `web/src/BrandMark.tsx` | 团团 Logo（导航栏，眨眼 + 悬停互看）；favicon 在 `web/public/` |
-| `web/src/robot/*` | 虚拟桌面机器人：设备客户端（协议 v1）、Web Speech 封装、SVG 脸部与动作 |
 
 前端直接 `import type` 后端的数据类型（`Agent`、`Message`、`RoomEvent`…），契约只有一份定义。
 
@@ -45,11 +43,11 @@
 
 | 版本 | 内容 |
 | --- | --- |
-| 1–2 | 初始表、路由决策与设备会话 |
-| 3 | 合并网页机器人会话 |
+| 1–3 | 初始表、路由决策、设备（桌面机器人）会话表及清理（功能已移除，见 7） |
 | 4 | `agents.avatar_shape` |
 | 5 | 头像颜色映射到新色板 |
 | 6 | ACP：`system_prompt` → `identity`；agents 加 `harness`、`cwd`、`env`、`permission_policy`、`mcp_server_ids`（从旧的 `mcp:` 工具 id 迁移）；rooms 加 `main_agent_id`（回填第一个成员）、`cwd`；messages 加 `timeline`；删除 `routing_decisions`；新表 `acp_sessions`、`settings` |
+| 7 | 移除桌面机器人：删除设备会话对应的房间（及其消息、ACP 会话、成员）并删除 `device_sessions` 表 |
 
 头像动画只用 CSS transform：≥32px 完整动画、更小只眨眼；`prefers-reduced-motion` 全部关闭；离屏（IntersectionObserver）和标签页隐藏（`html[data-tab-hidden]`）时暂停。
 
@@ -61,8 +59,7 @@
 4. `session/update` 实时以 `update` 事件推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。
 5. 取消：`session/cancel`，保留已生成部分并标为 `cancelled`。
 6. 交接：回合进行时，Agent 调用 `handoff` 把目标记到本回合（校验是群成员、不是自己）；回合正常结束后按顺序入队（去重、`@所有人` 轮次不重复），`hop + 1`，接手方 prompt 末尾附 `<tuantuan-handoff from="…">task</tuantuan-handoff>`。时间线记录 `handoffs` / `handoffFrom`，界面显示交接卡片。超过 5 次交接停止。群聊新消息打断当前链。
-7. 机器人工具：`set_expression` / `play_action` 走 `DeviceHub.controlFor`（等 ack，超时或设备不支持返回失败）；`speak` 把朗读文本记到本回合，`reply.end.spoken` 下发（没有时用 `conciseForSpeech` 生成）。
-8. session/load 回放：`switchSession` 指定历史会话时优先 load，回放的 update 存在 slot 里，`/replay` 接口按用户消息文本去掉本房间已有的轮次后返回，前端只读显示。
+7. session/load 回放：`switchSession` 指定历史会话时优先 load，回放的 update 存在 slot 里，`/replay` 接口按用户消息文本去掉本房间已有的轮次后返回，前端只读显示。
 
 ## 取舍
 

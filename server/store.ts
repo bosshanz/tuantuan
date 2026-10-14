@@ -61,7 +61,7 @@ export const MIGRATIONS: string[] = [
      chosen_model TEXT,             -- NULL when every candidate failed
      created_at INTEGER NOT NULL
    );`,
-  // A device (e.g. desktop robot) talking to an agent gets its own DM-like room per agent binding.
+  // Historical (removed in migration 7): a desktop robot's conversation per agent binding.
   `CREATE TABLE device_sessions (
      device_id TEXT NOT NULL,
      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -69,8 +69,7 @@ export const MIGRATIONS: string[] = [
      created_at INTEGER NOT NULL,
      PRIMARY KEY (device_id, agent_id)
    );`,
-  // The browser robot used to mint a random device id per browser profile, flooding the list with
-  // "桌面机器人" rooms. It now uses one shared id: drop the empty ones and adopt the newest per agent.
+  // Historical (removed in migration 7): collapsed duplicate browser-robot rooms.
   `DELETE FROM rooms WHERE id IN (
      SELECT room_id FROM device_sessions
      WHERE device_id LIKE 'web-robot-%' AND room_id NOT IN (SELECT DISTINCT room_id FROM messages));
@@ -112,6 +111,13 @@ export const MIGRATIONS: string[] = [
      PRIMARY KEY (room_id, agent_id)
    );
    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // The desktop robot feature was removed: drop its conversations and the device binding table.
+  // (Migrations 2–3 above still create/clean that table so old databases upgrade step by step.)
+  `DELETE FROM messages WHERE room_id IN (SELECT room_id FROM device_sessions);
+   DELETE FROM acp_sessions WHERE room_id IN (SELECT room_id FROM device_sessions);
+   DELETE FROM room_agents WHERE room_id IN (SELECT room_id FROM device_sessions);
+   DELETE FROM rooms WHERE id IN (SELECT room_id FROM device_sessions);
+   DROP TABLE device_sessions;`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -149,8 +155,6 @@ export interface Room {
   name: string;
   kind: "group" | "dm";
   agentIds: string[];
-  /** Set when this DM is the conversation of a device (robot) bound to the agent. */
-  deviceId: string | null;
   /** Group only: who answers when nobody is @-mentioned. */
   mainAgentId: string | null;
   /** Group only: shared working directory of all members; "" = home directory. */
@@ -386,36 +390,15 @@ export class Store {
     const agentIds = (
       this.db.query("SELECT agent_id FROM room_agents WHERE room_id = ? ORDER BY rowid").all(r.id as string) as Row[]
     ).map((x) => x.agent_id as string);
-    const device = this.db
-      .query("SELECT device_id FROM device_sessions WHERE room_id = ?")
-      .get(r.id as string) as Row | null;
     return {
       id: r.id as string,
       name: r.name as string,
       kind: r.kind as Room["kind"],
       agentIds,
-      deviceId: (device?.device_id as string | undefined) ?? null,
       mainAgentId: (r.main_agent_id as string | null) ?? null,
       cwd: (r.cwd as string) ?? "",
       createdAt: r.created_at as number,
     };
-  }
-
-  /** Returns the device's conversation with this agent, creating it on first bind. */
-  deviceRoom(deviceId: string, agent: Agent): Room {
-    const existing = this.db
-      .query("SELECT room_id FROM device_sessions WHERE device_id = ? AND agent_id = ?")
-      .get(deviceId, agent.id) as Row | null;
-    if (existing) return this.getRoom(existing.room_id as string) as Room;
-    const id = crypto.randomUUID();
-    this.db.transaction(() => {
-      this.db
-        .query("INSERT INTO rooms (id, name, kind, created_at) VALUES (?,?,?,?)")
-        .run(id, `桌面机器人 · ${agent.name}`, "dm", Date.now());
-      this.db.query("INSERT INTO room_agents VALUES (?,?)").run(id, agent.id);
-      this.db.query("INSERT INTO device_sessions VALUES (?,?,?,?)").run(deviceId, agent.id, id, Date.now());
-    })();
-    return this.getRoom(id) as Room;
   }
 
   // ---- messages ----

@@ -2,8 +2,8 @@ import { resolve } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 
 /**
- * Tuantuan's own MCP server, injected into group and robot sessions so agents can hand off work
- * (`handoff`, `list_members`) and drive the robot (`set_expression`, `play_action`, `speak`).
+ * Tuantuan's own MCP server, injected into group sessions so agents can hand off work
+ * (`handoff`, `list_members`).
  *
  * One endpoint per (room, agent) at /mcp/<token>, speaking MCP JSON-RPC over plain HTTP POST
  * (Streamable HTTP with JSON responses). Harnesses that only take stdio MCP servers get
@@ -94,7 +94,7 @@ export class TuantuanMcp {
           protocolVersion: typeof m.params?.protocolVersion === "string" ? m.params.protocolVersion : PROTOCOL,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: MCP_SERVER_NAME, title: "团团", version: "1.0" },
-          instructions: "团团群聊与机器人工具。",
+          instructions: "团团群聊工具。",
         });
       case "ping":
         return ok(m.id, {});

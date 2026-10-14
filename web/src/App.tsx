@@ -8,7 +8,6 @@ import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
-import { RobotPage } from "./robot/RobotPage";
 import { SetupPage } from "./Setup";
 import { AgentAvatar, RoomIcon, roomSubtitle, useHashRoute } from "./ui";
 
@@ -70,8 +69,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const section =
-    route[0] === "a" ? "agents" : route[0] === "robot" ? "robot" : route[0] === "setup" ? "setup" : "rooms";
+  const section = route[0] === "a" ? "agents" : route[0] === "setup" ? "setup" : "rooms";
   const detailId = route[1] ?? null;
   const roomId = section === "rooms" && detailId && detailId !== "new" ? detailId : null;
 
@@ -87,12 +85,12 @@ export function App() {
   }, []);
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
-  const mobileView = section === "robot" || section === "setup" || detailId ? "main" : "list";
+  const mobileView = section === "setup" || detailId ? "main" : "list";
   const harnessName = (id: string) => meta?.harnesses.find((h) => h.id === id)?.name ?? id;
 
   if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
-    <div className={`shell ${section === "robot" || section === "setup" ? "no-list" : ""}`} data-mobile={mobileView}>
+    <div className={`shell ${section === "setup" ? "no-list" : ""}`} data-mobile={mobileView}>
       <nav className="rail" aria-label="主导航">
         <div className="logo" title="团团 Tuantuan">
           <BrandMark size={32} />
@@ -104,7 +102,6 @@ export function App() {
           onClick={() => go("c")}
         />
         <RailButton icon={<Bot size={20} />} label="Agents" current={section === "agents"} onClick={() => go("a")} />
-        <RailButton icon={<RobotGlyph />} label="机器人" current={section === "robot"} onClick={() => go("robot")} />
         <RailButton
           icon={<PlugZap size={20} />}
           label="引导"
@@ -156,8 +153,7 @@ export function App() {
           {(
             [
               ["群聊", rooms.filter((r) => r.kind === "group")],
-              ["私聊", rooms.filter((r) => r.kind === "dm" && !r.deviceId)],
-              ["桌面机器人", rooms.filter((r) => r.deviceId)],
+              ["私聊", rooms.filter((r) => r.kind === "dm")],
             ] as const
           ).map(
             ([label, list]) =>
@@ -291,7 +287,7 @@ export function App() {
               go("a");
             }}
             onStartChat={(a) => {
-              const dm = rooms.find((r) => r.kind === "dm" && !r.deviceId && r.agentIds[0] === a.id);
+              const dm = rooms.find((r) => r.kind === "dm" && r.agentIds[0] === a.id);
               if (dm) go(`c/${dm.id}`);
               else
                 void api<Room>("POST", "/api/rooms", { name: `与 ${a.name} 私聊`, kind: "dm", agentIds: [a.id] }).then(
@@ -305,15 +301,6 @@ export function App() {
         )}
         {section === "agents" && detailId && detailId !== "new" && loaded && !agents.some((a) => a.id === detailId) && (
           <NotFound what="Agent" onBack={() => go("a")} />
-        )}
-        {section === "robot" && loaded && (
-          <RobotPage
-            agents={agents}
-            userName={userName}
-            onOpenConversation={(id) => go(`c/${id}`)}
-            onConversationCreated={reload}
-            goCreateAgent={() => go("a/new")}
-          />
         )}
       </main>
 
@@ -346,26 +333,6 @@ function RailButton(props: { icon: React.ReactNode; label: string; current: bool
       {props.icon}
       {props.label}
     </button>
-  );
-}
-
-function RobotGlyph() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      <rect x="3.5" y="6" width="17" height="12" rx="4" />
-      <circle cx="9" cy="12" r="1.3" fill="currentColor" />
-      <circle cx="15" cy="12" r="1.3" fill="currentColor" />
-      <path d="M12 6V3.5M9 21h6" />
-    </svg>
   );
 }
 
@@ -445,17 +412,10 @@ function Welcome({
       path: "setup",
     },
     {
-      done: rooms.some((r) => !r.deviceId),
+      done: rooms.length > 0,
       title: "开始一个会话",
       cta: "新建会话",
       path: "c/new",
-      needs: agents.length > 0,
-    },
-    {
-      done: rooms.some((r) => r.deviceId),
-      title: "试试桌面机器人",
-      cta: "打开机器人",
-      path: "robot",
       needs: agents.length > 0,
     },
   ];

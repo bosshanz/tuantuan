@@ -232,18 +232,6 @@ export function SetupPage(props: {
               ))}
             </div>
           </section>
-
-          <section className="card">
-            <div className="card-head">
-              <h3>3 · 机器人</h3>
-              <p>机器人房间在机器人页面选择一个已绑定 Harness 的 Agent。</p>
-            </div>
-            <div className="card-body">
-              <button type="button" className="btn" onClick={() => props.go("robot")}>
-                打开机器人
-              </button>
-            </div>
-          </section>
         </div>
       </div>
     </>

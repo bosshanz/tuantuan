@@ -82,7 +82,7 @@ describe("Store", () => {
     expect(s.recentMessages(r1.id, 2).map((m) => m.seq)).toEqual([2, 3]);
   });
 
-  test("browser robot sessions collapse to one shared device: empty ones dropped, newest kept per agent", () => {
+  test("migration 7: databases from the robot era start and lose only the robot conversations", () => {
     const path = join(tmpdir(), `agent-hub-robot-${Date.now()}.db`);
     try {
       // Build a version-2 database (before avatar shapes) holding two browser-robot rooms.
@@ -91,19 +91,16 @@ describe("Store", () => {
       db.exec(`PRAGMA user_version = 2;
         INSERT INTO agents (id,name,color,avatar,system_prompt,tools,skills,model_mode,pinned_model,created_at,updated_at)
           VALUES ('r','R','#000000','R','','[]','[]','auto',NULL,0,0);
-        INSERT INTO rooms VALUES ('old','桌面机器人 · R','dm',0), ('empty','桌面机器人 · R','dm',2);
-        INSERT INTO room_agents VALUES ('old','r'), ('empty','r');
+        INSERT INTO rooms VALUES ('old','桌面机器人 · R','dm',0), ('empty','桌面机器人 · R','dm',2), ('keep','私聊','dm',3);
+        INSERT INTO room_agents VALUES ('old','r'), ('empty','r'), ('keep','r');
         INSERT INTO device_sessions VALUES ('web-robot-aaaa1111','r','old',1), ('web-robot-bbbb2222','r','empty',2);
         INSERT INTO messages (id,room_id,seq,run_id,hop,sender_kind,sender_id,sender_name,content,status,created_at)
-          VALUES ('m','old',1,'m',0,'human',NULL,'me','hi','done',0);`);
+          VALUES ('m','old',1,'m',0,'human',NULL,'me','hi','done',0), ('k','keep',1,'k',0,'human',NULL,'me','yo','done',0);`);
       db.close();
-      const old = { id: "old" };
-      const empty = { id: "empty" };
       const s2 = new Store(path);
-      expect(s2.getRoom(empty.id)).toBeFalsy();
-      expect(s2.deviceRoom("web-robot", s2.getAgent("r") as NonNullable<ReturnType<Store["getAgent"]>>).id).toBe(
-        old.id,
-      );
+      expect(s2.listRooms().map((r) => r.id)).toEqual(["keep"]);
+      expect(s2.recentMessages("keep", 10).map((m) => m.content)).toEqual(["yo"]);
+      expect(s2.db.query("SELECT name FROM sqlite_master WHERE name = 'device_sessions'").get()).toBeNull();
       s2.db.close();
     } finally {
       for (const f of [path, `${path}-wal`, `${path}-shm`]) rmSync(f, { force: true });
