@@ -8,7 +8,7 @@ import { type Skill, skillCatalogPrompt } from "./skills";
 import type { Agent, Message, RoutingDecision, Store } from "./store";
 import { ValidationError } from "./store";
 import { runToolLoop, type ToolCallRecord } from "./tool-loop";
-import { buildToolRuntime, type DeviceControl } from "./tools";
+import { buildToolRuntime, type DeviceControl, HANDOFF_TOOL } from "./tools";
 
 export type RoomEvent =
   | { type: "message"; message: Message }
@@ -27,6 +27,13 @@ interface Trigger {
   agentId: string;
   hop: number;
   selection?: Selection;
+  /** Set when another agent handed this work over via the handoff tool. */
+  handoff?: Handoff;
+}
+
+export interface Handoff {
+  fromName: string;
+  task: string;
 }
 
 const INTERJECTION = "被新消息打断";
@@ -197,17 +204,17 @@ export class Orchestrator {
       const agent = this.store.getAgent(t.agentId);
       if (!agent) continue;
       replied.add(agent.id);
-      const reply = await this.runAgentTurn(agent, human, t.hop, members(), signal, t.selection);
+      const handoffs: { agentId: string; task: string }[] = [];
+      const reply = await this.runAgentTurn(agent, human, t.hop, members(), signal, t.selection, t.handoff, handoffs);
       if (reply.status !== "done") {
         if (reply.status === "cancelled") return this.noteInterjection(room.id, human.id, signal, queue);
         continue;
       }
-      // Agents trigger other room members they @; never themselves.
-      const others = members().filter((m) => m.id !== agent.id);
-      // An agent already waiting in the queue is not queued twice (e.g. human @A @B, then A @B).
-      for (const id of parseMentions(reply.content, others))
-        if (!queue.some((q) => q.agentId === id) && !(fanOut && replied.has(id)))
-          queue.push({ agentId: id, hop: t.hop + 1 });
+      // Only explicit handoff tool calls trigger other agents; "@名字" in reply text is display-only.
+      // An agent already waiting in the queue is not queued twice (e.g. human @A @B, then A hands off to B).
+      for (const h of handoffs)
+        if (!queue.some((q) => q.agentId === h.agentId) && !(fanOut && replied.has(h.agentId)))
+          queue.push({ agentId: h.agentId, hop: t.hop + 1, handoff: { fromName: agent.name, task: h.task } });
     }
   }
 
@@ -225,6 +232,8 @@ export class Orchestrator {
     members: Agent[],
     signal: AbortSignal,
     selection?: Selection,
+    handoff?: Handoff,
+    handoffsOut?: { agentId: string; task: string }[],
   ): Promise<Message> {
     const { limits } = this.config;
     const history = this.store.recentMessages(human.roomId, limits.contextMessages);
@@ -243,7 +252,9 @@ export class Orchestrator {
     const skills = this.skills.filter((s) => agent.skills.includes(s.name));
     const room = this.store.getRoom(human.roomId);
     const device = this.devices?.controlFor(human.roomId) ?? undefined;
-    const systemPrompt = buildSystemPrompt(agent, members, room?.kind ?? "group", skills, device !== undefined);
+    const isGroup = room?.kind === "group" && device === undefined;
+    let systemPrompt = buildSystemPrompt(agent, members, room?.kind ?? "group", skills, device !== undefined);
+    if (handoff) systemPrompt += `\n\n「${handoff.fromName}」把这项工作交给了你：${handoff.task}`;
     const messages = buildContext(systemPrompt, agent, history, limits.contextChars);
     const trigger = [...history].reverse().find((m) => m.senderKind !== "system" && m.senderId !== agent.id);
 
@@ -270,6 +281,15 @@ export class Orchestrator {
         mcpServers: this.store.listMcpServers(),
         mcp: this.mcp,
         device,
+        handoff:
+          isGroup && handoffsOut
+            ? {
+                targets: members.filter((m) => m.id !== agent.id).map((m) => ({ id: m.id, name: m.name })),
+                record: (target, task) => {
+                  if (!handoffsOut.some((h) => h.agentId === target.id)) handoffsOut.push({ agentId: target.id, task });
+                },
+              }
+            : undefined,
       });
       const contextChars = messages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0);
       plan = await planRoute(
@@ -278,7 +298,7 @@ export class Orchestrator {
         {
           text: trigger?.content ?? human.content,
           contextTokens: Math.ceil(contextChars / 3),
-          toolCount: runtime.specs.length,
+          toolCount: runtime.specs.filter((s) => s.function.name !== HANDOFF_TOOL).length,
           hasImages: false,
         },
         signal,
@@ -350,7 +370,7 @@ export function buildSystemPrompt(
         ? "你正在和用户私聊。"
         : `你在一个群聊中，消息以「[发言者]: 内容」的形式给出。${
             others.length > 0
-              ? `群里的其他 Agent：${others.join("、")}。在回复中写 @名字 会让对方立刻接着回复，所以只在你确实要把任务交给某人时才 @ 他；提到、感谢或引用别人时直接写名字，不要加 @。不要 @ 用户，不要在回复开头写「[名字]:」。`
+              ? `群里的其他 Agent：${others.join("、")}。回复正文里的 @名字 只是普通文字，不会通知任何人。只有当用户这次的请求确实需要对方现在动手时，才调用 handoff 工具把具体任务交给对方；不要为了介绍、推荐或预告别人能做什么而交接。不要在回复开头写「[名字]:」。`
               : ""
           }`,
     agent.systemPrompt,

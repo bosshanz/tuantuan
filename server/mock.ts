@@ -8,7 +8,8 @@ import { pickByRules } from "./picker";
  * It is driven by directives written in plain text:
  *   [[fail:<model>]]          in the latest user message: that mock model errors before streaming (tests fallback)
  *   [[tool:<name> <json>]]    in the latest user message: call that tool with the JSON arguments
- *   [[reply:<text>]]          in the agent system prompt: reply with exactly <text> (e.g. to @ other agents)
+ *   [[reply:<text>]]          in the agent system prompt: reply with exactly <text>
+ *   [[handoff:<name> <task>]] in the agent system prompt: call the handoff tool (when offered) before replying
  * Otherwise it replies with a short acknowledgement naming the agent and model.
  */
 export async function mockChat(model: ModelConfig, req: ChatRequest): Promise<ChatResult> {
@@ -62,6 +63,15 @@ export async function mockChat(model: ModelConfig, req: ChatRequest): Promise<Ch
         },
       );
     }
+    const sys = req.messages.find((m) => m.role === "system")?.content ?? "";
+    for (const [i, m] of [...sys.matchAll(/\[\[handoff:(\S+)\s+([^\]]*)\]\]/g)].entries()) {
+      if (!available.has("handoff")) break;
+      calls.push({
+        id: `mock_handoff_${i}`,
+        type: "function",
+        function: { name: "handoff", arguments: JSON.stringify({ agent: m[1], task: (m[2] ?? "").trim() }) },
+      });
+    }
     for (const [i, m] of [...lastUser.matchAll(/\[\[tool:([\w-]+)\s*(\{.*?\})?\]\]/g)].entries()) {
       const name = m[1] ?? "";
       if (!available.has(name)) missing.push(name);
@@ -71,9 +81,11 @@ export async function mockChat(model: ModelConfig, req: ChatRequest): Promise<Ch
     if (missing.length > 0) return stream(`我没有可用的工具：${missing.join("、")}。`, req);
   }
 
-  // Robot body tools are side effects, not information: answer normally after them.
+  // Robot body tools and hand-offs are side effects, not information: answer normally after them.
   const robotOnly = afterUser.every(
-    (m) => m.role !== "assistant" || (m.tool_calls ?? []).every((c) => c.function.name.startsWith("robot_")),
+    (m) =>
+      m.role !== "assistant" ||
+      (m.tool_calls ?? []).every((c) => c.function.name.startsWith("robot_") || c.function.name === "handoff"),
   );
   if (toolResults.length > 0 && !robotOnly) {
     const summary = toolResults.map((m) => (m.role === "tool" ? m.content.slice(0, 200) : "")).join("；");

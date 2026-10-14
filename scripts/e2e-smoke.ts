@@ -32,7 +32,7 @@ try {
     await page.getByRole("button", { name: "创建 Agent" }).click();
     await page.getByText("所有修改已保存").waitFor();
   };
-  await createAgent("Alice", "[[reply:@Bob 请你来接手]]");
+  await createAgent("Alice", "[[handoff:Bob 请你来接手]][[reply:这个交给 Bob 了。]]");
   await createAgent("Bob", "", "calculator");
 
   await page.getByRole("button", { name: "会话", exact: true }).click();
@@ -48,7 +48,7 @@ try {
   const input = page.getByLabel("消息输入框");
   await input.fill("@Alice 你好");
   await input.press("Enter");
-  await page.getByText("请你来接手").first().waitFor();
+  await page.locator(".handoff", { hasText: "请你来接手" }).first().waitFor();
   await page.getByText(/我是 Bob（mock\//).waitFor();
   await page.getByText("Agent 接力 · 第 1 跳").waitFor();
   const routingCount = await page.locator('[data-shot="expand"]').count();

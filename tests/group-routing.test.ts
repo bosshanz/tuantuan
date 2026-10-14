@@ -8,14 +8,34 @@ import { testConfig } from "./helpers";
 // Exercises the real OpenAI-compatible path (not the mock) with a fake upstream whose replies
 // look like what real chat models write in a group: quoting the user, echoing "[name]:", @-ing people.
 const calls: string[] = [];
+const lastSystemFor: Record<string, string> = {};
 const upstream = Bun.serve({
   port: 0,
   async fetch(req) {
-    const body = (await req.json()) as { messages: { role: string; content: string }[] };
+    const body = (await req.json()) as {
+      messages: { role: string; content: string }[];
+      tools?: { function: { name: string } }[];
+    };
     const system = body.messages[0]?.content ?? "";
     const name = /你的名字是「([^」]+)」/.exec(system)?.[1] ?? "?";
     calls.push(name);
+    lastSystemFor[name] = system;
     const script = /SCRIPT<<([\s\S]*?)>>/.exec(system)?.[1] ?? `我是 ${name}。`;
+    // HANDOFF<<name|task>> → first call answers with a real tool call (if the handoff tool is offered).
+    const ho = /HANDOFF<<([^|]+)\|([^>]*)>>/.exec(system);
+    const offered = (body.tools ?? []).some((t) => t.function.name === "handoff");
+    if (ho && offered && !body.messages.some((m) => m.role === "tool")) {
+      const call = {
+        index: 0,
+        id: "call_1",
+        type: "function",
+        function: { name: "handoff", arguments: JSON.stringify({ agent: ho[1], task: ho[2] }) },
+      };
+      return new Response(
+        `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [call] } }] })}\n\ndata: [DONE]\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    }
     if (system.includes("SLOW")) {
       // Streams slowly so a test can interject mid-generation.
       const enc = new TextEncoder();
@@ -113,8 +133,8 @@ describe("group routing on the real provider path", () => {
   });
 
   test("@所有人 / @all → every member once in member order; hand-offs to someone who already answered are skipped", async () => {
-    const a = await agent("Amy", "@Bob2 这个你来补充");
-    const b = await agent("Bob2", "@Amy 你说得对，再补充一点");
+    const a = await agent("Amy", "HANDOFF<<Bob2|这个你来补充>>SCRIPT<<交给 Bob2。>>");
+    const b = await agent("Bob2", "HANDOFF<<Amy|再补充一点>>SCRIPT<<交给 Amy。>>");
     const c = await agent("Cat");
     const room = await api<Room>("POST", "/api/rooms", { name: "g5", kind: "group", agentIds: [a.id, b.id, c.id] });
     expect(replies(await say(room, "@所有人 周报写好了吗"))).toEqual([
@@ -171,7 +191,7 @@ describe("group routing on the real provider path", () => {
   });
 
   test("an explicit hand-off still chains; an agent already queued is not run twice", async () => {
-    const a = await agent("Ada", "@Bea 这个请你补充");
+    const a = await agent("Ada", "HANDOFF<<Bea|这个请你补充>>SCRIPT<<交给 Bea 补充。>>");
     const b = await agent("Bea");
     const c = await agent("Cid");
     const room = await api<Room>("POST", "/api/rooms", { name: "g3", kind: "group", agentIds: [a.id, b.id, c.id] });
@@ -184,6 +204,29 @@ describe("group routing on the real provider path", () => {
       ["Ada", 1],
       ["Bea", 1],
     ]);
+  });
+
+  test("Andy's case: an offer to @ someone in reply text is NOT a hand-off; only the handoff tool is", async () => {
+    const pm = await agent(
+      "产品经理",
+      "SCRIPT<<你好！另外需要中英互译或文案润色的话，我可以让 @翻译助手 接手。说吧，这次要解决什么问题？>>",
+    );
+    const tr = await agent("翻译助手");
+    const room = await api<Room>("POST", "/api/rooms", { name: "g7", kind: "group", agentIds: [pm.id, tr.id] });
+    expect(replies(await say(room, "@产品经理 大家好"))).toEqual([["产品经理", 1]]);
+    expect(calls).toEqual(["产品经理"]);
+    // The same agent with an explicit handoff call does trigger the translator, who sees the task.
+    const pm2 = await agent(
+      "产品经理二号",
+      "HANDOFF<<翻译助手|把这句话译成英文：你好>>SCRIPT<<这句交给翻译助手翻译。>>",
+    );
+    const room2 = await api<Room>("POST", "/api/rooms", { name: "g8", kind: "group", agentIds: [pm2.id, tr.id] });
+    const ms = await say(room2, "@产品经理二号 帮我把“你好”翻成英文");
+    expect(replies(ms)).toEqual([
+      ["产品经理二号", 1],
+      ["翻译助手", 2],
+    ]);
+    expect(lastSystemFor["翻译助手"]).toContain("「产品经理二号」把这项工作交给了你：把这句话译成英文：你好");
   });
 
   test("missing API key: only the mentioned agent answers, with a truthful error", async () => {

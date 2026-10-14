@@ -28,12 +28,13 @@ mock 模型根据文本中的指令给出确定性结果，方便不接 Key 就�
 
 | 写在哪里 | 指令 | 效果 |
 | --- | --- | --- |
-| Agent 的系统 Prompt | `[[reply:@Bob 请你来处理]]` | 该 Agent 固定这样回复，用来演示 Agent 互相 @ |
+| Agent 的系统 Prompt | `[[reply:好的]]` | 该 Agent 固定这样回复 |
+| Agent 的系统 Prompt | `[[handoff:Bob 请你来处理]]` | 该 Agent 先调用 handoff 工具把任务交给 Bob（Agent 之间只能这样交接，回复里写 @ 不会触发） |
 | 发送的消息 | `[[tool:calculator {"expression":"6*7"}]]` | 调用工具（需在 Agent 上勾选），再根据结果回复 |
 | 发送的消息 | `[[tool:load_skill {"name":"code-review"}]]` | 按需加载 Skill 正文 |
 | 发送的消息 | `[[fail:small]]` | 让 `mock/small` 模拟故障，观察路由回退（分类器也用 small，会退回规则分类） |
 
-例：Prompt 分别为 `[[reply:@PongBot 该你了]]` 和 `[[reply:@PingBot 该你了]]` 的两个 Agent 会互相 @，直到触发跳数上限（默认 5）。
+例：Prompt 分别为 `[[handoff:PongBot 该你了]]` 和 `[[handoff:PingBot 该你了]]` 的两个 Agent 会互相交接，直到触发跳数上限（默认 5）。
 
 ## 接入真实模型
 

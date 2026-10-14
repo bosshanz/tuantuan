@@ -129,6 +129,16 @@ export interface DeviceControl {
 
 export const ROBOT_TOOL_NAMES = ["robot_express", "robot_action"] as const;
 
+export const HANDOFF_TOOL = "handoff";
+
+/** Agent-to-agent hand-off is an explicit tool call; plain "@名字" in reply text never triggers anyone. */
+export interface HandoffControl {
+  /** Other agents in the room, by name. */
+  targets: { id: string; name: string }[];
+  /** Records the hand-off; the orchestrator runs the target after this reply finishes. */
+  record(target: { id: string; name: string }, task: string): void;
+}
+
 export interface ToolRuntime {
   specs: ToolSpec[];
   /** Runs a tool by its function name; throws with a truthful message on any failure. */
@@ -147,6 +157,8 @@ export async function buildToolRuntime(opts: {
   mcp: McpConnections;
   /** Present when the conversation belongs to a device; adds robot_express / robot_action. */
   device?: DeviceControl;
+  /** Present in group rooms with other agents; adds the `handoff` tool. */
+  handoff?: HandoffControl;
 }): Promise<{ runtime: ToolRuntime; warnings: string[] }> {
   const specs: ToolSpec[] = [];
   const handlers = new Map<string, (args: Record<string, unknown>, signal?: AbortSignal) => Promise<string>>();
@@ -208,6 +220,29 @@ export async function buildToolRuntime(opts: {
       const skill = byName.get(String(args.name));
       if (!skill) throw new Error(`没有名为 ${String(args.name)} 的 Skill`);
       return skill.body;
+    });
+  }
+
+  if (opts.handoff && opts.handoff.targets.length > 0) {
+    const h = opts.handoff;
+    specs.push(
+      fn(
+        HANDOFF_TOOL,
+        "把当前用户请求中的一部分工作交给群里另一个 Agent，对方会在你回复后立即接手。只在用户这次的请求确实需要对方现在动手时调用；不要用来介绍、推荐或预告别人能做什么。",
+        {
+          agent: { type: "string", enum: h.targets.map((t) => t.name), description: "接手的 Agent 名称" },
+          task: { type: "string", description: "交给对方的具体任务，一两句话" },
+        },
+        ["agent", "task"],
+      ),
+    );
+    handlers.set(HANDOFF_TOOL, async (args) => {
+      const target = h.targets.find((t) => t.name === String(args.agent));
+      if (!target) throw new Error(`群里没有名为 ${String(args.agent)} 的其他 Agent`);
+      const task = String(args.task ?? "").trim();
+      if (!task) throw new Error("task 不能为空");
+      h.record(target, task);
+      return `已交接给 ${target.name}，对方会在你回复后接手。请在回复里用一句话告诉用户你交给了谁、交了什么，不要再写 @。`;
     });
   }
 

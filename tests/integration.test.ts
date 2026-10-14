@@ -59,7 +59,7 @@ describe("HTTP + WS integration (mock provider)", () => {
   let ws: WebSocket;
 
   beforeAll(async () => {
-    a = await createAgent("Alice", "[[reply:@Bob 请你来处理这个问题]]");
+    a = await createAgent("Alice", "[[handoff:Bob 请你来处理这个问题]][[reply:这个交给 Bob 处理。]]");
     b = await createAgent("Bob");
     room = await createRoom("项目群", "group", [a.id, b.id]);
     ws = new WebSocket(`ws://localhost:${server.port}/ws`);
@@ -78,7 +78,10 @@ describe("HTTP + WS integration (mock provider)", () => {
       ["Alice", 1, "done"],
       ["Bob", 2, "done"],
     ]);
-    expect(messages[1]?.content).toBe("@Bob 请你来处理这个问题");
+    expect(messages[1]?.content).toBe("这个交给 Bob 处理。");
+    expect(messages[1]?.toolCalls.map((c) => [c.name, JSON.parse(c.arguments), c.status])).toEqual([
+      ["handoff", { agent: "Bob", task: "请你来处理这个问题" }, "ok"],
+    ]);
     expect(messages[2]?.content).toContain("我是 Bob");
     expect(messages.every((m) => m.runId === messages[0]?.id)).toBe(true);
 
@@ -87,7 +90,8 @@ describe("HTTP + WS integration (mock provider)", () => {
       expect(r.plan.mode).toBe("auto");
       expect(r.plan.classification?.source).toBe("llm");
       expect(r.chosenModel).toBe(r.plan.candidates[0] ?? "missing");
-      expect(r.attempts).toEqual([{ modelId: r.chosenModel as string, ok: true }]);
+      // Alice makes two model calls (handoff tool call, then the reply); every attempt succeeds on the first candidate.
+      for (const at of r.attempts) expect(at).toEqual({ modelId: r.chosenModel as string, ok: true });
     }
 
     const bobId = messages[2]?.id;
@@ -124,8 +128,8 @@ describe("HTTP + WS integration (mock provider)", () => {
   });
 
   test("hop limit stops an A<->B loop and says so", async () => {
-    const p = await createAgent("PingBot", "[[reply:@PongBot 该你了]]");
-    const q = await createAgent("PongBot", "[[reply:@PingBot 该你了]]");
+    const p = await createAgent("PingBot", "[[handoff:PongBot 该你了]][[reply:交给 PongBot]]");
+    const q = await createAgent("PongBot", "[[handoff:PingBot 该你了]][[reply:交给 PingBot]]");
     const r = await createRoom("循环群", "group", [p.id, q.id]);
     const { messages } = await say(r.id, "@PingBot 开始");
     const agents = messages.filter((m) => m.senderKind === "agent");
@@ -143,7 +147,7 @@ describe("HTTP + WS integration (mock provider)", () => {
   });
 
   test("an agent mentioning itself does not trigger itself", async () => {
-    const s = await createAgent("Narcissus", "[[reply:@Narcissus 我又来了]]");
+    const s = await createAgent("Narcissus", "[[handoff:Narcissus 我又来了]][[reply:@Narcissus 我又来了]]");
     const r = await createRoom("自恋群", "group", [s.id]);
     const { messages } = await say(r.id, "@Narcissus 你好");
     expect(messages.filter((m) => m.senderKind === "agent")).toHaveLength(1);

@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowRightLeft,
   ArrowUp,
   Check,
   ChevronLeft,
@@ -372,11 +373,13 @@ function MessageItem(props: {
   const { m, routing: d } = props;
   const streaming = m.status === "streaming";
   const fellBack = d?.attempts.some((a) => !a.ok);
+  const handoffs = m.toolCalls.filter((c) => c.name === "handoff");
+  const tools = m.toolCalls.filter((c) => c.name !== "handoff");
   return (
     <div className="msg" data-status={m.status}>
-      {m.toolCalls.length > 0 && (
+      {tools.length > 0 && (
         <div className="tool-list">
-          {m.toolCalls.map((c) => (
+          {tools.map((c) => (
             <details key={c.id} className="tool">
               <summary>
                 <ChevronRight size={14} className="chev" />
@@ -431,6 +434,18 @@ function MessageItem(props: {
           <span>{m.error ?? "回复被中断"}</span>
         </div>
       )}
+      {handoffs.map((c) => {
+        const args = safeJson(c.arguments) as { agent?: string; task?: string };
+        return (
+          <div key={c.id} className="handoff" data-status={c.status}>
+            <ArrowRightLeft size={13} />
+            <span>
+              交接给 <b>@{args.agent ?? "?"}</b>：{args.task ?? ""}
+              {c.status === "error" && <span className="error-text">（失败：{c.error}）</span>}
+            </span>
+          </div>
+        );
+      })}
       {(m.senderKind === "agent" || m.hop >= 2) && (
         <div className="msg-meta">
           {m.status === "cancelled" && (
@@ -871,4 +886,12 @@ function Composer(props: {
       </div>
     </div>
   );
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
 }

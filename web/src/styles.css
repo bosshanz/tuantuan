@@ -486,3 +486,6 @@ kbd.combo { gap: 3px; }
 .avatar.emoji { font-size: calc(var(--size) * 0.56); font-weight: 400; }
 .search-trigger { display: flex; align-items: center; justify-content: space-between; text-align: left; color: var(--text-3); height: 32px; }
 .pop-item .pop-hint { margin-left: auto; font-size: 11px; }
+.handoff { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; padding: 6px 10px; border-radius: var(--r2); background: var(--accent-soft); color: var(--accent-text); font-size: var(--fs-sm); }
+.handoff svg { flex-shrink: 0; margin-top: 3px; }
+.handoff[data-status="error"] { background: var(--danger-soft); color: var(--danger); }
