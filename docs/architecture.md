@@ -12,15 +12,16 @@
 | --- | --- |
 | `server/main.ts` | 读取配置与 Skills，启动服务 |
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件 |
-| `server/orchestrator.ts` | **运行时编排**：房间队列、@ 触发链、跳数上限、取消、单个 Agent 回合（上下文构建 → 路由 → 工具循环 → 持久化/推送） |
+| `server/orchestrator.ts` | **运行时编排**：房间队列、初始触发（@ / @所有人 / 按话题选择）、handoff 交接链、跳数上限、打断与取消、单个 Agent 回合（上下文构建 → 路由 → 工具循环 → 持久化/推送） |
 | `server/decision.ts` | 百炼决策模型（systemone）客户端：构造问题、超时、严格解析返回 |
-| `server/router.ts` | 任务分类（LLM 分类器 + 规则回退）、候选模型排序、按候选回退调用 |
+| `server/picker.ts` | 群聊没有 @ 时按话题选一个成员（决策模型 → LLM → 关键词规则 → 第一个成员） |
+| `server/router.ts` | 任务分类（决策模型 → LLM 分类器 → 规则回退）、候选模型排序、按候选回退调用 |
 | `server/classify.ts` | 确定性规则分类（router 与 mock 分类器共用） |
 | `server/tool-loop.ts` | function-calling 循环 |
-| `server/tools.ts` | 内置工具、为某个 Agent 组装工具集（内置 / MCP / `load_skill`） |
+| `server/tools.ts` | 内置工具、为某个 Agent 组装工具集（内置 / MCP / `load_skill` / 群聊的 `handoff` / 设备房间的 `robot_express`、`robot_action`） |
 | `server/mcp.ts` | MCP Streamable HTTP 客户端连接（官方 SDK） |
 | `server/skills.ts` | 读取 `SKILL.md`、生成 Skill 目录提示 |
-| `server/mentions.ts` | `@名字` 解析 |
+| `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
 | `server/llm.ts` / `server/mock.ts` | OpenAI 兼容流式客户端 / 确定性假模型 |
 | `server/store.ts` | SQLite 迁移与读写 |
 | `server/device.ts` / `server/device-protocol.ts` | `/device` 设备协议：DeviceHub 管理设备连接、会话房间、由房间事件推导的会话状态、带 ack 超时的表情/动作下发（见 [device-protocol.md](device-protocol.md)） |
@@ -36,7 +37,7 @@
 | Agent、MCP 服务、房间与成员、消息、路由决策 | SQLite（`Store`） | 唯一权威来源；前端刷新后从 API 重建 |
 | 进行中的运行（每房间当前链 + 排队的人类消息 + AbortController） | `Orchestrator` 内存 | 进程退出即丢失；启动时把残留的 `streaming` 消息标记为 `interrupted`，不伪装成完成 |
 | 流式增量文本 | 仅经 WebSocket 推送 | 消息完成（done / error / cancelled）时才把全文写库；刷新页面时进行中的消息显示为空直到完成 |
-| Provider / 模型 / 路由表 / 限制 | 配置文件（只读） | 启动时校验，非法直接失败；Key 只存在环境变量 |
+| Provider / 模型 / 路由表 / 限制 | `.env`（`AGENT_HUB_MODELS`、`DECISION_*` 等）+ 可选 providers.json（只读） | 启动时校验，非法直接失败；Key 只存在环境变量 |
 | Skills | `skills/` 目录（只读） | 启动时加载；加载失败逐条报告 |
 | 当前用户显示名 | 浏览器 localStorage | 无账号体系 |
 
@@ -51,10 +52,10 @@
    - 群聊 @具体成员 → 这些成员（不在房间的 Agent 不触发）。
    - 群聊没有 @ → `server/picker.ts` 选一个成员：决策模型对成员做一次 choice（置信度不足或选了 other 时回退）→ classifierModel 输出 JSON → 关键词（拉丁词 + 中文二元组）与"名称 + Prompt"的重叠数 → 第一个成员。选择结果写入该回复路由记录的 `plan.selection`。mock 分类器对选择请求用同一套关键词规则，因此结果是确定的。
 3. 触发按 FIFO 顺序**串行**执行。Agent 回复成功后，把它本条回复里成功调用的 `handoff` 工具目标（排除自己、去重、跳过已在排队的）加入队列，`hop + 1`，并带上 task，写入接手方的系统提示。回复文本里的 @ 不解析。之所以用工具而不是解析文本：真实模型经常写"我可以让 @X 接手"这类提议，文本规则怎么改都会误判，工具调用才是明确的意图。handoff 只提供给非设备群聊房间，不计入路由的 toolCount。代价是模型必须支持 function calling（不支持时回退到下一个候选模型）。
-4. `hop ≥ 2` 的每次执行计 1 次 Agent 互相 @；达到 `maxAgentHops` 后停止整条链，并发一条系统消息列出未执行的触发。
+4. `hop ≥ 2` 的每次执行计 1 次交接；达到 `maxAgentHops` 后停止整条链，并发一条系统消息列出未执行的触发。
 5. 取消：中止当前链（正在流的消息以 `cancelled` 保存已生成部分）并清空该房间排队的人类消息（发系统消息说明数量）。
 
-上下文：取房间最近 `contextMessages` 条消息，从新到旧累计不超过 `contextChars` 字符；自己的消息作 `assistant`，其他人作 `user` 并带 `[发言者]:` 前缀。系统提示包含名字、房间类型、其他成员的 @ 名、Agent 自己的 Prompt、Skill 目录。
+上下文：取房间最近 `contextMessages` 条消息，从新到旧累计不超过 `contextChars` 字符；自己的消息作 `assistant`，其他人作 `user` 并带 `[发言者]:` 前缀。系统提示包含名字、房间类型、其他成员、handoff 的使用规则（只有用户这次的请求确实需要对方现在动手时才交接，正文里的 @ 不会触发）、交接来的 task（如有）、Agent 自己的 Prompt、Skill 目录。
 
 ## 模型路由
 
@@ -77,7 +78,7 @@
 - 固定模型的 Agent 跳过分类，只有一个候选，**不回退**（固定即意味着用户要这个模型）。
 - 工具循环的后续轮次从上一轮成功的模型开始，避免同一回答中途换模型。
 - 流开始后的错误不回退（否则会重复输出），直接以 `error` 状态结束并保留已生成内容。
-- 每条 Agent 消息记录：信号、分类结果与来源、分类器错误、候选顺序、理由、每次尝试结果、最终模型。前端在消息下方展开查看。
+- 每条 Agent 消息记录：信号、分类结果与来源、分类器错误、候选顺序、理由、每次尝试结果、最终模型。前端在消息下方显示一行弱化的来源（按话题选中 / 接 X 的交接 · 模型 · 已回退），点击在详情面板查看全部；会话信息面板汇总本会话的模型使用与回退次数。
 
 ## 工具与 Skills
 
