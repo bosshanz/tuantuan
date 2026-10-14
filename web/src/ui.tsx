@@ -40,7 +40,7 @@ export function AgentAvatar({
   return (
     <span
       className={EMOJI.test(agent.avatar) ? "avatar emoji" : "avatar"}
-      style={{ background: agent.color, ["--size" as string]: `${size}px` }}
+      style={{ ["--tint" as string]: agent.color, ["--size" as string]: `${size}px` }}
       aria-hidden
     >
       {agent.avatar}

@@ -4,7 +4,7 @@ import { type Agent, type AgentInput, api, type McpServer, type McpTool, type Me
 import { type PickItem, PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
-const COLORS = ["#5b5bd6", "#e5484d", "#30a46c", "#d6409f", "#f76b15", "#0090ff", "#12a594", "#8e4ec6", "#6f6e77"];
+const COLORS = ["#2f4a6d", "#b0432a", "#3d6b4f", "#b0812a", "#6d3f5b", "#2f6b6b", "#7a5a3c", "#4f5d63", "#3a3833"];
 
 function emptyAgent(): AgentInput {
   return {

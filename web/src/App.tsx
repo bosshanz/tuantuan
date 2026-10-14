@@ -87,7 +87,7 @@ export function App() {
     <div className={`shell ${section === "robot" ? "no-list" : ""}`} data-mobile={mobileView}>
       <nav className="rail" aria-label="主导航">
         <div className="logo" aria-hidden>
-          <Sparkles size={18} />
+          A
         </div>
         <RailButton
           icon={<MessagesSquare size={20} />}

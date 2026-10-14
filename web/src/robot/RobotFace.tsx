@@ -27,28 +27,23 @@ export function RobotFace(props: {
           <g className="arm-r">
             <rect className="r-shell" x="234" y="238" width="24" height="58" rx="12" />
           </g>
-          <rect className="r-shell" x="92" y="226" width="136" height="88" rx="30" />
-          <rect className="r-accent" x="140" y="258" width="40" height="8" rx="4" opacity="0.85" />
+          <rect className="r-shell" x="92" y="226" width="136" height="88" rx="18" />
+          <g className="r-grille">
+            {[0, 1, 2, 3].map((i) => (
+              <line key={i} x1="128" x2="192" y1={252 + i * 9} y2={252 + i * 9} />
+            ))}
+          </g>
+          <circle className="r-accent" cx="160" cy="296" r="3.5" />
           <rect className="r-shell" x="144" y="210" width="32" height="22" rx="8" />
           <g className="head">
-            <line
-              x1="160"
-              y1="58"
-              x2="160"
-              y2="30"
-              stroke="var(--border-strong)"
-              strokeWidth="5"
-              strokeLinecap="round"
-            />
-            <circle className="antenna-dot" cx="160" cy="24" r="9" />
-            <rect className="r-shell" x="44" y="56" width="232" height="162" rx="52" />
-            <rect className="r-screen" x="66" y="78" width="188" height="118" rx="34" />
+            <line x1="160" y1="58" x2="160" y2="30" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <circle className="antenna-dot" cx="160" cy="24" r="5" />
+            <rect className="r-shell" x="44" y="56" width="232" height="162" rx="40" />
+            <rect className="r-screen" x="66" y="78" width="188" height="118" rx="22" />
             <g className="eyes">
               <ellipse className="eye r-feature" cx="122" cy="124" rx="14" ry="19" />
               <ellipse className="eye r-feature" cx="198" cy="124" rx="14" ry="19" />
             </g>
-            <ellipse className="r-cheek" cx="98" cy="158" rx="13" ry="6" />
-            <ellipse className="r-cheek" cx="222" cy="158" rx="13" ry="6" />
             <g className="mouth">
               <path className="mouth-shape m-smile r-line" d="M140 162 Q160 178 180 162" />
               <path className="mouth-shape m-grin r-feature" d="M134 158 Q160 190 186 158 Z" />
