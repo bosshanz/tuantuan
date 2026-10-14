@@ -9,6 +9,7 @@ export interface PickItem {
   /** Render title in the UI font instead of monospace (for names, not identifiers). */
   plain?: boolean;
   invalid?: boolean;
+  trailing?: ReactNode;
 }
 
 /** Searchable checkable list; used for tools, skills and room members. */
@@ -60,6 +61,7 @@ export function PickList(props: {
                   </div>
                   {i.description && <div className={`pick-desc ${i.invalid ? "error-text" : ""}`}>{i.description}</div>}
                 </span>
+                {i.trailing}
               </label>
             ))}
             {s && items.length === 0 && g.items.length > 0 && <div className="pick-empty">没有匹配「{q}」的项</div>}

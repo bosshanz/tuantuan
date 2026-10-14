@@ -1,23 +1,42 @@
+import type { TerminalSnapshot } from "../../server/acp";
+import type { HarnessStatus } from "../../server/harness";
+import type { PermissionAsk, SessionView } from "../../server/host";
 import type { RoomEvent, RoomState } from "../../server/orchestrator";
-import type { Agent, AgentInput, McpServer, Message, Room, RoutingDecision } from "../../server/store";
+import type { Agent, AgentInput, McpServer, Message, Room } from "../../server/store";
 
-export type { Agent, AgentInput, McpServer, Message, Room, RoomEvent, RoomState, RoutingDecision };
+export type {
+  Agent,
+  AgentInput,
+  HarnessStatus,
+  McpServer,
+  Message,
+  PermissionAsk,
+  Room,
+  RoomEvent,
+  RoomState,
+  SessionView,
+  TerminalSnapshot,
+};
+
+export interface HarnessInfo {
+  id: string;
+  name: string;
+  install: string;
+  auth: string;
+  docs: string;
+  identity: "claude-meta" | "grok-meta" | "codex-env" | "first-prompt";
+}
 
 export interface Meta {
-  configSource: string;
-  models: { id: string; tags: string[]; costTier: number; contextWindow: number }[];
-  classifierModel: string | null;
-  decisionModel: string | null;
-  limits: { maxAgentHops: number; maxToolIterations: number; contextMessages: number; contextChars: number };
-  builtinTools: { id: string; name: string; description: string }[];
-  skills: { name: string; description: string }[];
-  skillErrors: { dir: string; error: string }[];
+  harnesses: HarnessInfo[];
 }
 
-export interface McpTool {
-  name: string;
-  description: string;
-}
+export const IDENTITY_DELIVERY: Record<HarnessInfo["identity"], string> = {
+  "claude-meta": "作为系统提示追加（_meta.systemPrompt.append）",
+  "grok-meta": "作为系统规则追加（_meta.rules）",
+  "codex-env": "作为 developer_instructions（CODEX_CONFIG 环境变量）",
+  "first-prompt": "放在每个新会话的第一条消息前",
+};
 
 /** Throws an Error carrying the server's error message for any non-2xx response. */
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {

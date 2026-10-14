@@ -1,8 +1,8 @@
-import { AlertTriangle, Check, ChevronLeft, MessageCircle, Plug, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, MessageCircle, Plug, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import { AvatarPicker } from "./AvatarPicker";
-import { type Agent, type AgentInput, api, type McpServer, type McpTool, type Meta } from "./api";
+import { type Agent, type AgentInput, api, IDENTITY_DELIVERY, type McpServer, type Meta } from "./api";
 import { type PickItem, PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
@@ -18,12 +18,31 @@ function emptyAgent(seed: string): Form {
     color: d.color,
     avatarShape: d.shape,
     avatar: "",
-    systemPrompt: "",
-    tools: [],
-    skills: [],
-    modelMode: "auto",
-    pinnedModel: null,
+    identity: "",
+    harness: "",
+    cwd: "",
+    env: {},
+    mcpServerIds: [],
+    permissionPolicy: "ask",
   };
+}
+
+const envToText = (env: Record<string, string>) =>
+  Object.entries(env)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+
+/** KEY=VALUE per line; blank lines and # comments ignored. */
+function textToEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const i = t.indexOf("=");
+    if (i > 0) out[t.slice(0, i).trim()] = t.slice(i + 1);
+    else out[t] = "";
+  }
+  return out;
 }
 
 const comparable = (a: Form) =>
@@ -31,11 +50,12 @@ const comparable = (a: Form) =>
     a.name,
     a.color,
     a.avatarShape,
-    a.systemPrompt,
-    [...a.tools].sort(),
-    [...a.skills].sort(),
-    a.modelMode,
-    a.modelMode === "pinned" ? a.pinnedModel : null,
+    a.identity,
+    a.harness,
+    a.cwd,
+    a.env,
+    [...a.mcpServerIds].sort(),
+    a.permissionPolicy,
   ]);
 
 export function AgentEditor(props: {
@@ -60,8 +80,14 @@ export function AgentEditor(props: {
     setJustSaved(false);
     setForm((f) => ({ ...f, [k]: v }));
   };
-  const toggleIn = (k: "tools" | "skills", v: string) =>
-    set(k, form[k].includes(v) ? form[k].filter((x) => x !== v) : [...form[k], v]);
+  const [envText, setEnvText] = useState(() => envToText(initial.env));
+  useEffect(() => setEnvText(envToText(initial.env)), [initial]);
+  const toggleMcp = (v: string) =>
+    set(
+      "mcpServerIds",
+      form.mcpServerIds.includes(v) ? form.mcpServerIds.filter((x) => x !== v) : [...form.mcpServerIds, v],
+    );
+  const harness = meta.harnesses.find((h) => h.id === form.harness);
 
   const save = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -71,7 +97,6 @@ export function AgentEditor(props: {
       const body = {
         ...form,
         avatar: form.avatar.trim() || [...form.name.trim()][0] || "A",
-        pinnedModel: form.modelMode === "pinned" ? form.pinnedModel : null,
       };
       const saved = agent
         ? await api<Agent>("PUT", `/api/agents/${agent.id}`, body)
@@ -96,8 +121,6 @@ export function AgentEditor(props: {
     }
   };
 
-  const pinnedMissing =
-    form.modelMode === "pinned" && !!form.pinnedModel && !meta.models.some((m) => m.id === form.pinnedModel);
   return (
     <>
       <header className="main-head">
@@ -109,8 +132,8 @@ export function AgentEditor(props: {
           <div className="editor-title">
             <h2>{agent ? agent.name : form.name.trim() || "新建 Agent"}</h2>
             <div className="sub">
-              {form.modelMode === "auto" ? "Auto 路由" : `固定 ${form.pinnedModel ?? ""}`} · {form.tools.length} 个工具
-              · {form.skills.length} 个 Skills
+              {harness ? harness.name : "未绑定 Harness"}
+              {form.cwd && ` · ${form.cwd}`}
             </div>
           </div>
         </div>
@@ -155,99 +178,105 @@ export function AgentEditor(props: {
 
           <section className="card">
             <div className="card-head">
-              <h3>系统 Prompt</h3>
+              <h3>Harness</h3>
+              <p>
+                由哪个编码 Agent 来驱动它；Skills、工具和模型都归 Harness 管。<a href="#/setup">检测与登录</a>
+              </p>
             </div>
             <div className="card-body">
-              <textarea
-                className="textarea"
-                rows={7}
-                value={form.systemPrompt}
-                onChange={(e) => set("systemPrompt", e.target.value)}
-                aria-label="系统 Prompt"
-                placeholder="你是一名严谨的资深工程师……"
-              />
+              <label className="field">
+                <span className="label">Harness</span>
+                <select
+                  className="select"
+                  aria-label="Harness"
+                  value={form.harness}
+                  onChange={(e) => set("harness", e.target.value)}
+                >
+                  <option value="">未绑定</option>
+                  {meta.harnesses.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="label">工作目录</span>
+                <input
+                  className="input mono"
+                  value={form.cwd}
+                  onChange={(e) => set("cwd", e.target.value)}
+                  placeholder="~（主目录）；群聊里使用群的共享目录"
+                  spellCheck={false}
+                />
+              </label>
+              <div className="field">
+                <span className="label">工具授权</span>
+                <fieldset className="segmented" aria-label="工具授权">
+                  <button
+                    type="button"
+                    aria-pressed={form.permissionPolicy === "ask"}
+                    onClick={() => set("permissionPolicy", "ask")}
+                  >
+                    每次询问
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={form.permissionPolicy === "allow"}
+                    onClick={() => set("permissionPolicy", "allow")}
+                  >
+                    自动允许
+                  </button>
+                </fieldset>
+              </div>
             </div>
           </section>
 
           <section className="card">
             <div className="card-head">
-              <h3>模型</h3>
+              <h3>身份文档</h3>
+              <p>
+                团团独立维护，不写进项目目录。
+                {harness && `${harness.name}：${IDENTITY_DELIVERY[harness.identity]}。`}
+              </p>
             </div>
             <div className="card-body">
-              <fieldset className="segmented" aria-label="模型策略">
-                <button type="button" aria-pressed={form.modelMode === "auto"} onClick={() => set("modelMode", "auto")}>
-                  Auto 路由
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={form.modelMode === "pinned"}
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      modelMode: "pinned",
-                      pinnedModel: f.pinnedModel ?? meta.models[0]?.id ?? null,
-                    }))
-                  }
-                >
-                  固定模型
-                </button>
-              </fieldset>
-              {form.modelMode === "pinned" && (
-                <label className="field">
-                  <span className="label">模型</span>
-                  <select
-                    className="select"
-                    value={form.pinnedModel ?? ""}
-                    onChange={(e) => set("pinnedModel", e.target.value)}
-                  >
-                    {pinnedMissing && (
-                      <option value={form.pinnedModel ?? ""} disabled>
-                        {form.pinnedModel}（当前未启用）
-                      </option>
-                    )}
-                    {meta.models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.id} · 成本档 {m.costTier} · {Math.round(m.contextWindow / 1000)}k 上下文
-                      </option>
-                    ))}
-                  </select>
-                  {pinnedMissing && (
-                    <span className="error-text" role="alert">
-                      {form.pinnedModel} 未启用，回复会失败。请换一个模型或改用 Auto。
-                    </span>
-                  )}
-                </label>
-              )}
+              <textarea
+                className="textarea mono"
+                rows={9}
+                value={form.identity}
+                onChange={(e) => set("identity", e.target.value)}
+                aria-label="身份文档"
+                placeholder={"# 角色\n你是团队里的前端工程师……\n\n# 约定\n- 改动前先说明计划"}
+              />
             </div>
           </section>
 
-          <ToolsSection
-            meta={meta}
+          <McpSection
             servers={props.mcpServers}
-            selected={form.tools}
-            toggle={(id) => toggleIn("tools", id)}
+            selected={form.mcpServerIds}
+            toggle={toggleMcp}
             onMcpChange={props.onMcpChange}
           />
 
           <section className="card">
             <div className="card-head">
-              <h3>Skills</h3>
+              <h3>环境变量</h3>
+              <p>只给这个 Agent 的 Harness 进程，例如 API Key。每行 KEY=VALUE。</p>
             </div>
             <div className="card-body">
-              <PickList
-                searchPlaceholder="搜索 Skill"
-                emptyText="skills 目录下没有可用的 Skill"
-                groups={[
-                  { items: meta.skills.map((s) => ({ id: s.name, title: s.name, description: s.description })) },
-                ]}
-                selected={form.skills}
-                onToggle={(id) => toggleIn("skills", id)}
+              <textarea
+                className="textarea mono"
+                rows={3}
+                value={envText}
+                onChange={(e) => {
+                  setEnvText(e.target.value);
+                  set("env", textToEnv(e.target.value));
+                }}
+                aria-label="环境变量"
+                placeholder="ANTHROPIC_API_KEY=sk-…"
+                spellCheck={false}
               />
-              {meta.skillErrors.map((e) => (
-                <div key={e.dir} className="form-error">
-                  <AlertTriangle size={15} /> 未加载 {e.dir}：{e.error}
-                </div>
-              ))}
             </div>
           </section>
 
@@ -289,7 +318,14 @@ export function AgentEditor(props: {
             )}
           </span>
           {agent && dirty && (
-            <button type="button" className="btn ghost" onClick={() => setForm(initial)}>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => {
+                setForm(initial);
+                setEnvText(envToText(initial.env));
+              }}
+            >
               放弃修改
             </button>
           )}
@@ -302,32 +338,16 @@ export function AgentEditor(props: {
   );
 }
 
-function ToolsSection(props: {
-  meta: Meta;
+function McpSection(props: {
   servers: McpServer[];
   selected: string[];
   toggle: (id: string) => void;
   onMcpChange: () => Promise<void>;
 }) {
-  const [tools, setTools] = useState<Record<string, McpTool[] | { error: string } | "loading">>({});
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  const load = async (s: McpServer) => {
-    setTools((t) => ({ ...t, [s.id]: "loading" }));
-    try {
-      const list = await api<McpTool[]>("GET", `/api/mcp-servers/${s.id}/tools`);
-      setTools((t) => ({ ...t, [s.id]: list }));
-    } catch (e) {
-      setTools((t) => ({ ...t, [s.id]: { error: (e as Error).message } }));
-    }
-  };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: list tools once per server list change
-  useEffect(() => {
-    for (const s of props.servers) if (!tools[s.id]) void load(s);
-  }, [props.servers]);
 
   const add = async () => {
     setError(null);
@@ -342,7 +362,7 @@ function ToolsSection(props: {
     }
   };
   const remove = async (s: McpServer) => {
-    if (!confirm(`移除 MCP 服务「${s.name}」？\n所有引用它的 Agent 都将无法再调用这些工具。`)) return;
+    if (!confirm(`移除 MCP 服务「${s.name}」？\n所有 Agent 都将不再拿到它。`)) return;
     try {
       await api("DELETE", `/api/mcp-servers/${s.id}`);
       await props.onMcpChange();
@@ -351,75 +371,36 @@ function ToolsSection(props: {
     }
   };
 
-  const groups: { label: React.ReactNode; items: PickItem[]; footer?: React.ReactNode }[] = [
-    {
-      label: "内置",
-      items: props.meta.builtinTools.map((t) => ({ id: t.id, title: t.name, description: t.description })),
-    },
-    ...props.servers.map((s) => {
-      const state = tools[s.id];
-      const listed = Array.isArray(state) ? state : [];
-      const known = new Set(listed.map((t) => `mcp:${s.id}:${t.name}`));
-      const orphaned = Array.isArray(state)
-        ? props.selected.filter((id) => id.startsWith(`mcp:${s.id}:`) && !known.has(id))
-        : [];
-      return {
-        label: (
-          <>
-            <Plug size={12} />
-            {s.name}
-            <span className="grow">{s.url}</span>
-            <button
-              type="button"
-              className="btn ghost sm icon"
-              title="刷新工具列表"
-              aria-label={`刷新 ${s.name}`}
-              onClick={() => void load(s)}
-            >
-              <RefreshCw size={12} className={state === "loading" ? "spin" : ""} />
-            </button>
-            <button
-              type="button"
-              className="btn ghost sm icon danger"
-              title="移除此 MCP 服务"
-              aria-label={`移除 ${s.name}`}
-              onClick={() => void remove(s)}
-            >
-              <Trash2 size={12} />
-            </button>
-          </>
-        ),
-        items: [
-          ...listed.map((t) => ({ id: `mcp:${s.id}:${t.name}`, title: t.name, description: t.description })),
-          ...orphaned.map((id) => ({
-            id,
-            title: id.split(":").slice(2).join(":"),
-            description: "服务已不再提供此工具，取消勾选以移除",
-            invalid: true,
-          })),
-        ],
-        footer:
-          state === "loading" ? (
-            <div className="pick-empty">正在获取工具列表…</div>
-          ) : state && !Array.isArray(state) ? (
-            <div className="pick-empty error-text">{state.error}</div>
-          ) : Array.isArray(state) && state.length === 0 ? (
-            <div className="pick-empty">该服务没有提供工具</div>
-          ) : undefined,
-      };
-    }),
-  ];
+  const items: PickItem[] = props.servers.map((s) => ({
+    id: s.id,
+    title: s.name,
+    description: s.url,
+    trailing: (
+      <button
+        type="button"
+        className="btn ghost sm icon danger"
+        title="移除此 MCP 服务"
+        aria-label={`移除 ${s.name}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          void remove(s);
+        }}
+      >
+        <Trash2 size={12} />
+      </button>
+    ),
+  }));
 
   return (
     <section className="card">
       <div className="card-head row" style={{ alignItems: "center" }}>
         <div className="grow">
-          <h3>工具</h3>
-          {props.selected.length > 0 && <p>已选 {props.selected.length} 个</p>}
+          <h3>MCP 服务</h3>
+          <p>新建 Harness 会话时传给它（session/new 的 mcpServers）。</p>
         </div>
         <button type="button" className="btn sm" onClick={() => setAdding((v) => !v)}>
           <Plug size={13} />
-          添加 MCP 服务
+          添加
         </button>
       </div>
       <div className="card-body">
@@ -445,9 +426,9 @@ function ToolsSection(props: {
         )}
         {error && <div className="form-error">{error}</div>}
         <PickList
-          searchPlaceholder="搜索工具"
-          emptyText="没有可用工具"
-          groups={groups}
+          searchPlaceholder="搜索 MCP 服务"
+          emptyText="还没有 MCP 服务"
+          groups={[{ items }]}
           selected={props.selected}
           onToggle={props.toggle}
         />

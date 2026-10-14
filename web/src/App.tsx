@@ -1,4 +1,4 @@
-import { Bot, Command, MessagesSquare, Plus, Search, Sparkles, UserRound } from "lucide-react";
+import { Bot, Command, MessagesSquare, PlugZap, Plus, Search, Sparkles, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentEditor } from "./AgentEditor";
 import { AvatarShowcase } from "./AvatarShowcase";
@@ -9,6 +9,7 @@ import { CommandPalette } from "./CommandPalette";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
 import { RobotPage } from "./robot/RobotPage";
+import { SetupPage } from "./Setup";
 import { AgentAvatar, RoomIcon, roomSubtitle, useHashRoute } from "./ui";
 
 export function App() {
@@ -69,7 +70,8 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const section = route[0] === "a" ? "agents" : route[0] === "robot" ? "robot" : "rooms";
+  const section =
+    route[0] === "a" ? "agents" : route[0] === "robot" ? "robot" : route[0] === "setup" ? "setup" : "rooms";
   const detailId = route[1] ?? null;
   const roomId = section === "rooms" && detailId && detailId !== "new" ? detailId : null;
 
@@ -85,11 +87,12 @@ export function App() {
   }, []);
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
-  const mobileView = section === "robot" || detailId ? "main" : "list";
+  const mobileView = section === "robot" || section === "setup" || detailId ? "main" : "list";
+  const harnessName = (id: string) => meta?.harnesses.find((h) => h.id === id)?.name ?? id;
 
   if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
-    <div className={`shell ${section === "robot" ? "no-list" : ""}`} data-mobile={mobileView}>
+    <div className={`shell ${section === "robot" || section === "setup" ? "no-list" : ""}`} data-mobile={mobileView}>
       <nav className="rail" aria-label="主导航">
         <div className="logo" title="团团 Tuantuan">
           <BrandMark size={32} />
@@ -102,6 +105,12 @@ export function App() {
         />
         <RailButton icon={<Bot size={20} />} label="Agents" current={section === "agents"} onClick={() => go("a")} />
         <RailButton icon={<RobotGlyph />} label="机器人" current={section === "robot"} onClick={() => go("robot")} />
+        <RailButton
+          icon={<PlugZap size={20} />}
+          label="引导"
+          current={section === "setup"}
+          onClick={() => go("setup")}
+        />
         <div className="spacer" />
         <button
           type="button"
@@ -207,11 +216,7 @@ export function App() {
               <span className="li-body">
                 <span className="li-title">{a.name}</span>
                 <span className="li-sub">
-                  {a.modelMode === "auto" ? "Auto 路由" : a.pinnedModel}
-                  {a.modelMode === "pinned" && meta && !meta.models.some((m) => m.id === a.pinnedModel) && (
-                    <span className="warn-text">（未启用）</span>
-                  )}{" "}
-                  · {a.tools.length} 工具 · {a.skills.length} Skills
+                  {a.harness ? harnessName(a.harness) : <span className="warn-text">未绑定 Harness</span>}
                 </span>
               </span>
             </button>
@@ -246,6 +251,7 @@ export function App() {
             room={room}
             agents={agents}
             userName={userName}
+            harnessName={harnessName}
             subscribeEvents={subscribeEvents}
             onBack={() => go("c")}
             onRoomChange={reload}
@@ -255,6 +261,7 @@ export function App() {
             }}
           />
         )}
+        {section === "setup" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
         {section === "agents" && !detailId && loaded && (
           <div className="empty">
             <div className="empty-icon">
@@ -432,10 +439,10 @@ function Welcome({
 }) {
   const steps = [
     {
-      done: agents.length > 0,
-      title: "创建一个 Agent",
-      cta: "新建 Agent",
-      path: "a/new",
+      done: agents.some((a) => a.harness),
+      title: "接入 Harness，绑定到 Agent",
+      cta: "新手引导",
+      path: "setup",
     },
     {
       done: rooms.some((r) => !r.deviceId),
@@ -476,11 +483,6 @@ function Welcome({
           </li>
         ))}
       </ol>
-      {meta?.configSource === "builtin-mock" && (
-        <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-          演示模式 · 内置 mock 模型
-        </p>
-      )}
     </div>
   );
 }

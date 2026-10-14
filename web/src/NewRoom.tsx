@@ -96,7 +96,7 @@ export function NewRoom({
                   items: agents.map((a) => ({
                     id: a.id,
                     title: a.name,
-                    description: a.systemPrompt.slice(0, 80) || "（未设置 Prompt）",
+                    description: a.identity.slice(0, 80) || (a.harness ? a.harness : "未绑定 Harness"),
                     leading: <AgentAvatar agent={a} size={24} />,
                     plain: true,
                   })),

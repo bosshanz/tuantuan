@@ -1,49 +1,60 @@
 import {
   AlertTriangle,
-  ArrowRightLeft,
   ArrowUp,
-  Check,
   ChevronLeft,
   ChevronRight,
   CircleSlash,
   CircleStop,
+  History,
+  ImagePlus,
   Loader2,
   PanelRight,
+  Plus,
   Trash2,
   Users,
-  Wrench,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { type Agent, api, type Message, type Room, type RoomState, type RoutingDecision, type WsEvent } from "./api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { applyUpdate, emptyTimeline, timelineText } from "../../shared/timeline";
+import {
+  type Agent,
+  api,
+  type Message,
+  type PermissionAsk,
+  type Room,
+  type RoomState,
+  type SessionView,
+  type TerminalSnapshot,
+  type WsEvent,
+} from "./api";
 import { agentActivity, messageExpression } from "./avatarState";
+import { PermissionDialog, SessionBar, TimelineView } from "./Harness";
 import { mergeMessages, upsertMessage } from "./messageMerge";
 import { usePresence } from "./motion";
 import { PickList } from "./PickList";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
 
-const SELECT_LABEL: Record<string, string> = {
-  systemone: "没有 @，由决策模型按话题选择",
-  llm: "没有 @，由 LLM 按话题选择",
-  rules: "没有 @，按关键词规则选择",
-  only: "没有 @，群里只有这一个 Agent",
-};
-
-const TYPE_LABEL: Record<string, string> = {
-  chat: "闲聊",
-  coding: "编程",
-  reasoning: "推理",
-  long_context: "长上下文",
-  tool_heavy: "工具",
-  vision: "视觉",
-};
-const DIFF_LABEL: Record<string, string> = { easy: "简单", medium: "中等", hard: "困难" };
 const GROUP_GAP_MS = 5 * 60 * 1000;
+
+interface ImageAttachment {
+  mimeType: string;
+  data: string;
+}
+
+function readImage(f: File): Promise<ImageAttachment> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve({ mimeType: f.type, data: String(r.result).replace(/^data:[^,]*,/, "") });
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(f);
+  });
+}
 
 export function ChatView(props: {
   room: Room;
   agents: Agent[];
   userName: string;
+  harnessName: (id: string) => string;
   subscribeEvents: (fn: (e: WsEvent) => void) => () => void;
   onBack: () => void;
   onRoomChange: () => Promise<void>;
@@ -51,55 +62,47 @@ export function ChatView(props: {
 }) {
   const { room, agents } = props;
   const [messages, setMessages] = useState<Message[]>([]);
-  const [routing, setRouting] = useState<Record<string, RoutingDecision>>({});
   const [state, setState] = useState<RoomState>({ activeRunId: null, queued: 0 });
+  const [sessions, setSessions] = useState<Record<string, SessionView>>({});
+  const [asks, setAsks] = useState<PermissionAsk[]>([]);
+  const [terminals, setTerminals] = useState<Record<string, TerminalSnapshot>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [images, setImages] = useState<ImageAttachment[]>([]);
   const [sendError, setSendError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const wide = useMediaQuery("(min-width: 1181px)");
   const [panel, setPanel] = useState(false);
   const panelPresence = usePresence(panel, 180);
   const listRef = useRef<HTMLDivElement>(null);
-  // For relayed replies: who handed the work over (from the giver's handoff tool call).
-  const handoffFrom = useMemo(() => {
-    const out = new Map<string, string>();
-    messages.forEach((m, i) => {
-      if (m.senderKind !== "agent" || m.hop < 2) return;
-      for (let j = i - 1; j >= 0; j--) {
-        const g = messages[j] as Message;
-        if (g.runId !== m.runId) break;
-        const hit = g.toolCalls.some(
-          (c) => c.name === "handoff" && (safeJson(c.arguments) as { agent?: string }).agent === m.senderName,
-        );
-        if (hit) {
-          out.set(m.id, g.senderName);
-          break;
-        }
-      }
-    });
-    return out;
-  }, [messages]);
   const members = useMemo(
     () => room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a),
     [room.agentIds, agents],
   );
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const mentionNames = useMemo(() => [...agents.map((a) => a.name), "所有人", "all", "everyone"], [agents]);
+  // The agent the composer talks to by default: the DM partner, or the group's main agent.
+  const primary = room.kind === "dm" ? members[0] : (members.find((a) => a.id === room.mainAgentId) ?? members[0]);
+  const primaryView = primary ? sessions[primary.id] : undefined;
 
   useEffect(() => {
     let alive = true;
+    setSessions({});
+    setAsks([]);
     const load = async () => {
       try {
-        const data = await api<{ messages: Message[]; routing: RoutingDecision[]; state: RoomState }>(
-          "GET",
-          `/api/rooms/${room.id}/messages?limit=200`,
-        );
+        const data = await api<{
+          messages: Message[];
+          state: RoomState;
+          sessions: Record<string, SessionView>;
+          asks: PermissionAsk[];
+        }>("GET", `/api/rooms/${room.id}/messages?limit=200`);
         if (!alive) return;
         // A snapshot can be older than live events that arrived while it was in flight: merge, never replace.
         setMessages((prev) => mergeMessages(data.messages, prev, room.id));
-        setRouting(Object.fromEntries(data.routing.map((r) => [r.messageId, r])));
         setState(data.state);
+        setSessions((s) => ({ ...data.sessions, ...s }));
+        setAsks(data.asks);
         setLoadError(null);
       } catch (e) {
         if (alive) setLoadError((e as Error).message);
@@ -112,12 +115,21 @@ export function ChatView(props: {
         void load();
       } else if (e.type === "message" && e.message.roomId === room.id) {
         setMessages((ms) => upsertMessage(ms, e.message));
-      } else if (e.type === "delta" && e.roomId === room.id) {
-        setMessages((ms) => ms.map((m) => (m.id === e.messageId ? { ...m, content: m.content + e.text } : m)));
-      } else if (e.type === "tools" && e.roomId === room.id) {
-        setMessages((ms) => ms.map((m) => (m.id === e.messageId ? { ...m, toolCalls: e.toolCalls } : m)));
-      } else if (e.type === "routing" && e.roomId === room.id) {
-        setRouting((r) => ({ ...r, [e.decision.messageId]: e.decision }));
+      } else if (e.type === "update" && e.roomId === room.id) {
+        setMessages((ms) =>
+          ms.map((m) => {
+            if (m.id !== e.messageId) return m;
+            const timeline = applyUpdate(m.timeline ?? emptyTimeline(), e.update);
+            return { ...m, timeline, content: timelineText(timeline) };
+          }),
+        );
+      } else if (e.type === "session" && e.roomId === room.id) {
+        setSessions((s) => ({ ...s, [e.agentId]: e.view }));
+      } else if (e.type === "permission" && e.roomId === room.id) {
+        const ask = e.ask;
+        setAsks((a) => (ask ? [...a.filter((x) => x.id !== ask.id), ask] : a.filter((x) => x.id !== e.resolvedId)));
+      } else if (e.type === "terminal" && e.roomId === room.id) {
+        setTerminals((t) => ({ ...t, [e.terminal.terminalId]: e.terminal }));
       } else if (e.type === "room.state" && e.roomId === room.id) {
         setState(e.state);
       }
@@ -127,6 +139,15 @@ export function ChatView(props: {
       off();
     };
   }, [room.id, props.subscribeEvents]);
+
+  // Warm up the primary agent's session so pickers and slash commands are there before the first message.
+  useEffect(() => {
+    if (!primary?.harness || sessions[primary.id]) return;
+    api<SessionView>("GET", `/api/rooms/${room.id}/agents/${primary.id}/session`).then(
+      (v) => setSessions((s) => ({ ...s, [primary.id]: v })),
+      () => {}, // errors (not installed / login needed) surface when a message is sent
+    );
+  }, [room.id, primary?.id, primary?.harness, sessions]);
 
   // Open at the latest message; afterwards stick to the bottom only when the reader is already there.
   const opened = useRef(false);
@@ -140,13 +161,16 @@ export function ChatView(props: {
 
   const send = async () => {
     const content = draft.trim();
-    if (!content) return;
+    if (!content && images.length === 0) return;
     setSendError(null);
     setDraft("");
+    const imgs = images;
+    setImages([]);
     try {
       const sent = await api<Message>("POST", `/api/rooms/${room.id}/messages`, {
         senderName: props.userName,
         content,
+        images: imgs,
       });
       // The server's reply is authoritative: show it now even if the socket is slow, reconnecting or raced.
       setMessages((ms) => upsertMessage(ms, sent));
@@ -156,6 +180,7 @@ export function ChatView(props: {
       });
     } catch (e) {
       setDraft(content);
+      setImages(imgs);
       setSendError(`发送失败：${(e as Error).message}`);
     }
   };
@@ -168,6 +193,21 @@ export function ChatView(props: {
     }
   };
 
+  const answer = useCallback(async (askId: string, optionId: string | null) => {
+    setAsks((a) => a.filter((x) => x.id !== askId));
+    await api("POST", `/api/permissions/${askId}`, { optionId }).catch(() => {});
+  }, []);
+
+  const sessionCall = async (path: string, body: unknown) => {
+    if (!primary) return;
+    try {
+      const v = await api<SessionView>("POST", `/api/rooms/${room.id}/agents/${primary.id}/${path}`, body);
+      setSessions((s) => ({ ...s, [primary.id]: v }));
+    } catch (e) {
+      setSendError((e as Error).message);
+    }
+  };
+
   const openDetails = (id: string) => {
     setSelected((cur) => (cur === id && panel ? null : id));
     setPanel(true);
@@ -177,6 +217,7 @@ export function ChatView(props: {
   const running = state.activeRunId !== null;
   const replying = messages.findLast((m) => m.status === "streaming");
   const selectedMsg = messages.find((m) => m.id === selected);
+  const ask = asks[0];
 
   return (
     <div className="chat-wrap">
@@ -226,6 +267,12 @@ export function ChatView(props: {
               <h2 style={{ fontSize: 17 }}>
                 {room.kind === "group" ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
               </h2>
+              {primary && !primary.harness && (
+                <p className="muted">
+                  {primary.name} 还没有绑定 Harness，<a href={`#/a/${primary.id}`}>去设置</a>或
+                  <a href="#/setup">打开新手引导</a>。
+                </p>
+              )}
               {room.kind === "group" && members.length > 0 && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
                   {members.map((a) => (
@@ -264,11 +311,10 @@ export function ChatView(props: {
                   <MessageItem
                     key={m.id}
                     m={m}
-                    routing={routing[m.id]}
+                    terminals={terminals}
                     mentionNames={mentionNames}
                     selected={selected === m.id && panel}
                     onDetails={() => openDetails(m.id)}
-                    handoffFrom={handoffFrom.get(m.id)}
                   />
                 ))}
               </div>
@@ -301,16 +347,37 @@ export function ChatView(props: {
               {sendError}
             </div>
           )}
+          {primaryView && (
+            <SessionBar
+              view={primaryView}
+              onConfig={(configId, value) => void sessionCall("config", { configId, value })}
+              onMode={(modeId) => void sessionCall("mode", { modeId })}
+            />
+          )}
           <Composer
             value={draft}
             onChange={setDraft}
             onSubmit={() => void send()}
             members={room.kind === "group" ? members : []}
             interrupts={room.kind === "group" && running}
-            placeholder="发消息…"
+            placeholder={primaryView?.commands.length ? "发消息，/ 查看命令…" : "发消息…"}
+            commands={primaryView?.commands ?? []}
+            images={images}
+            onImages={setImages}
+            imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
           />
         </footer>
       </div>
+
+      {ask && (
+        <PermissionDialog
+          key={ask.id}
+          ask={ask}
+          agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
+          terminals={terminals}
+          onAnswer={(optionId) => void answer(ask.id, optionId)}
+        />
+      )}
 
       {panelPresence.mounted && (
         <>
@@ -346,14 +413,19 @@ export function ChatView(props: {
             </div>
             <div className="details-body">
               {selectedMsg ? (
-                <MessageDetails m={selectedMsg} d={routing[selectedMsg.id]} />
+                <MessageDetails
+                  m={selectedMsg}
+                  agent={agentById.get(selectedMsg.senderId ?? "")}
+                  harnessName={props.harnessName}
+                />
               ) : (
                 <RoomInfo
                   room={room}
                   agents={agents}
                   members={members}
                   messages={messages}
-                  routing={routing}
+                  sessions={sessions}
+                  harnessName={props.harnessName}
                   onRoomChange={props.onRoomChange}
                   onDeleted={props.onDeleted}
                 />
@@ -391,64 +463,38 @@ function groupMessages(messages: Message[]): Group[] {
 
 function MessageItem(props: {
   m: Message;
-  routing?: RoutingDecision;
+  terminals: Record<string, TerminalSnapshot>;
   mentionNames: string[];
   selected: boolean;
   onDetails: () => void;
-  handoffFrom?: string;
 }) {
-  const { m, routing: d } = props;
+  const { m } = props;
   const streaming = m.status === "streaming";
-  const fellBack = d?.attempts.some((a) => !a.ok);
-  const handoffs = m.toolCalls.filter((c) => c.name === "handoff");
-  const tools = m.toolCalls.filter((c) => c.name !== "handoff");
+  const t = m.timeline;
+  const empty = !t || t.parts.length === 0;
   return (
     <div className="msg" data-status={m.status} data-fresh={Date.now() - m.createdAt < 4000 ? "" : undefined}>
-      {tools.length > 0 && (
-        <div className="tool-list">
-          {tools.map((c) => (
-            <details key={c.id} className="tool">
-              <summary>
-                <ChevronRight size={14} className="chev" />
-                <Wrench size={13} />
-                <span className="tool-name">{c.name}</span>
-                <span className="tool-args">{c.arguments}</span>
-                <ToolStatus status={c.status} />
-              </summary>
-              <div className="tool-body">
-                <span className="k">参数</span>
-                <pre>{prettyJson(c.arguments)}</pre>
-                {c.result !== undefined && (
-                  <>
-                    <span className="k">结果</span>
-                    <pre>{c.result}</pre>
-                  </>
-                )}
-                {c.error && (
-                  <>
-                    <span className="k">错误（已原样返回给模型）</span>
-                    <pre className="error-text">{c.error}</pre>
-                  </>
-                )}
-              </div>
-            </details>
-          ))}
-        </div>
+      {m.senderKind === "human" ? (
+        <>
+          {m.content && <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />}
+          {t && <TimelineView t={t} streaming={false} terminals={props.terminals} mentionNames={props.mentionNames} />}
+        </>
+      ) : t ? (
+        <TimelineView t={t} streaming={streaming} terminals={props.terminals} mentionNames={props.mentionNames} />
+      ) : (
+        m.content && <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />
       )}
-      {m.content ? (
-        <div className={streaming ? "caret-wrap" : undefined}>
-          <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />
-        </div>
-      ) : streaming ? (
+      {m.senderKind === "agent" && empty && !m.content && streaming && (
         <span className="typing">
           <i />
           <i />
           <i />
-          {m.toolCalls.some((c) => c.status === "running") ? "正在调用工具" : "正在思考"}
+          正在思考
         </span>
-      ) : m.status === "done" ? (
+      )}
+      {m.senderKind === "agent" && empty && !m.content && m.status === "done" && (
         <span className="muted">（空回复）</span>
-      ) : null}
+      )}
       {m.status === "error" && (
         <div className="msg-error" role="alert">
           <AlertTriangle size={14} />
@@ -461,19 +507,7 @@ function MessageItem(props: {
           <span>{m.error ?? "回复被中断"}</span>
         </div>
       )}
-      {handoffs.map((c) => {
-        const args = safeJson(c.arguments) as { agent?: string; task?: string };
-        return (
-          <div key={c.id} className="handoff" data-status={c.status}>
-            <div className="handoff-label">
-              <ArrowRightLeft size={12} />
-              {c.status === "error" ? "交接失败" : "交接给"} <b>{args.agent ?? "?"}</b>
-            </div>
-            <div className="handoff-task">{c.status === "error" ? c.error : args.task}</div>
-          </div>
-        );
-      })}
-      {m.senderKind === "agent" && (m.status === "cancelled" || d) && (
+      {m.senderKind === "agent" && !streaming && (
         <div className="msg-meta">
           {m.status === "cancelled" && (
             <span className="state-tag">
@@ -481,213 +515,144 @@ function MessageItem(props: {
               {m.error === "被新消息打断" ? "被新消息打断" : "已停止"}
             </span>
           )}
-          {d && (
-            <button
-              type="button"
-              className="trace"
-              aria-pressed={props.selected}
-              onClick={props.onDetails}
-              data-shot="expand"
-              title="查看详情"
-            >
-              {m.hop >= 2 && <span>由 {props.handoffFrom ?? "其他 Agent"} 转交</span>}
-              <span className="model">{d.chosenModel ?? (d.attempts.length ? "模型全部失败" : "选择模型中…")}</span>
-              {fellBack && <span className="warn">已切换模型</span>}
-              <ChevronRight size={11} className="chev" />
-            </button>
-          )}
+          <button
+            type="button"
+            className="trace"
+            aria-pressed={props.selected}
+            onClick={props.onDetails}
+            data-shot="expand"
+            title="查看详情"
+          >
+            {t && Object.keys(t.tools).length > 0 && <span>{Object.keys(t.tools).length} 次工具调用</span>}
+            <span>详情</span>
+            <ChevronRight size={11} className="chev" />
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-function ToolStatus({ status }: { status: "running" | "ok" | "error" }) {
-  if (status === "running")
-    return (
-      <span className="tool-status running">
-        <Loader2 size={12} className="spin" />
-        执行中
-      </span>
-    );
-  if (status === "ok")
-    return (
-      <span className="tool-status ok">
-        <Check size={12} />
-        成功
-      </span>
-    );
+const STOP_LABEL: Record<string, string> = {
+  end_turn: "正常结束",
+  cancelled: "已取消",
+  refusal: "拒绝",
+  max_tokens: "达到 token 上限",
+  max_turn_requests: "达到轮次上限",
+};
+
+function MessageDetails(props: { m: Message; agent?: Agent; harnessName: (id: string) => string }) {
+  const { m, agent } = props;
+  const tools = Object.values(m.timeline?.tools ?? {});
   return (
-    <span className="tool-status error">
-      <X size={12} />
-      失败
-    </span>
+    <section className="d-section">
+      <dl className="kv">
+        <dt>Agent</dt>
+        <dd>{m.senderName}</dd>
+        <dt>Harness</dt>
+        <dd>{agent?.harness ? props.harnessName(agent.harness) : "—"}</dd>
+        <dt>状态</dt>
+        <dd>
+          {m.timeline?.stopReason ? (STOP_LABEL[m.timeline.stopReason] ?? m.timeline.stopReason) : m.status}
+          {m.error && <div className="error-text">{m.error}</div>}
+        </dd>
+        <dt>工具</dt>
+        <dd>{tools.length === 0 ? "无" : tools.map((t) => t.title).join("、")}</dd>
+        <dt>时间</dt>
+        <dd>{new Date(m.createdAt).toLocaleString()}</dd>
+      </dl>
+    </section>
   );
 }
 
-function prettyJson(s: string): string {
-  try {
-    return JSON.stringify(JSON.parse(s), null, 2);
-  } catch {
-    return s || "{}";
-  }
-}
-
-function MessageDetails({ m, d }: { m: Message; d?: RoutingDecision }) {
-  const c = d?.plan.classification;
+/** Harness session controls for one agent: current session, new session, sessions the harness remembers. */
+function SessionSection(props: { room: Room; agent: Agent; view?: SessionView; solo: boolean }) {
+  const { room, agent, view } = props;
+  const [list, setList] = useState<{ sessionId: string; title?: string | null; updatedAt?: string | null }[] | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const base = `/api/rooms/${room.id}/agents/${agent.id}`;
+  const run = async (fn: () => Promise<unknown>) => {
+    try {
+      setError(null);
+      await fn();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   return (
-    <>
-      <section className="d-section">
-        <h4>模型路由</h4>
-        {!d ? (
-          <p className="muted">这条消息没有路由记录。</p>
-        ) : (
-          <dl className="kv">
-            {d.plan.selection && (
-              <>
-                <dt>回复人</dt>
-                <dd>
-                  {d.plan.selection.agentName}
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    {SELECT_LABEL[d.plan.selection.by]}
-                    {d.plan.selection.confidence !== undefined && ` · 置信度 ${d.plan.selection.confidence.toFixed(2)}`}
-                    {" · "}
-                    {d.plan.selection.reason}
-                  </div>
-                  {d.plan.selection.fallbackReason && (
-                    <div className="warn-text">{d.plan.selection.fallbackReason}</div>
-                  )}
-                </dd>
-              </>
-            )}
-            <dt>策略</dt>
-            <dd>{d.plan.mode === "pinned" ? "固定模型（不回退）" : "Auto 路由"}</dd>
-            {c && (
-              <>
-                <dt>任务</dt>
-                <dd>
-                  {TYPE_LABEL[c.taskType]} · {DIFF_LABEL[c.difficulty]}
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    {c.source === "systemone"
-                      ? `由决策模型 ${c.decision?.model ?? ""} 分类`
-                      : c.source === "llm"
-                        ? `由 ${c.classifierModel} 分类`
-                        : "规则分类"}
-                  </div>
-                  {c.decision && !c.decision.error && (
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {c.decision.taskType && (
-                        <>
-                          类型 {c.decision.taskType.choice} 置信度 {c.decision.taskType.confidence.toFixed(2)}
-                          {c.decision.taskType.used ? "" : "（未采用）"}
-                        </>
-                      )}
-                      {c.decision.difficulty && (
-                        <>
-                          {" · "}难度 {c.decision.difficulty.score.toFixed(2)} 置信度{" "}
-                          {c.decision.difficulty.confidence.toFixed(2)}
-                          {c.decision.difficulty.used ? "" : "（未采用）"}
-                        </>
-                      )}
-                      {c.decision.needsTools !== undefined && <> · 需工具 {c.decision.needsTools.toFixed(2)}</>}
-                      {c.decision.latencyMs !== undefined && <> · {Math.round(c.decision.latencyMs)}ms</>}
-                    </div>
-                  )}
-                  {c.fallbackReason && <div className="warn-text">{c.fallbackReason}</div>}
-                  {c.note && (
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {c.note}
-                    </div>
-                  )}
-                  {c.classifierError && <div className="error-text">分类模型失败，已改用规则：{c.classifierError}</div>}
-                </dd>
-              </>
-            )}
-            <dt>最终模型</dt>
-            <dd>
-              {d.chosenModel ? (
-                <span className="badge ok">{d.chosenModel}</span>
-              ) : (
-                <span className="badge danger">{d.attempts.length ? "全部失败" : "进行中"}</span>
-              )}
-            </dd>
-            <dt>候选顺序</dt>
-            <dd className="cand">
-              {d.plan.candidates.length === 0
-                ? "无"
-                : d.plan.candidates.map((id, i) => (
-                    <Fragment key={id}>
-                      {i > 0 && <ChevronRight size={12} className="muted" />}
-                      <code style={{ fontSize: 12 }}>{id}</code>
-                    </Fragment>
-                  ))}
-            </dd>
-            <dt>理由</dt>
-            <dd>{d.plan.reason}</dd>
-            <dt>输入</dt>
-            <dd>
-              约 {d.plan.signals.contextTokens} token 上下文 · {d.plan.signals.toolCount} 个工具
-            </dd>
-            <dt>尝试</dt>
-            <dd>
-              {d.attempts.length === 0 ? (
-                <span className="muted">进行中</span>
-              ) : (
-                <ul className="attempts">
-                  {d.attempts.map((a, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: attempts are append-only
-                    <li key={i}>
-                      {a.ok ? <Check size={13} color="var(--ok)" /> : <X size={13} color="var(--danger)" />}
-                      <span>
-                        <code style={{ fontSize: 12 }}>{a.modelId}</code>
-                        {a.error && <div className="error-text">{a.error}</div>}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </dd>
-          </dl>
-        )}
-      </section>
-      <section className="d-section">
-        <h4>工具调用（{m.toolCalls.length}）</h4>
-        {m.toolCalls.length === 0 ? (
-          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            没有调用工具。
-          </p>
-        ) : (
-          <div className="tool-list">
-            {m.toolCalls.map((t) => (
-              <details key={t.id} className="tool" open={t.status === "error"}>
-                <summary>
-                  <ChevronRight size={14} className="chev" />
-                  <span className="tool-name">{t.name}</span>
-                  <span className="tool-args" />
-                  <ToolStatus status={t.status} />
-                </summary>
-                <div className="tool-body">
-                  <span className="k">参数</span>
-                  <pre>{prettyJson(t.arguments)}</pre>
-                  {t.result !== undefined && (
-                    <>
-                      <span className="k">结果</span>
-                      <pre>{t.result}</pre>
-                    </>
-                  )}
-                  {t.error && (
-                    <>
-                      <span className="k">错误</span>
-                      <pre className="error-text">{t.error}</pre>
-                    </>
-                  )}
-                </div>
-              </details>
-            ))}
-          </div>
-        )}
-      </section>
-    </>
+    <section className="d-section">
+      <h4 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        {props.solo ? "Harness 会话" : `${agent.name} 的会话`}
+        <span style={{ display: "flex", gap: 4 }}>
+          {view?.capabilities.list && (
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() => void run(async () => setList(await api("GET", `${base}/history`)))}
+            >
+              <History size={13} />
+              历史
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn ghost sm"
+            title="开始新的 Harness 会话（聊天记录保留）"
+            onClick={() => void run(() => api("POST", `${base}/session`, { sessionId: null }))}
+          >
+            <Plus size={13} />
+            新会话
+          </button>
+        </span>
+      </h4>
+      {view ? (
+        <dl className="kv">
+          <dt>会话</dt>
+          <dd>
+            <code style={{ fontSize: 11 }}>{view.sessionId}</code>
+            {view.title && <div className="muted">{view.title}</div>}
+          </dd>
+          {view.usage && (
+            <>
+              <dt>上下文</dt>
+              <dd>
+                {view.usage.used.toLocaleString()} / {view.usage.size.toLocaleString()}
+                {view.usage.cost && ` · ${view.usage.cost.amount.toFixed(4)} ${view.usage.cost.currency}`}
+              </dd>
+            </>
+          )}
+        </dl>
+      ) : (
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          发第一条消息时启动。
+        </p>
+      )}
+      {list && (
+        <div className="session-list">
+          {list.length === 0 && <p className="muted">没有可恢复的会话。</p>}
+          {list.map((s) => (
+            <button
+              key={s.sessionId}
+              type="button"
+              className="pop-item"
+              aria-current={s.sessionId === view?.sessionId}
+              onClick={() =>
+                void run(async () => {
+                  await api("POST", `${base}/session`, { sessionId: s.sessionId });
+                  setList(null);
+                })
+              }
+            >
+              <span>{s.title || s.sessionId}</span>
+              {s.updatedAt && <span className="pop-hint muted">{new Date(s.updatedAt).toLocaleDateString()}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <div className="error-text">{error}</div>}
+    </section>
   );
 }
 
@@ -696,28 +661,28 @@ function RoomInfo(props: {
   agents: Agent[];
   members: Agent[];
   messages: Message[];
-  routing: Record<string, RoutingDecision>;
+  sessions: Record<string, SessionView>;
+  harnessName: (id: string) => string;
   onRoomChange: () => Promise<void>;
   onDeleted: () => void;
 }) {
   const { room } = props;
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cwd, setCwd] = useState(room.cwd);
+  useEffect(() => setCwd(room.cwd), [room.cwd]);
   const replyCount = new Map<string, number>();
-  const stats = { replies: 0, handoffs: 0, fallbacks: 0, failed: 0, models: [] as [string, number][] };
-  const byModel = new Map<string, number>();
-  for (const m of props.messages) {
-    if (m.senderKind !== "agent") continue;
-    stats.replies++;
-    if (m.senderId) replyCount.set(m.senderId, (replyCount.get(m.senderId) ?? 0) + 1);
-    if (m.status === "error") stats.failed++;
-    stats.handoffs += m.toolCalls.filter((c) => c.name === "handoff" && c.status === "ok").length;
-    const d = props.routing[m.id];
-    if (!d) continue;
-    if (d.attempts.some((a) => !a.ok)) stats.fallbacks++;
-    if (d.chosenModel) byModel.set(d.chosenModel, (byModel.get(d.chosenModel) ?? 0) + 1);
-  }
-  stats.models = [...byModel].sort((a, b) => b[1] - a[1]);
+  for (const m of props.messages)
+    if (m.senderKind === "agent" && m.senderId) replyCount.set(m.senderId, (replyCount.get(m.senderId) ?? 0) + 1);
+  const patch = async (body: { mainAgentId?: string; cwd?: string }) => {
+    try {
+      await api("PATCH", `/api/rooms/${room.id}`, body);
+      await props.onRoomChange();
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   const toggle = async (id: string) => {
     const next = room.agentIds.includes(id) ? room.agentIds.filter((x) => x !== id) : [...room.agentIds, id];
     try {
@@ -768,9 +733,8 @@ function RoomInfo(props: {
                   <span className="member-body">
                     <span className="member-name">{a.name}</span>
                     <span className="member-sub">
-                      {a.modelMode === "auto" ? "Auto 路由" : `固定 ${a.pinnedModel}`}
-                      {a.tools.length > 0 && ` · ${a.tools.length} 工具`}
-                      {a.skills.length > 0 && ` · ${a.skills.length} Skills`}
+                      {a.harness ? props.harnessName(a.harness) : "未绑定 Harness"}
+                      {room.mainAgentId === a.id && " · 主 Agent"}
                     </span>
                   </span>
                   {n > 0 && (
@@ -785,27 +749,41 @@ function RoomInfo(props: {
         )}
         {error && <div className="error-text">{error}</div>}
       </section>
-      {stats.replies > 0 && (
+      {room.kind === "group" && (
         <section className="d-section">
-          <h4>模型</h4>
-          <div className="usage">
-            {stats.models.map(([id, n]) => (
-              <div key={id} className="usage-row">
-                <code>{id}</code>
-                <span className="usage-bar">
-                  <i style={{ width: `${(n / stats.replies) * 100}%` }} />
-                </span>
-                <span className="usage-n">{n}</span>
-              </div>
-            ))}
-          </div>
-          <p className="d-note">
-            {stats.replies} 条回复
-            {stats.handoffs > 0 && ` · ${stats.handoffs} 次交接`}
-            {stats.fallbacks > 0 && ` · ${stats.fallbacks} 次切换模型`}
-            {stats.failed > 0 && ` · ${stats.failed} 条失败`}
-          </p>
+          <h4>群设置</h4>
+          <label className="field">
+            <span className="label">主 Agent（没有 @ 时由它回复）</span>
+            <select
+              className="select"
+              aria-label="主 Agent"
+              value={room.mainAgentId ?? ""}
+              onChange={(e) => void patch({ mainAgentId: e.target.value })}
+            >
+              {props.members.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span className="label">共享工作目录</span>
+            <input
+              className="input mono"
+              value={cwd}
+              placeholder="~（主目录）"
+              onChange={(e) => setCwd(e.target.value)}
+              onBlur={() => cwd !== room.cwd && void patch({ cwd })}
+              spellCheck={false}
+            />
+          </label>
         </section>
+      )}
+      {props.members.map((a) =>
+        a.harness ? (
+          <SessionSection key={a.id} room={room} agent={a} view={props.sessions[a.id]} solo={room.kind === "dm"} />
+        ) : null,
       )}
       <section className="d-section" style={{ marginTop: "auto" }}>
         <button
@@ -834,7 +812,18 @@ function Composer(props: {
   /** Group chain running: sending will interrupt it. */
   interrupts: boolean;
   placeholder: string;
+  commands: { name: string; description: string }[];
+  images: ImageAttachment[];
+  onImages: (imgs: ImageAttachment[]) => void;
+  /** null = the harness does not take images (button hidden). */
+  imageNote: string | null;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const addFiles = async (files: Iterable<File>) => {
+    const next = [...props.images];
+    for (const f of files) if (f.type.startsWith("image/")) next.push(await readImage(f));
+    props.onImages(next.slice(0, 8));
+  };
   const ref = useRef<HTMLTextAreaElement>(null);
   const [caret, setCaret] = useState(0);
   const [active, setActive] = useState(0);
@@ -848,6 +837,21 @@ function Composer(props: {
     query && !dismissed
       ? [...(everyone ? [EVERYONE] : []), ...props.members.filter((a) => a.name.toLowerCase().includes(q))]
       : [];
+  // Slash commands come from the harness (available_commands_update); typed at the very start.
+  const slash = /^\/(\S*)$/.exec(props.value.slice(0, caret));
+  const commands =
+    slash && !dismissed && options.length === 0
+      ? props.commands.filter((c) => c.name.toLowerCase().startsWith((slash[1] ?? "").toLowerCase())).slice(0, 12)
+      : [];
+  const pickCommand = (name: string) => {
+    const v = `/${name} `;
+    props.onChange(v + props.value.slice(caret));
+    setCaret(v.length);
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(v.length, v.length);
+    });
+  };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resize on value change
   useEffect(() => {
@@ -868,7 +872,54 @@ function Composer(props: {
   };
 
   return (
-    <div className="composer-box">
+    // biome-ignore lint/a11y/noStaticElementInteractions: dropping images is a shortcut; the image button is the accessible path
+    <div
+      className="composer-box"
+      onDragOver={(e) => props.imageNote !== null && e.preventDefault()}
+      onDrop={(e) => {
+        if (props.imageNote === null) return;
+        e.preventDefault();
+        void addFiles(e.dataTransfer.files);
+      }}
+    >
+      {commands.length > 0 && (
+        <div className="popover mention-pop slash-pop" role="listbox" aria-label="斜杠命令">
+          <div className="pop-title">命令</div>
+          {commands.map((c, i) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={i === active % commands.length}
+              key={c.name}
+              className="pop-item"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pickCommand(c.name);
+              }}
+            >
+              <code className="slash-name">/{c.name}</code>
+              <span className="muted">{c.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {props.images.length > 0 && (
+        <div className="attach-row">
+          {props.images.map((img, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: attachments are a short local list
+            <span key={i} className="attach">
+              <img src={`data:${img.mimeType};base64,${img.data}`} alt={`附件 ${i + 1}`} />
+              <button
+                type="button"
+                aria-label="移除图片"
+                onClick={() => props.onImages(props.images.filter((_, j) => j !== i))}
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       {options.length > 0 && (
         <div className="popover mention-pop" role="listbox" aria-label="选择要 @ 的 Agent">
           <div className="pop-title">提及 Agent</div>
@@ -909,8 +960,29 @@ function Composer(props: {
           setDismissed(false);
         }}
         onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+        onPaste={(e) => {
+          const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
+          if (files.length > 0 && props.imageNote !== null) {
+            e.preventDefault();
+            void addFiles(files);
+          }
+        }}
         onKeyDown={(e) => {
-          if (options.length > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+          if (commands.length > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+            e.preventDefault();
+            setActive((i) => (i + (e.key === "ArrowDown" ? 1 : commands.length - 1)) % commands.length);
+          } else if (commands.length > 0 && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
+            const c = commands[active % commands.length] as { name: string };
+            if (props.value.trim() !== `/${c.name}`) {
+              e.preventDefault();
+              pickCommand(c.name);
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              props.onSubmit();
+            }
+          } else if (commands.length > 0 && e.key === "Escape") {
+            setDismissed(true);
+          } else if (options.length > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
             e.preventDefault();
             setActive((i) => (i + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length);
           } else if (options.length > 0 && (e.key === "Enter" || e.key === "Tab")) {
@@ -925,6 +997,30 @@ function Composer(props: {
         }}
       />
       <div className="composer-foot">
+        {props.imageNote !== null && (
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              multiple
+              hidden
+              onChange={(e) => {
+                void addFiles(e.target.files ?? []);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="btn ghost icon sm"
+              aria-label="添加图片"
+              title={props.imageNote || "添加图片"}
+              onClick={() => fileRef.current?.click()}
+            >
+              <ImagePlus size={16} />
+            </button>
+          </>
+        )}
         {props.members.length > 0 && props.value.trim() ? (
           <Recipients text={props.value} members={props.members} interrupts={props.interrupts} />
         ) : (
@@ -934,7 +1030,7 @@ function Composer(props: {
           type="button"
           className="send-btn"
           onClick={props.onSubmit}
-          disabled={!props.value.trim()}
+          disabled={!props.value.trim() && props.images.length === 0}
           aria-label="发送"
         >
           <ArrowUp size={17} />
@@ -942,14 +1038,6 @@ function Composer(props: {
       </div>
     </div>
   );
-}
-
-function safeJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return {};
-  }
 }
 
 const EVERYONE_RE = /(^|[^\w.])@(所有人|all|everyone)(?![\w\u4e00-\u9fff])/i;
