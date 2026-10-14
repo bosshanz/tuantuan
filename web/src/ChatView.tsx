@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowRightLeft,
   ArrowUp,
   ChevronLeft,
   ChevronRight,
@@ -15,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyUpdate, emptyTimeline, timelineText } from "../../shared/timeline";
+import { applyUpdate, emptyTimeline, type ReplayTurn, type Timeline, timelineText } from "../../shared/timeline";
 import {
   type Agent,
   api,
@@ -67,6 +68,7 @@ export function ChatView(props: {
   const [asks, setAsks] = useState<PermissionAsk[]>([]);
   const [terminals, setTerminals] = useState<Record<string, TerminalSnapshot>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [replay, setReplay] = useState<ReplayTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -148,6 +150,15 @@ export function ChatView(props: {
       () => {}, // errors (not installed / login needed) surface when a message is sent
     );
   }, [room.id, primary?.id, primary?.harness, sessions]);
+
+  // After switching to an older harness session, show what it replayed that this room doesn't have.
+  const primarySession = primaryView?.sessionId ?? null;
+  const primaryId = primary?.id;
+  useEffect(() => {
+    setReplay([]);
+    if (!primaryId || !primarySession) return;
+    api<ReplayTurn[]>("GET", `/api/rooms/${room.id}/agents/${primaryId}/replay`).then(setReplay, () => {});
+  }, [room.id, primaryId, primarySession]);
 
   // Open at the latest message; afterwards stick to the bottom only when the reader is already there.
   const opened = useRef(false);
@@ -261,7 +272,7 @@ export function ChatView(props: {
         )}
 
         <div className="messages" ref={listRef}>
-          {messages.length === 0 && !loadError && (
+          {messages.length === 0 && replay.length === 0 && !loadError && (
             <div className="empty">
               <RoomIcon room={room} agents={agents} />
               <h2 style={{ fontSize: 17 }}>
@@ -289,6 +300,9 @@ export function ChatView(props: {
                 </div>
               )}
             </div>
+          )}
+          {replay.length > 0 && primary && (
+            <ReplayHistory turns={replay} agentName={primary.name} terminals={terminals} />
           )}
           {groups.map((g) =>
             g.kind === "system" ? (
@@ -470,10 +484,18 @@ function MessageItem(props: {
 }) {
   const { m } = props;
   const streaming = m.status === "streaming";
-  const t = m.timeline;
+  const t = withoutHandoffTools(m.timeline);
   const empty = !t || t.parts.length === 0;
   return (
     <div className="msg" data-status={m.status} data-fresh={Date.now() - m.createdAt < 4000 ? "" : undefined}>
+      {t?.handoffFrom && (
+        <div className="handoff-from">
+          <ArrowRightLeft size={12} />
+          <span>
+            接 <b>@{t.handoffFrom.agentName}</b> 的交接：{t.handoffFrom.task}
+          </span>
+        </div>
+      )}
       {m.senderKind === "human" ? (
         <>
           {m.content && <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />}
@@ -484,6 +506,15 @@ function MessageItem(props: {
       ) : (
         m.content && <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />
       )}
+      {t?.handoffs?.map((h) => (
+        <div key={h.agentId} className="handoff-card" role="note">
+          <div className="handoff-title">
+            <ArrowRightLeft size={13} />
+            交接给 <b>@{h.agentName}</b>
+          </div>
+          <p>{h.task}</p>
+        </div>
+      ))}
       {m.senderKind === "agent" && empty && !m.content && streaming && (
         <span className="typing">
           <i />
@@ -530,6 +561,44 @@ function MessageItem(props: {
         </div>
       )}
     </div>
+  );
+}
+
+/** The handoff tool call is shown as a hand-off card instead of a generic tool card. */
+function withoutHandoffTools(t: Timeline | null): Timeline | null {
+  if (!t?.handoffs?.length) return t;
+  const hide = new Set(
+    Object.values(t.tools)
+      .filter((x) => /handoff/i.test(x.title))
+      .map((x) => x.toolCallId),
+  );
+  if (hide.size === 0) return t;
+  return { ...t, parts: t.parts.filter((p) => !(p.kind === "tool" && hide.has(p.toolCallId))) };
+}
+
+/** History a harness replayed on session/load that this room never showed (read-only). */
+function ReplayHistory(props: { turns: ReplayTurn[]; agentName: string; terminals: Record<string, TerminalSnapshot> }) {
+  return (
+    <details className="replay" open>
+      <summary>
+        <History size={13} /> 载入的 Harness 历史 · {props.turns.length} 轮
+      </summary>
+      {props.turns.map((turn, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: replayed turns have no ids and never reorder
+        <div key={i} className="replay-turn">
+          {turn.user && (
+            <div className="replay-user">
+              <span className="name">我</span>
+              <MessageMarkdown text={turn.user} mentionNames={[]} />
+            </div>
+          )}
+          <div className="replay-agent">
+            <span className="name">{props.agentName}</span>
+            <TimelineView t={turn.reply} streaming={false} terminals={props.terminals} mentionNames={[]} />
+          </div>
+        </div>
+      ))}
+    </details>
   );
 }
 

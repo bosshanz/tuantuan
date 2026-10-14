@@ -945,3 +945,72 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 @media (max-width: 720px) { .harness-row { flex-direction: column; } .harness-side { width: auto; align-items: flex-start; } .harness-test { text-align: left; } }
 @media (prefers-reduced-motion: reduce) { .thought .chev { transition: none; } }
 .plan ul { list-style: none; margin: 0; padding: 0; }
+
+/* ---- M2: hand-off cards, replayed harness history ---- */
+.handoff-from {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.handoff-card {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--surface-2);
+  max-width: 560px;
+}
+.handoff-card .handoff-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.handoff-card p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.replay {
+  margin: 4px 0 16px;
+  padding: 8px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  opacity: 0.85;
+}
+.replay summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.replay-turn {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.replay-turn:last-child {
+  border-bottom: 0;
+}
+.replay-user,
+.replay-agent {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
+  font-size: 13px;
+}
+.replay .name {
+  font-weight: 600;
+  color: var(--text-3);
+}
+.auth-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}

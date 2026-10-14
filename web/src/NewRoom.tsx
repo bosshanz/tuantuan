@@ -16,6 +16,10 @@ export function NewRoom({
   const [kind, setKind] = useState<"group" | "dm">("group");
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [main, setMain] = useState<string>("");
+  const [cwd, setCwd] = useState("");
+  // The main agent must be a member: default to the first one picked.
+  const mainId = selected.includes(main) ? main : (selected[0] ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const dmAgent = agents.find((a) => a.id === selected[0]);
@@ -26,7 +30,15 @@ export function NewRoom({
     setError(null);
     try {
       const roomName = name.trim() || (kind === "dm" && dmAgent ? `与 ${dmAgent.name} 私聊` : "");
-      onCreated(await api<Room>("POST", "/api/rooms", { name: roomName, kind, agentIds: selected }));
+      onCreated(
+        await api<Room>(
+          "POST",
+          "/api/rooms",
+          kind === "group"
+            ? { name: roomName, kind, agentIds: selected, mainAgentId: mainId || null, cwd: cwd.trim() }
+            : { name: roomName, kind, agentIds: selected },
+        ),
+      );
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -108,6 +120,43 @@ export function NewRoom({
               }
             />
           </div>
+          {kind === "group" && (
+            <>
+              <label className="field">
+                <span className="label">
+                  主 Agent <span className="muted">（没人被 @ 时由它回复）</span>
+                </span>
+                <select
+                  className="select"
+                  aria-label="主 Agent"
+                  value={mainId}
+                  disabled={selected.length === 0}
+                  onChange={(e) => setMain(e.target.value)}
+                >
+                  {selected.length === 0 && <option value="">先选择成员</option>}
+                  {selected.map((id) => (
+                    <option key={id} value={id}>
+                      {agents.find((a) => a.id === id)?.name ?? id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="label">
+                  共享工作目录 <span className="muted">（群里所有 Agent 在这里读写；留空则用各自的目录）</span>
+                </span>
+                <input
+                  className="input"
+                  aria-label="共享工作目录"
+                  value={cwd}
+                  onChange={(e) => setCwd(e.target.value)}
+                  maxLength={1024}
+                  placeholder="例如：~/code/my-project"
+                  spellCheck={false}
+                />
+              </label>
+            </>
+          )}
           {error && (
             <div className="form-error" role="alert">
               {error}

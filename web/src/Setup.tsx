@@ -8,7 +8,17 @@ interface TestResult {
   error?: string;
   protocolVersion?: number;
   agentInfo?: { name: string; title?: string | null; version: string } | null;
-  authMethods?: { id: string; name: string; description: string | null }[];
+  authMethods?: {
+    id: string;
+    name: string;
+    description: string | null;
+    type: "agent" | "terminal";
+    command: string | null;
+  }[];
+  /** null: couldn't tell (session/new failed for another reason, see sessionError). */
+  loggedIn?: boolean | null;
+  sessionError?: string | null;
+  authError?: string | null;
 }
 
 /**
@@ -34,12 +44,18 @@ export function SetupPage(props: {
   }, []);
   useEffect(() => void refresh(), [refresh]);
 
-  const test = async (id: string) => {
+  const [authing, setAuthing] = useState<string | null>(null);
+  const test = async (id: string, methodId?: string) => {
     setTests((t) => ({ ...t, [id]: "running" }));
-    const r = await api<TestResult>("POST", `/api/harnesses/${id}/test`).catch((e) => ({
+    if (methodId) setAuthing(id);
+    const r = await (methodId
+      ? api<TestResult>("POST", `/api/harnesses/${id}/authenticate`, { methodId })
+      : api<TestResult>("POST", `/api/harnesses/${id}/test`)
+    ).catch((e) => ({
       ok: false,
       error: (e as Error).message,
     }));
+    setAuthing(null);
     setTests((t) => ({ ...t, [id]: r }));
   };
 
@@ -85,7 +101,7 @@ export function SetupPage(props: {
           <section className="card">
             <div className="card-head">
               <h3>1 · 安装与登录</h3>
-              <p>在终端里执行安装和登录命令；团团只检测，不替你运行。</p>
+              <p>安装命令在终端里执行；登录优先用 Harness 自带的登录流程，不支持时复制登录命令到终端。</p>
             </div>
             <div className="card-body harness-list">
               {!list && <Loader2 size={16} className="spin" />}
@@ -117,6 +133,12 @@ export function SetupPage(props: {
                       <div className="harness-sub muted">{h.path ?? h.error}</div>
                       {!h.path && <CopyLine label="安装" text={h.install} />}
                       <div className="harness-sub">登录：{h.auth}</div>
+                      {h.path && h.login && <CopyLine label="登录" text={h.login} />}
+                      {t &&
+                        t !== "running" &&
+                        t.authMethods
+                          ?.filter((m) => m.type === "terminal" && m.command)
+                          .map((m) => <CopyLine key={m.id} label={m.name} text={m.command as string} />)}
                       <PathOverride h={h} onSaved={setList} />
                     </div>
                     <div className="harness-side">
@@ -127,18 +149,42 @@ export function SetupPage(props: {
                         onClick={() => void test(h.id)}
                       >
                         {t === "running" ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
-                        握手测试
+                        {t && t !== "running" ? "重新检测" : "握手测试"}
                       </button>
+                      {authing === h.id && (
+                        <div className="muted harness-test" role="status">
+                          等待登录完成…（可能会打开浏览器）
+                        </div>
+                      )}
                       {t && t !== "running" && (
                         <div className={t.ok ? "ok-text harness-test" : "error-text harness-test"} role="status">
                           {t.ok
-                            ? `ACP v${t.protocolVersion} · ${t.agentInfo?.title ?? t.agentInfo?.name ?? "已连接"}${
-                                t.authMethods?.length
-                                  ? ` · 登录方式：${t.authMethods.map((m) => m.name).join("、")}`
-                                  : ""
+                            ? `ACP v${t.protocolVersion} · ${t.agentInfo?.title ?? t.agentInfo?.name ?? "已连接"} · ${
+                                t.loggedIn === true ? "已登录" : t.loggedIn === false ? "未登录" : "登录状态未知"
                               }`
                             : t.error}
                         </div>
+                      )}
+                      {t && t !== "running" && t.ok && t.loggedIn === false && (
+                        <div className="auth-actions">
+                          {t.authError && <div className="error-text">登录失败：{t.authError}</div>}
+                          {t.authMethods
+                            ?.filter((m) => m.type === "agent")
+                            .map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                className="btn sm primary"
+                                title={m.description ?? undefined}
+                                onClick={() => void test(h.id, m.id)}
+                              >
+                                用「{m.name}」登录
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                      {t && t !== "running" && t.ok && t.sessionError && (
+                        <div className="error-text harness-test">{t.sessionError}</div>
                       )}
                     </div>
                   </div>

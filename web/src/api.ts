@@ -23,6 +23,7 @@ export interface HarnessInfo {
   name: string;
   install: string;
   auth: string;
+  login: string;
   docs: string;
   identity: "claude-meta" | "grok-meta" | "codex-env" | "first-prompt";
 }

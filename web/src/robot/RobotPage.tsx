@@ -1,7 +1,7 @@
 import { AlertTriangle, Keyboard, MessageSquareText, Mic, MicOff, Send, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionState } from "../../../server/device-protocol";
-import { type Agent, api, type Message } from "../api";
+import { type Agent, api, type HarnessStatus, type Message } from "../api";
 import { AgentAvatar } from "../ui";
 import { type Command, DeviceClient, deviceId } from "./device-client";
 import { ACTION_LABEL, ACTION_MS, FACE_LABEL, type Face, RobotFace } from "./RobotFace";
@@ -22,13 +22,32 @@ export function RobotPage(props: {
   onConversationCreated: () => Promise<void>;
   goCreateAgent: () => void;
 }) {
-  const { agents } = props;
-  const [agentId, setAgentId] = useState(() => {
-    const saved = localStorage.getItem("agent-hub:robot-agent");
-    return agents.some((a) => a.id === saved) ? (saved as string) : (agents[0]?.id ?? "");
-  });
-  const agent = agents.find((a) => a.id === agentId);
+  // Only agents whose harness is installed can drive the robot.
+  const [installed, setInstalled] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    api<HarnessStatus[]>("GET", "/api/harnesses").then(
+      (l) => setInstalled(new Set(l.filter((h) => h.path).map((h) => h.id))),
+      () => setInstalled(new Set()),
+    );
+  }, []);
+  const agents = installed ? props.agents.filter((a) => a.harness && installed.has(a.harness)) : [];
+  const [picked, setAgentId] = useState(() => localStorage.getItem("agent-hub:robot-agent") ?? "");
+  const agent = agents.find((a) => a.id === picked) ?? agents[0];
 
+  if (!installed) return <div className="empty" aria-busy="true" />;
+  if (!agent && props.agents.length > 0)
+    return (
+      <div className="empty">
+        <div className="empty-icon">
+          <MessageSquareText size={24} />
+        </div>
+        <h2>没有可用的 Agent</h2>
+        <p className="muted">机器人需要一个绑定了已安装 Harness 的 Agent。</p>
+        <a className="btn primary" href="#/setup">
+          打开新手引导
+        </a>
+      </div>
+    );
   if (!agent)
     return (
       <div className="empty">
@@ -147,7 +166,7 @@ function RobotSession(props: {
           if (e.status === "error") setErrorUntil(Date.now() + 3000);
           if (e.status === "done" && e.text && ttsOnRef.current && ttsAvailable())
             speak(
-              e.text,
+              e.spoken ?? e.text,
               () => {
                 speakingRef.current = true;
                 setSpeaking(true);
