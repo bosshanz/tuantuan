@@ -805,3 +805,65 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .page-inner { gap: 0; }
 .handoff { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); box-shadow: none; border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent); }
 .list-pane { background: var(--bg); }
+
+/* ================= motion: one vocabulary for enter / exit ================= */
+:root {
+  --dur-1: 120ms; --dur-2: 180ms; --dur-3: 220ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-pop: cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+@keyframes t-fade-in { from { opacity: 0; } }
+@keyframes t-fade-out { to { opacity: 0; } }
+@keyframes t-pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.96); } }
+@keyframes t-pop-out { to { opacity: 0; transform: translateY(-2px) scale(0.97); } }
+@keyframes t-rise-in { from { opacity: 0; transform: translateY(6px) scale(0.985); } }
+@keyframes t-panel-in { from { opacity: 0; transform: translateX(16px); } }
+@keyframes t-panel-out { to { opacity: 0; transform: translateX(16px); } }
+@keyframes t-sheet-in { from { opacity: 0; transform: translateY(32px); } }
+@keyframes t-sheet-out { to { opacity: 0; transform: translateY(32px); } }
+@keyframes t-view-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes t-view-out { to { opacity: 0; transform: translateY(-4px); } }
+
+/* route / conversation switch: View Transitions on the main column only; the shell stays put */
+.main { view-transition-name: main-view; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-old(main-view) { animation: t-view-out var(--dur-1) var(--ease-in) both; }
+::view-transition-new(main-view) { animation: t-view-in var(--dur-3) var(--ease-out) both; }
+::view-transition-group(main-view) { animation-duration: var(--dur-3); }
+@supports not (view-transition-name: a) { .main > * { animation: t-view-in var(--dur-3) var(--ease-out); } }
+
+/* popovers & menus grow from their anchor */
+.popover { transform-origin: bottom left; animation: t-pop-in var(--dur-2) var(--ease-pop); }
+.mention-pop { transform-origin: bottom left; }
+.avatar-pop { transform-origin: top left; animation: t-pop-in var(--dur-2) var(--ease-pop); }
+.avatar-pop[data-state="closing"] { animation: t-pop-out var(--dur-1) var(--ease-in) forwards; pointer-events: none; }
+
+/* Cmd+K / dialogs */
+.overlay { animation: t-fade-in var(--dur-2) var(--ease-out); }
+.overlay .palette, .modal { transform-origin: top center; animation: t-pop-in var(--dur-3) var(--ease-pop); }
+.overlay[data-state="closing"] { animation: t-fade-out var(--dur-1) var(--ease-in) forwards; pointer-events: none; }
+.overlay[data-state="closing"] .palette { animation: t-pop-out var(--dur-1) var(--ease-in) forwards; }
+
+/* right panel slides; narrow screens use a bottom sheet */
+.details { animation: t-panel-in var(--dur-3) var(--ease-out); }
+.details[data-state="closing"] { animation: t-panel-out var(--dur-2) var(--ease-in) forwards; pointer-events: none; }
+.scrim { animation: t-fade-in var(--dur-2) var(--ease-out); }
+.scrim[data-state="closing"] { animation: t-fade-out var(--dur-2) var(--ease-in) forwards; }
+@media (max-width: 760px) {
+  .details { animation: t-sheet-in var(--dur-3) var(--ease-out); }
+  .details[data-state="closing"] { animation: t-sheet-out var(--dur-2) var(--ease-in) forwards; }
+}
+
+/* new messages and status notes */
+.msg { animation: none; }
+.msg[data-fresh], .turn { animation: t-rise-in var(--dur-3) var(--ease-out); }
+.msg[data-fresh] .handoff { transform-origin: top left; animation: t-pop-in var(--dur-3) var(--ease-pop) 60ms backwards; }
+.run-bar { animation: t-pop-in var(--dur-2) var(--ease-pop); }
+.save-bar .status > * , .save-bar .status { animation: t-fade-in var(--dur-2) var(--ease-out); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  .spin { animation-duration: 0.9s !important; animation-iteration-count: infinite !important; }
+}

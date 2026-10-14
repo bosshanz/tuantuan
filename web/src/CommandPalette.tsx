@@ -16,6 +16,7 @@ export function CommandPalette(props: {
   rooms: Room[];
   onClose: () => void;
   onGo: (path: string) => void;
+  state?: "open" | "closing";
 }) {
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -53,7 +54,11 @@ export function CommandPalette(props: {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: clicking the backdrop closes the dialog; Escape is handled on the input
     // biome-ignore lint/a11y/useKeyWithClickEvents: see above
-    <div className="overlay" onClick={(e) => e.target === e.currentTarget && props.onClose()}>
+    <div
+      className="overlay"
+      data-state={props.state ?? "open"}
+      onClick={(e) => e.target === e.currentTarget && props.onClose()}
+    >
       <div className="palette" role="dialog" aria-modal="true" aria-label="快速切换">
         <div className="palette-input">
           <Search size={18} className="muted" />

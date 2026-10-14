@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AVATAR_COLORS, AVATAR_SHAPES, type AvatarShape, SHAPE_LABEL } from "../../server/avatars";
 import { EXPRESSIONS, type Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
+import { usePresence } from "./motion";
 
 /** Radio-group keyboard model: arrows move within the group, Tab leaves it. */
 function arrowNav(e: React.KeyboardEvent<HTMLDivElement>, cols: number) {
@@ -23,6 +24,7 @@ export function AvatarPicker(props: {
   onReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const pop = usePresence(open, 140);
   // Hovering the preview cycles through the expressions so the choice is seen alive.
   const [hover, setHover] = useState(false);
   const [tick, setTick] = useState(0);
@@ -77,8 +79,8 @@ export function AvatarPicker(props: {
           expression={hover ? (EXPRESSIONS[tick % EXPRESSIONS.length] as Expression) : "idle"}
         />
       </button>
-      {open && (
-        <div className="avatar-pop" role="dialog" aria-label="编辑头像">
+      {pop.mounted && (
+        <div className="avatar-pop" data-state={pop.state} role="dialog" aria-label="编辑头像">
           <div className="avatar-pop-head">
             <h4>头像</h4>
             <button type="button" className="btn ghost sm" onClick={props.onReset}>

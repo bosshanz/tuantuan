@@ -6,6 +6,7 @@ import { type Agent, api, connectWs, type McpServer, type Meta, type Room, type 
 import { BrandMark } from "./BrandMark";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
+import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
 import { RobotPage } from "./robot/RobotPage";
 import { AgentAvatar, RoomIcon, roomSubtitle, useHashRoute } from "./ui";
@@ -19,6 +20,7 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [connected, setConnected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const palette = usePresence(paletteOpen, 140);
   const [userName, setUserName] = useState(() => localStorage.getItem("agent-hub:user") || "我");
   const [route, go] = useHashRoute();
   const listeners = useRef(new Set<(e: WsEvent) => void>());
@@ -308,8 +310,9 @@ export function App() {
         )}
       </main>
 
-      {paletteOpen && (
+      {palette.mounted && (
         <CommandPalette
+          state={palette.state}
           agents={agents}
           rooms={rooms}
           onClose={() => setPaletteOpen(false)}

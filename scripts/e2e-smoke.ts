@@ -61,6 +61,17 @@ try {
   await page.locator(".msg .tool", { hasText: "calculator" }).filter({ hasText: "成功" }).first().waitFor();
   await page.getByText("工具返回：42").waitFor();
 
+  // Let enter/exit animations finish so geometry is measured at rest.
+  const settle = () =>
+    page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY)
+          .map((a) => a.finished.catch(() => undefined)),
+      ),
+    );
+  await settle();
   // Alignment: one header line across columns, shared left edges, no header collisions.
   await page.getByRole("heading", { name: "回复详情" }).waitFor();
   const issues = await page.evaluate(() => {
@@ -134,6 +145,7 @@ try {
   await page.getByLabel("名称").waitFor();
   await page.locator("form.page").evaluate((el) => el.scrollTo(0, 240));
   await page.waitForTimeout(100);
+  await settle();
   const editorIssues = await page.evaluate(() => {
     const out: string[] = [];
     const head = document.querySelector(".main-head")?.getBoundingClientRect();
@@ -162,6 +174,37 @@ try {
     return out;
   });
   if (editorIssues.length) throw new Error(`editor header: ${editorIssues.join("; ")}`);
+
+  // Live updates without reload, even when the history fetch is slow (dev proxy, remote host):
+  // a late snapshot must not wipe messages that already arrived over the socket.
+  await page.route(/\/api\/rooms\/[^/]+\/messages\?/, async (route) => {
+    const res = await route.fetch();
+    await new Promise((r) => setTimeout(r, 700));
+    await route.fulfill({ response: res });
+  });
+  const live = async (roomTitle: string, text: string, reply: RegExp) => {
+    await page.locator(".main-head h2", { hasText: roomTitle }).waitFor();
+    await input.fill(text);
+    await input.press("Enter");
+    const body = text.replace(/^@\S+\s/, "");
+    await page.locator(".msg", { hasText: body }).first().waitFor({ timeout: 5000 });
+    await page.locator(".msg", { hasText: reply }).last().waitFor({ timeout: 8000 });
+    await page.waitForTimeout(900); // let the slow snapshot land, then make sure nothing vanished
+    if ((await page.locator(".msg", { hasText: body }).count()) === 0) throw new Error(`message vanished: ${text}`);
+  };
+  const navs = await page.evaluate(() => performance.getEntriesByType("navigation").length);
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.locator(".list-item", { hasText: "Bob" }).first().click();
+  await page.getByRole("button", { name: /私聊/ }).click();
+  await live("Bob", "私聊直播-1", /收到：「私聊直播-1」/);
+  await page.getByRole("button", { name: "会话", exact: true }).click();
+  await page.locator(".li-title", { hasText: "冒烟群" }).click();
+  await live("冒烟群", "@Bob 群聊直播-2", /群聊直播-2/);
+  await page.locator(".li-title", { hasText: /私聊/ }).first().click();
+  await live("Bob", "切换后-3", /收到：「切换后-3」/);
+  await page.unroute(/\/api\/rooms\/[^/]+\/messages\?/);
+  if ((await page.evaluate(() => performance.getEntriesByType("navigation").length)) !== navs)
+    throw new Error("page reloaded during live checks");
 
   await page.screenshot({ path: join(tmpdir(), "agent-hub-e2e.png"), fullPage: true });
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);

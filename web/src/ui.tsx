@@ -14,6 +14,7 @@ import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import type { Agent, Room } from "./api";
 import type { Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
+import { withViewTransition } from "./motion";
 
 for (const [name, lang] of Object.entries({ bash, go, javascript, json, python, sql, typescript }))
   hljs.registerLanguage(name, lang);
@@ -162,7 +163,7 @@ const readHash = () => location.hash.replace(/^#\/?/, "").split("/").filter(Bool
 export function useHashRoute(): [string[], (path: string) => void] {
   const [parts, setParts] = useState(readHash);
   useEffect(() => {
-    const on = () => setParts(readHash());
+    const on = () => withViewTransition(() => setParts(readHash()));
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);

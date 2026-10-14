@@ -17,6 +17,8 @@ import {
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { type Agent, api, type Message, type Room, type RoomState, type RoutingDecision, type WsEvent } from "./api";
 import { agentActivity, messageExpression } from "./avatarState";
+import { mergeMessages, upsertMessage } from "./messageMerge";
+import { usePresence } from "./motion";
 import { PickList } from "./PickList";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
 
@@ -57,6 +59,7 @@ export function ChatView(props: {
   const [selected, setSelected] = useState<string | null>(null);
   const wide = useMediaQuery("(min-width: 1181px)");
   const [panel, setPanel] = useState(false);
+  const panelPresence = usePresence(panel, 180);
   const listRef = useRef<HTMLDivElement>(null);
   // For relayed replies: who handed the work over (from the giver's handoff tool call).
   const handoffFrom = useMemo(() => {
@@ -93,10 +96,8 @@ export function ChatView(props: {
           `/api/rooms/${room.id}/messages?limit=200`,
         );
         if (!alive) return;
-        // Keep text streamed so far for messages the server has not finished persisting.
-        setMessages((prev) =>
-          data.messages.map((m) => (m.status === "streaming" ? (prev.find((p) => p.id === m.id) ?? m) : m)),
-        );
+        // A snapshot can be older than live events that arrived while it was in flight: merge, never replace.
+        setMessages((prev) => mergeMessages(data.messages, prev, room.id));
         setRouting(Object.fromEntries(data.routing.map((r) => [r.messageId, r])));
         setState(data.state);
         setLoadError(null);
@@ -110,13 +111,7 @@ export function ChatView(props: {
         setState(e.state);
         void load();
       } else if (e.type === "message" && e.message.roomId === room.id) {
-        setMessages((ms) => {
-          const i = ms.findIndex((m) => m.id === e.message.id);
-          if (i < 0) return [...ms, e.message];
-          const copy = [...ms];
-          copy[i] = e.message;
-          return copy;
-        });
+        setMessages((ms) => upsertMessage(ms, e.message));
       } else if (e.type === "delta" && e.roomId === room.id) {
         setMessages((ms) => ms.map((m) => (m.id === e.messageId ? { ...m, content: m.content + e.text } : m)));
       } else if (e.type === "tools" && e.roomId === room.id) {
@@ -133,11 +128,14 @@ export function ChatView(props: {
     };
   }, [room.id, props.subscribeEvents]);
 
-  // Stick to the bottom only when the reader is already there.
+  // Open at the latest message; afterwards stick to the bottom only when the reader is already there.
+  const opened = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: run on every content change
   useEffect(() => {
     const el = listRef.current;
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 240) el.scrollTop = el.scrollHeight;
+    if (!el || messages.length === 0) return;
+    if (!opened.current || el.scrollHeight - el.scrollTop - el.clientHeight < 240) el.scrollTop = el.scrollHeight;
+    opened.current = true;
   }, [messages]);
 
   const send = async () => {
@@ -146,7 +144,12 @@ export function ChatView(props: {
     setSendError(null);
     setDraft("");
     try {
-      await api("POST", `/api/rooms/${room.id}/messages`, { senderName: props.userName, content });
+      const sent = await api<Message>("POST", `/api/rooms/${room.id}/messages`, {
+        senderName: props.userName,
+        content,
+      });
+      // The server's reply is authoritative: show it now even if the socket is slow, reconnecting or raced.
+      setMessages((ms) => upsertMessage(ms, sent));
       requestAnimationFrame(() => {
         const el = listRef.current;
         if (el) el.scrollTop = el.scrollHeight;
@@ -309,14 +312,14 @@ export function ChatView(props: {
         </footer>
       </div>
 
-      {panel && (
+      {panelPresence.mounted && (
         <>
           {!wide && (
             // biome-ignore lint/a11y/noStaticElementInteractions: scrim closes the overlay panel; the close button is the keyboard path
             // biome-ignore lint/a11y/useKeyWithClickEvents: see above
-            <div className="scrim" onClick={() => setPanel(false)} />
+            <div className="scrim" data-state={panelPresence.state} onClick={() => setPanel(false)} />
           )}
-          <aside className="details" aria-label="详情面板">
+          <aside className="details" data-state={panelPresence.state} aria-label="详情面板">
             <div className="details-head">
               {selectedMsg && (
                 <button
@@ -400,7 +403,7 @@ function MessageItem(props: {
   const handoffs = m.toolCalls.filter((c) => c.name === "handoff");
   const tools = m.toolCalls.filter((c) => c.name !== "handoff");
   return (
-    <div className="msg" data-status={m.status}>
+    <div className="msg" data-status={m.status} data-fresh={Date.now() - m.createdAt < 4000 ? "" : undefined}>
       {tools.length > 0 && (
         <div className="tool-list">
           {tools.map((c) => (
