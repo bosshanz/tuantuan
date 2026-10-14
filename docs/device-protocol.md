@@ -4,7 +4,7 @@
 
 ## 连接与会话
 - 连接 `ws(s)://<host>/device`，第一条消息必须是 `hello`，否则服务端关闭连接（1008 `not_ready`）。
-- 每个 `(deviceId, agentId)` 对应一个持久的 dm 房间（表 `device_sessions`），房间名为「桌面机器人 · Agent 名」，会出现在聊天列表中，也可以在网页里继续聊。
+- 每个 `(deviceId, agentId)` 对应一个持久的 dm 房间（表 `device_sessions`），房间名为「桌面机器人 · Agent 名」，会出现在聊天列表中，也可以在网页里继续聊。设备必须使用稳定的 `deviceId`，否则每次连接都会新建会话；网页虚拟机器人固定为 `web-robot`。
 - 服务端→设备的每条消息都带有本连接内单调递增的 `seq`。
 
 ## 设备 → 服务端

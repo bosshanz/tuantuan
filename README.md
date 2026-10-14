@@ -7,11 +7,11 @@
 
 **一群 Agent，团团协作。** 多 Agent 群聊工作台。
 
-> 仓库名仍为 `agent-hub`；为兼容，环境变量继续使用 `AGENT_HUB_*` 前缀，默认数据库路径仍是 `data/agent-hub.db`。
+> 仓库已从 `bosshanz/agent-hub` 更名为 `bosshanz/tuantuan`（旧地址自动跳转）。为兼容，环境变量继续使用 `AGENT_HUB_*` 前缀，默认数据库路径仍是 `data/agent-hub.db`。
 
 动态 Agent 平台：在网页上用 **Prompt + Tools + Skills** 组合出 Agent，后台按任务 **自动路由模型**，Agent 可以在 **群聊** 中被 @，也能通过 `handoff` 工具把任务交接给另一个 Agent。还带一个用语音对话的虚拟桌面机器人。
 
-![群聊与会话信息](docs/screenshots/group-chat.png)
+![群聊：@、交接与工具调用](docs/screenshots/group-chat.png)
 
 - 不需要任何 API Key 即可运行：默认使用内置的确定性 `mock` 模型。
 - 接入真实模型只需在 `.env` 里填 1–5 个模型和对应的 Key（OpenAI 兼容接口：NewAPI、DeepSeek、通义千问、豆包等），不用改任何 JSON。
@@ -21,6 +21,8 @@
 需要 [Bun](https://bun.sh)（开发与测试使用 1.4.2；Skill 解析依赖内置的 `Bun.YAML`，更早版本未验证）。
 
 ```bash
+git clone https://github.com/bosshanz/tuantuan.git
+cd tuantuan
 bun install
 bun dev          # 同时启动 API（:8787）和前端（:5173），默认 mock 模型
 ```
@@ -43,7 +45,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173），默认 mock
 | `@所有人`（或 `@all` / `@everyone`） | 每个成员按成员顺序各回复一次 |
 | 回复还没结束时又发了一条 | 立即打断当前回复（已生成的部分保留，标记「被新消息打断」），丢弃还没执行的交接，再处理新消息 |
 
-![输入框显示将由谁回复](docs/screenshots/composer.png)
+![输入框：@所有人 显示回复对象](docs/screenshots/composer.png)
 
 - 输入框下方会实时显示这条消息将由谁回复（例如「回复 · 产品经理 · 工程师」「按话题自动选一位」「所有人 · 4」），回复进行中还会提示「发送会打断当前回复」。
 - **Agent 之间的交接只能通过内置工具 `handoff(agent, task)`**。Agent 回复正文里写的 `@名字` 只是显示，不会触发对方。交接后对方接手并看到 task，界面上显示为一张「交接给 X」卡片，接手方的回复下方显示「接 X 的交接」。
@@ -147,6 +149,13 @@ cp .env.example .env                                     # 填入对应的 API K
 
 见 `.env.example`：`PORT`、`DB_PATH`（默认 `data/agent-hub.db`）、`SKILLS_DIR`（默认 `skills`）、`AGENT_HUB_CONFIG`、`MOCK_CHUNK_DELAY_MS`，以及各 Provider 的 Key / BASE_URL、`AGENT_HUB_MODELS`、`AGENT_HUB_MODEL_<n>_*`、`AGENT_HUB_CLASSIFIER_MODEL`、`DECISION_*`。
 
+## 界面
+
+![Agent 编辑（深色）](docs/screenshots/agent-editor-dark.png)
+
+- 纸与墨风格：暖白纸色、墨色文字、朱红强调；标题衬线体（Newsreader，已自托管），浅色/深色跟随系统。
+- Agent 头像是 SVG Bot（13 种轮廓 × 13 种颜色），默认按 Agent id 生成，在编辑页点击头像修改。头像会根据状态变表情（思考、说话、难过、惊讶、休眠），开启「减少动态效果」时静止。预览全部表情：`/#/dev/avatars`。
+
 ## 桌面机器人
 
 左侧导航「机器人」（`#/robot`）打开虚拟桌面机器人：
@@ -154,7 +163,7 @@ cp .env.example .env                                     # 填入对应的 API K
 - 先选要绑定的 Agent；脸部会显示待机、聆听、思考、说话、开心、难过/出错、惊讶等表情。
 - 按住说话或打开免提（需要支持 Web Speech 的浏览器，推荐 Chrome；Safari 支持有限），回复用 zh-CN 朗读；不支持语音时用文字输入。说话时可以直接打断。
 - Agent 用内置工具 `robot_express` / `robot_action` 控制表情和动作（点头、摇头、歪头、挥手、环顾、跳舞）。设备没确认（离线、超时、不支持）时工具会如实返回失败。
-- 对话保存为聊天列表里「桌面机器人」分组下的会话，也可以在网页里接着聊。
+- 对话保存为聊天列表里「桌面机器人」分组下的会话，每个 Agent 一个（重复打开不会新增），也可以在网页里接着聊。
 - mock 模型下说「你好」「跳舞」会触发对应的表情和动作。
 - 真实硬件可按 [docs/device-protocol.md](docs/device-protocol.md) 接入。
 
@@ -168,7 +177,7 @@ cp .env.example .env                                     # 填入对应的 API K
 bun run check      # tsc 类型检查 + biome lint + bun test
 bun run test       # 仅测试
 bun run build      # 构建前端
-bun run e2e        # 浏览器冒烟（需先 build，需要本机 Chrome；CHROME_PATH 可指定）
+bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本机 Chrome；CHROME_PATH 可指定）
 ```
 
 ## 常见问题
@@ -183,6 +192,7 @@ bun run e2e        # 浏览器冒烟（需先 build，需要本机 Chrome；CHRO
 | 群里一句话好几个 Agent 都回复 | 只有 @ 多人、`@所有人` 或 Agent 调用了 `handoff` 才会这样。详情面板的工具调用里能看到 handoff。 |
 | Agent 说「让 @X 来」但 X 没反应 | 正常：正文里的 @ 只是显示，交接必须调用 `handoff` 工具；模型要支持 function calling。 |
 | 机器人不听 / 不说话 | 浏览器需要麦克风权限和 Web Speech 支持；不行就用文字输入。 |
+| 机器人会话列表里有很多空的旧会话 | 旧版本每次打开都新建会话；升级后启动一次会自动清理（迁移 3）。 |
 | e2e 找不到浏览器 | 设置 `CHROME_PATH` 指向本机 Chrome。 |
 
 ## 文档
