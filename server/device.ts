@@ -9,7 +9,11 @@ import {
 } from "./device-protocol";
 import type { Orchestrator, RoomEvent } from "./orchestrator";
 import type { Store } from "./store";
-import type { DeviceControl } from "./tools";
+
+/** Lets an agent drive the robot's face and body. Wired to agents in M2 via Tuantuan's MCP tool server. */
+export interface DeviceControl {
+  command(kind: "expression" | "action", name: string, signal?: AbortSignal): Promise<string>;
+}
 
 const InboundSchema = z.discriminatedUnion("type", [
   z.object({
@@ -190,8 +194,14 @@ export class DeviceHub {
         roomId,
         e.state.activeRunId ? (this.phase.get(roomId) === "replying" ? "replying" : "thinking") : "idle",
       );
-    else if (e.type === "delta") this.setPhase(roomId, "replying");
-    if (e.type === "delta") this.broadcast(roomId, { type: "reply.delta", messageId: e.messageId, text: e.text });
+    else if (
+      e.type === "update" &&
+      e.update.sessionUpdate === "agent_message_chunk" &&
+      e.update.content.type === "text"
+    ) {
+      this.setPhase(roomId, "replying");
+      this.broadcast(roomId, { type: "reply.delta", messageId: e.messageId, text: e.update.content.text });
+    }
     if (e.type === "message" && e.message.senderKind === "agent") {
       const m = e.message;
       if (m.status === "streaming") this.broadcast(roomId, { type: "reply.start", messageId: m.id });

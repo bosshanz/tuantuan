@@ -2,15 +2,14 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
+import { AcpProcess } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
-import type { AppConfig } from "./config";
 import { type DeviceConn, DeviceHub } from "./device";
-import { McpConnections } from "./mcp";
+import { detectHarness, harnessSpec, loginShellEnv, visibleHarnesses } from "./harness";
+import { HarnessHost } from "./host";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
-import type { SkillLoadResult } from "./skills";
-import { type AgentInput, Store, ValidationError } from "./store";
-import { BUILTIN_TOOLS } from "./tools";
+import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 
 const AgentInputSchema = z.object({
   name: z
@@ -29,17 +28,22 @@ const AgentInputSchema = z.object({
     .optional(),
   avatar: z.string().trim().min(1).max(4).optional(),
   avatarShape: z.enum(AVATAR_SHAPES).optional(),
-  systemPrompt: z.string().max(20000),
-  tools: z.array(z.string()).max(64),
-  skills: z.array(z.string()).max(64),
-  modelMode: z.enum(["auto", "pinned"]),
-  pinnedModel: z.string().nullable(),
+  identity: z.string().max(40000).default(""),
+  harness: z.string().max(32).default(""),
+  cwd: z.string().max(1024).default(""),
+  env: z
+    .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "环境变量名只能包含字母、数字和下划线"), z.string().max(8000))
+    .default({}),
+  mcpServerIds: z.array(z.string()).max(32).default([]),
+  permissionPolicy: z.enum(PERMISSION_POLICIES).default("ask"),
 });
 
 const RoomInputSchema = z.object({
   name: z.string().trim().min(1, "房间名不能为空").max(64),
   kind: z.enum(["group", "dm"]),
   agentIds: z.array(z.string()),
+  mainAgentId: z.string().nullable().optional(),
+  cwd: z.string().max(1024).optional(),
 });
 
 const McpInputSchema = z.object({
@@ -50,10 +54,12 @@ const McpInputSchema = z.object({
     .refine((u) => /^https?:/.test(u), "只支持 http(s) 地址"),
 });
 
+const ImageSchema = z.object({
+  mimeType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
+  data: z.string().max(7_000_000, "图片不能超过 5MB"),
+});
+
 export interface AppDeps {
-  config: AppConfig;
-  configSource: string;
-  skills: SkillLoadResult;
   dbPath: string;
   staticDir?: string;
   deviceAckTimeoutMs?: number;
@@ -64,69 +70,113 @@ type WsData = { kind: "ui"; rooms: Set<string> } | { kind: "device"; conn: Devic
 
 export function createApp(deps: AppDeps) {
   const store = new Store(deps.dbPath);
-  const mcp = new McpConnections();
   let server: Server<WsData> | null = null;
   const devices = new DeviceHub(store, deps.deviceAckTimeoutMs);
-  const orchestrator = new Orchestrator(
-    store,
-    deps.config,
-    deps.skills.skills,
-    mcp,
-    (roomId, event: RoomEvent) => {
-      server?.publish(`room:${roomId}`, JSON.stringify(event));
-      devices.onRoomEvent(roomId, event);
-    },
-    devices,
-  );
+  const publish = (roomId: string, event: RoomEvent) => {
+    server?.publish(`room:${roomId}`, JSON.stringify(event));
+    devices.onRoomEvent(roomId, event);
+  };
+  const host = new HarnessHost(store, {
+    session: (roomId, agentId, view) => publish(roomId, { type: "session", roomId, agentId, view }),
+    permission: (a) =>
+      "resolved" in a
+        ? publish(a.roomId, { type: "permission", roomId: a.roomId, ask: null, resolvedId: a.id })
+        : publish(a.roomId, { type: "permission", roomId: a.roomId, ask: a }),
+    terminal: (roomId, terminal) => publish(roomId, { type: "terminal", roomId, terminal }),
+  });
+  const orchestrator = new Orchestrator(store, host, publish);
   devices.orchestrator = orchestrator;
 
   const json = (data: unknown, status = 200) => Response.json(data, { status });
 
   function validateAgent(raw: unknown): AgentInput {
     const a = AgentInputSchema.parse(raw);
+    if (a.harness && !harnessSpec(a.harness)) throw new ValidationError(`未知 Harness：${a.harness}`);
     const mcpIds = new Set(store.listMcpServers().map((s) => s.id));
-    for (const t of a.tools) {
-      const [kind, x] = t.split(":");
-      const ok = (kind === "builtin" && x && x in BUILTIN_TOOLS) || (kind === "mcp" && x && mcpIds.has(x));
-      if (!ok) throw new ValidationError(`未知工具：${t}`);
+    for (const m of a.mcpServerIds) if (!mcpIds.has(m)) throw new ValidationError(`未知 MCP 服务：${m}`);
+    return { ...a, avatar: a.avatar ?? ([...a.name][0] as string) };
+  }
+
+  async function harnessStatuses() {
+    const overrides = store.getSetting<Record<string, string>>("harnessPaths", {});
+    return Promise.all(visibleHarnesses().map((h) => detectHarness(h, overrides[h.id] ?? null)));
+  }
+
+  /** Spawns the harness once and runs the ACP handshake, so onboarding can show what works. */
+  async function testHarness(id: string) {
+    const spec = harnessSpec(id);
+    if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
+    const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
+    if (!status.path) return { ok: false, error: status.error, install: spec.install };
+    const env = await loginShellEnv();
+    const p = new AcpProcess(
+      { command: status.path, args: spec.args, env, cwd: env.HOME ?? "/" },
+      { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
+    );
+    try {
+      const init = await p.initialize(30_000);
+      return {
+        ok: true,
+        protocolVersion: init.protocolVersion,
+        agentInfo: init.agentInfo ?? null,
+        authMethods: (init.authMethods ?? []).map((m) => ({
+          id: m.id,
+          name: m.name,
+          description: m.description ?? null,
+        })),
+        capabilities: init.agentCapabilities ?? {},
+        auth: spec.auth,
+      };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    } finally {
+      p.kill();
     }
-    const skillNames = new Set(deps.skills.skills.map((s) => s.name));
-    for (const s of a.skills) if (!skillNames.has(s)) throw new ValidationError(`未知 Skill：${s}`);
-    if (a.modelMode === "pinned" && !deps.config.models.some((m) => m.id === a.pinnedModel))
-      throw new ValidationError(`固定模型不存在：${a.pinnedModel ?? "(空)"}`);
-    return {
-      ...a,
-      avatar: a.avatar ?? ([...a.name][0] as string),
-      pinnedModel: a.modelMode === "pinned" ? a.pinnedModel : null,
-    };
+  }
+
+  function agentIn(roomId: string, agentId: string | undefined) {
+    const room = store.getRoom(roomId);
+    if (!room) throw new ValidationError("房间不存在", 404);
+    const agent = agentId && room.agentIds.includes(agentId) ? store.getAgent(agentId) : null;
+    if (!agent) throw new ValidationError("该 Agent 不在这个会话里", 404);
+    return { room, agent, identity: orchestrator.identityFor(room, agent) };
   }
 
   async function handleApi(req: Request, url: URL): Promise<Response> {
     const parts = url.pathname.split("/").filter(Boolean).slice(1); // drop "api"
-    const [resource, id, sub] = parts;
+    const [resource, id, sub, subId, action] = parts;
     const method = req.method;
     const body = async () => (method === "GET" || method === "DELETE" ? undefined : await req.json());
 
     if (resource === "meta" && method === "GET")
       return json({
-        configSource: deps.configSource,
-        models: deps.config.models.map(({ id, tags, costTier, contextWindow }) => ({
+        harnesses: visibleHarnesses().map(({ id, name, install, auth, docs, identity }) => ({
           id,
-          tags,
-          costTier,
-          contextWindow,
+          name,
+          install,
+          auth,
+          docs,
+          identity,
         })),
-        classifierModel: deps.config.router.classifierModel ?? null,
-        decisionModel: deps.config.decision?.model ?? null,
-        limits: deps.config.limits,
-        builtinTools: Object.values(BUILTIN_TOOLS).map((t) => ({
-          id: `builtin:${t.spec.function.name}`,
-          name: t.spec.function.name,
-          description: t.spec.function.description,
-        })),
-        skills: deps.skills.skills.map(({ name, description }) => ({ name, description })),
-        skillErrors: deps.skills.errors,
       });
+
+    if (resource === "harnesses") {
+      if (!id && method === "GET") return json(await harnessStatuses());
+      if (id && sub === "path" && method === "PUT") {
+        const { path } = z.object({ path: z.string().max(1024).nullable() }).parse(await body());
+        const overrides = store.getSetting<Record<string, string>>("harnessPaths", {});
+        if (path?.trim()) overrides[id] = path.trim();
+        else delete overrides[id];
+        store.setSetting("harnessPaths", overrides);
+        return json(await harnessStatuses());
+      }
+      if (id && sub === "test" && method === "POST") return json(await testHarness(id));
+    }
+
+    if (resource === "permissions" && id && method === "POST") {
+      const { optionId } = z.object({ optionId: z.string().nullable() }).parse(await body());
+      return host.answer(id, optionId) ? json({ ok: true }) : json({ error: "授权请求已失效" }, 404);
+    }
 
     if (resource === "agents") {
       if (!id && method === "GET") return json(store.listAgents());
@@ -142,19 +192,8 @@ export function createApp(deps: AppDeps) {
         const s = McpInputSchema.parse(await body());
         return json(store.createMcpServer(s.name, s.url), 201);
       }
-      if (id && !sub && method === "DELETE") {
-        await mcp.drop(id);
+      if (id && !sub && method === "DELETE")
         return store.deleteMcpServer(id) ? json({ ok: true }) : json({ error: "MCP 服务不存在" }, 404);
-      }
-      if (id && sub === "tools" && method === "GET") {
-        const s = store.listMcpServers().find((x) => x.id === id);
-        if (!s) return json({ error: "MCP 服务不存在" }, 404);
-        try {
-          return json(await mcp.listTools(s.id, s.url));
-        } catch (e) {
-          return json({ error: (e as Error).message }, 502);
-        }
-      }
     }
 
     if (resource === "rooms") {
@@ -162,7 +201,7 @@ export function createApp(deps: AppDeps) {
       if (!id && method === "POST") {
         const r = RoomInputSchema.parse(await body());
         if (r.kind === "dm" && r.agentIds.length !== 1) throw new ValidationError("私聊必须且只能包含 1 个 Agent");
-        return json(store.createRoom(r.name, r.kind, r.agentIds), 201);
+        return json(store.createRoom(r.name, r.kind, r.agentIds, { mainAgentId: r.mainAgentId, cwd: r.cwd }), 201);
       }
       const room = id ? store.getRoom(id) : null;
       if (id && !room) return json({ error: "房间不存在" }, 404);
@@ -171,25 +210,57 @@ export function createApp(deps: AppDeps) {
         store.deleteRoom(room.id);
         return json({ ok: true });
       }
-      if (room && sub === "agents" && method === "PUT") {
+      if (room && !sub && method === "PATCH") {
+        const g = z
+          .object({ mainAgentId: z.string().nullable().optional(), cwd: z.string().max(1024).optional() })
+          .parse(await body());
+        if (room.kind !== "group") throw new ValidationError("只有群聊有主 Agent 和共享工作目录");
+        return json(store.updateGroup(room.id, g));
+      }
+      if (room && sub === "agents" && !subId && method === "PUT") {
         const { agentIds } = z.object({ agentIds: z.array(z.string()) }).parse(await body());
         if (room.kind === "dm") throw new ValidationError("私聊的成员不能修改");
         return json(store.setRoomAgents(room.id, agentIds));
       }
+      // Per-agent harness session controls: /api/rooms/:id/agents/:agentId/<action>
+      if (room && sub === "agents" && subId) {
+        const t = agentIn(room.id, subId);
+        if (action === "session" && method === "GET")
+          return json(await host.session(t.room, t.agent, t.identity).then((x) => x.slot.view));
+        if (action === "session" && method === "POST") {
+          const { sessionId } = z.object({ sessionId: z.string().nullable() }).parse(await body());
+          return json(await host.switchSession(t.room, t.agent, t.identity, sessionId));
+        }
+        if (action === "history" && method === "GET") return json(await host.listSessions(t.room, t.agent, t.identity));
+        if (action === "config" && method === "POST") {
+          const c = z.object({ configId: z.string(), value: z.union([z.string(), z.boolean()]) }).parse(await body());
+          return json(await host.setConfig(t.room, t.agent, t.identity, c.configId, c.value));
+        }
+        if (action === "mode" && method === "POST") {
+          const { modeId } = z.object({ modeId: z.string() }).parse(await body());
+          return json(await host.setMode(t.room, t.agent, t.identity, modeId));
+        }
+      }
       if (room && sub === "messages" && method === "GET") {
         const limit = Math.min(Number(url.searchParams.get("limit") ?? 100) || 100, 500);
-        const messages = store.recentMessages(room.id, limit);
         return json({
-          messages,
-          routing: store.routingFor(messages.filter((m) => m.senderKind === "agent").map((m) => m.id)),
+          messages: store.recentMessages(room.id, limit),
           state: orchestrator.state(room.id),
+          sessions: Object.fromEntries(
+            room.agentIds.map((a) => [a, host.view(room.id, a)]).filter((e) => e[1] !== null),
+          ),
+          asks: host.pendingAsks(room.id),
         });
       }
       if (room && sub === "messages" && method === "POST") {
         const m = z
-          .object({ senderName: z.string().max(32).default("我"), content: z.string().max(20000) })
+          .object({
+            senderName: z.string().max(32).default("我"),
+            content: z.string().max(100000),
+            images: z.array(ImageSchema).max(8).default([]),
+          })
           .parse(await body());
-        return json(orchestrator.postHumanMessage(room.id, m.senderName, m.content), 201);
+        return json(orchestrator.postHumanMessage(room.id, m.senderName, m.content, m.images), 201);
       }
       if (room && sub === "cancel" && method === "POST") return json({ cancelled: orchestrator.cancel(room.id) });
     }
@@ -202,7 +273,7 @@ export function createApp(deps: AppDeps) {
     store,
     orchestrator,
     devices,
-    mcp,
+    host,
     attach(s: Server<WsData>) {
       server = s;
     },

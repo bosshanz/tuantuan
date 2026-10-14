@@ -1,13 +1,12 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { emptyTimeline, type Timeline } from "../shared/timeline";
 import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
-import type { Attempt, RoutingPlan } from "./router";
-import type { ToolCallRecord } from "./tool-loop";
 
-/** SQLite is the source of truth for agents, rooms, messages and routing decisions. */
+/** SQLite is the source of truth for agents, rooms, messages and ACP session bindings. */
 
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `CREATE TABLE agents (
      id TEXT PRIMARY KEY,
      name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -85,7 +84,38 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE agents ADD COLUMN avatar_shape TEXT NOT NULL DEFAULT '';`,
   // Visual refresh: move the muted paper & ink avatar colours to the vivid palette (see LEGACY_AVATAR_COLORS).
   `UPDATE agents SET color = CASE lower(color) WHEN '#2f4a6d' THEN '#3d7bfa' WHEN '#2f6b6b' THEN '#13a594' WHEN '#3d6b4f' THEN '#2bb06a' WHEN '#6f7a3a' THEN '#86b51c' WHEN '#b0812a' THEN '#f5a30f' WHEN '#b0432a' THEN '#f2553c' WHEN '#a8476b' THEN '#ee4f97' WHEN '#6d3f5b' THEN '#9a5bea' WHEN '#7a5a3c' THEN '#ff7a1f' WHEN '#4f5d63' THEN '#22a6dc' WHEN '#2a2722' THEN '#3a3a3c' WHEN '#2f7de1' THEN '#3d7bfa' WHEN '#e0662e' THEN '#ff7a1f' ELSE color END;`,
+  // Harness era (docs/plan-harness-acp.md): agents are driven by ACP harnesses. The old system prompt
+  // becomes the Tuantuan identity doc; tools/skills/model_mode/pinned_model stay as unused legacy
+  // columns (a CHECK constraint references them, so they cannot be dropped without a table rebuild).
+  // Existing MCP bindings ("mcp:<server>:<tool>" tool ids) become per-agent MCP server ids.
+  `ALTER TABLE agents RENAME COLUMN system_prompt TO identity;
+   ALTER TABLE agents ADD COLUMN harness TEXT NOT NULL DEFAULT '';
+   ALTER TABLE agents ADD COLUMN cwd TEXT NOT NULL DEFAULT '';
+   ALTER TABLE agents ADD COLUMN env TEXT NOT NULL DEFAULT '{}';
+   ALTER TABLE agents ADD COLUMN permission_policy TEXT NOT NULL DEFAULT 'ask';
+   ALTER TABLE agents ADD COLUMN mcp_server_ids TEXT NOT NULL DEFAULT '[]';
+   UPDATE agents SET mcp_server_ids = COALESCE((
+     SELECT json_group_array(DISTINCT substr(j.value, 5, instr(substr(j.value, 5), ':') - 1))
+     FROM json_each(agents.tools) j WHERE j.value LIKE 'mcp:%:%'), '[]');
+   ALTER TABLE rooms ADD COLUMN main_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL;
+   ALTER TABLE rooms ADD COLUMN cwd TEXT NOT NULL DEFAULT '';
+   UPDATE rooms SET main_agent_id = (SELECT agent_id FROM room_agents WHERE room_id = rooms.id ORDER BY rowid LIMIT 1)
+     WHERE kind = 'group';
+   ALTER TABLE messages ADD COLUMN timeline TEXT;
+   DROP TABLE routing_decisions;
+   CREATE TABLE acp_sessions (
+     room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+     harness TEXT NOT NULL,
+     session_id TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (room_id, agent_id)
+   );
+   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 ];
+
+export const PERMISSION_POLICIES = ["ask", "allow"] as const;
+export type PermissionPolicy = (typeof PERMISSION_POLICIES)[number];
 
 export interface Agent {
   id: string;
@@ -93,11 +123,17 @@ export interface Agent {
   color: string;
   avatar: string;
   avatarShape: AvatarShape;
-  systemPrompt: string;
-  tools: string[];
-  skills: string[];
-  modelMode: "auto" | "pinned";
-  pinnedModel: string | null;
+  /** Tuantuan-owned identity doc (AGENTS.md-style), delivered to the harness per §3.4 of the plan. */
+  identity: string;
+  /** Harness id from server/harness.ts; "" = not bound yet (onboarding). */
+  harness: string;
+  /** Working directory for private chats; "" = the user's home directory. Groups use the room's cwd. */
+  cwd: string;
+  /** Extra env vars for the harness process (e.g. API keys). Never sent to the browser in full. */
+  env: Record<string, string>;
+  mcpServerIds: string[];
+  /** "ask" shows the permission dialog; "allow" picks the agent's first allow option automatically. */
+  permissionPolicy: PermissionPolicy;
   createdAt: number;
   updatedAt: number;
 }
@@ -115,6 +151,10 @@ export interface Room {
   agentIds: string[];
   /** Set when this DM is the conversation of a device (robot) bound to the agent. */
   deviceId: string | null;
+  /** Group only: who answers when nobody is @-mentioned. */
+  mainAgentId: string | null;
+  /** Group only: shared working directory of all members; "" = home directory. */
+  cwd: string;
   createdAt: number;
 }
 
@@ -132,15 +172,16 @@ export interface Message {
   content: string;
   status: MessageStatus;
   error: string | null;
-  toolCalls: ToolCallRecord[];
+  /** Agent replies: everything the harness streamed (text, thoughts, tool calls, plan). Null for others. */
+  timeline: Timeline | null;
   createdAt: number;
 }
 
-export interface RoutingDecision {
-  messageId: string;
-  plan: RoutingPlan;
-  attempts: Attempt[];
-  chosenModel: string | null;
+export interface AcpSessionRow {
+  roomId: string;
+  agentId: string;
+  harness: string;
+  sessionId: string;
   createdAt: number;
 }
 
@@ -219,20 +260,24 @@ export class Store {
       color: a.color || defaultAvatar(id).color,
       avatar: a.avatar,
       avatar_shape: isAvatarShape(a.avatarShape) ? a.avatarShape : defaultAvatar(id).shape,
-      system_prompt: a.systemPrompt,
-      tools: JSON.stringify(a.tools),
-      skills: JSON.stringify(a.skills),
-      model_mode: a.modelMode,
-      pinned_model: a.modelMode === "pinned" ? a.pinnedModel : null,
+      identity: a.identity,
+      harness: a.harness,
+      cwd: a.cwd,
+      env: JSON.stringify(a.env),
+      permission_policy: a.permissionPolicy,
+      mcp_server_ids: JSON.stringify(a.mcpServerIds),
+      tools: "[]",
+      skills: "[]",
+      model_mode: "auto",
       created_at: createdAt,
       updated_at: updatedAt,
     };
     const sql =
       op === "insert"
-        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,system_prompt,tools,skills,model_mode,pinned_model,created_at,updated_at)
-             VALUES ($id,$name,$color,$avatar,$avatar_shape,$system_prompt,$tools,$skills,$model_mode,$pinned_model,$created_at,$updated_at)`
-        : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,system_prompt=$system_prompt,tools=$tools,skills=$skills,
-             model_mode=$model_mode,pinned_model=$pinned_model,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
+        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,cwd,env,permission_policy,mcp_server_ids,tools,skills,model_mode,created_at,updated_at)
+             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$cwd,$env,$permission_policy,$mcp_server_ids,$tools,$skills,$model_mode,$created_at,$updated_at)`
+        : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,identity=$identity,harness=$harness,cwd=$cwd,env=$env,
+             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
     try {
       this.db.query(sql).run(params);
     } catch (e) {
@@ -282,18 +327,47 @@ export class Store {
     return row ? this.toRoom(row) : null;
   }
 
-  createRoom(name: string, kind: "group" | "dm", agentIds: string[]): Room {
+  createRoom(
+    name: string,
+    kind: "group" | "dm",
+    agentIds: string[],
+    opts: { mainAgentId?: string | null; cwd?: string } = {},
+  ): Room {
     const id = crypto.randomUUID();
     this.db.transaction(() => {
-      this.db.query("INSERT INTO rooms VALUES (?,?,?,?)").run(id, name, kind, Date.now());
+      this.db
+        .query("INSERT INTO rooms (id, name, kind, created_at, cwd) VALUES (?,?,?,?,?)")
+        .run(id, name, kind, Date.now(), opts.cwd ?? "");
       this.setRoomAgentsTx(id, agentIds);
+      if (kind === "group") this.setMainTx(id, opts.mainAgentId ?? null);
     })();
     return this.getRoom(id) as Room;
   }
 
   setRoomAgents(roomId: string, agentIds: string[]): Room {
-    this.db.transaction(() => this.setRoomAgentsTx(roomId, agentIds))();
+    this.db.transaction(() => {
+      this.setRoomAgentsTx(roomId, agentIds);
+      const room = this.getRoom(roomId);
+      if (room?.kind === "group") this.setMainTx(roomId, room.mainAgentId);
+    })();
     return this.getRoom(roomId) as Room;
+  }
+
+  /** Group settings. The main agent must be a member; it falls back to the first member. */
+  updateGroup(roomId: string, patch: { mainAgentId?: string | null; cwd?: string }): Room {
+    this.db.transaction(() => {
+      if (patch.cwd !== undefined) this.db.query("UPDATE rooms SET cwd = ? WHERE id = ?").run(patch.cwd, roomId);
+      if (patch.mainAgentId !== undefined) this.setMainTx(roomId, patch.mainAgentId);
+    })();
+    return this.getRoom(roomId) as Room;
+  }
+
+  private setMainTx(roomId: string, wanted: string | null) {
+    const members = (
+      this.db.query("SELECT agent_id FROM room_agents WHERE room_id = ? ORDER BY rowid").all(roomId) as Row[]
+    ).map((x) => x.agent_id as string);
+    const main = wanted && members.includes(wanted) ? wanted : (members[0] ?? null);
+    this.db.query("UPDATE rooms SET main_agent_id = ? WHERE id = ?").run(main, roomId);
   }
 
   private setRoomAgentsTx(roomId: string, agentIds: string[]) {
@@ -321,6 +395,8 @@ export class Store {
       kind: r.kind as Room["kind"],
       agentIds,
       deviceId: (device?.device_id as string | undefined) ?? null,
+      mainAgentId: (r.main_agent_id as string | null) ?? null,
+      cwd: (r.cwd as string) ?? "",
       createdAt: r.created_at as number,
     };
   }
@@ -333,7 +409,9 @@ export class Store {
     if (existing) return this.getRoom(existing.room_id as string) as Room;
     const id = crypto.randomUUID();
     this.db.transaction(() => {
-      this.db.query("INSERT INTO rooms VALUES (?,?,?,?)").run(id, `桌面机器人 · ${agent.name}`, "dm", Date.now());
+      this.db
+        .query("INSERT INTO rooms (id, name, kind, created_at) VALUES (?,?,?,?)")
+        .run(id, `桌面机器人 · ${agent.name}`, "dm", Date.now());
       this.db.query("INSERT INTO room_agents VALUES (?,?)").run(id, agent.id);
       this.db.query("INSERT INTO device_sessions VALUES (?,?,?,?)").run(deviceId, agent.id, id, Date.now());
     })();
@@ -341,7 +419,7 @@ export class Store {
   }
 
   // ---- messages ----
-  insertMessage(m: Omit<Message, "id" | "seq" | "createdAt" | "toolCalls" | "error"> & { id?: string }): Message {
+  insertMessage(m: Omit<Message, "id" | "seq" | "createdAt" | "timeline" | "error"> & { id?: string }): Message {
     const id = m.id ?? crypto.randomUUID();
     this.db.transaction(() => {
       const { next } = this.db
@@ -349,8 +427,8 @@ export class Store {
         .get(m.roomId) as { next: number };
       this.db
         .query(
-          `INSERT INTO messages (id, room_id, seq, run_id, hop, sender_kind, sender_id, sender_name, content, status, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO messages (id, room_id, seq, run_id, hop, sender_kind, sender_id, sender_name, content, status, created_at, timeline)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           id,
@@ -364,18 +442,20 @@ export class Store {
           m.content,
           m.status,
           Date.now(),
+          m.senderKind === "agent" ? JSON.stringify(emptyTimeline()) : null,
         );
     })();
     return this.getMessage(id) as Message;
   }
 
-  finishMessage(
+  /** Saves reply progress; also used for the final state (status other than "streaming"). */
+  updateReply(
     id: string,
-    patch: { content: string; status: MessageStatus; error?: string | null; toolCalls: ToolCallRecord[] },
+    patch: { content: string; status: MessageStatus; error?: string | null; timeline: Timeline },
   ): Message {
     this.db
-      .query("UPDATE messages SET content = ?, status = ?, error = ?, tool_calls = ? WHERE id = ?")
-      .run(patch.content, patch.status, patch.error ?? null, JSON.stringify(patch.toolCalls), id);
+      .query("UPDATE messages SET content = ?, status = ?, error = ?, timeline = ? WHERE id = ?")
+      .run(patch.content, patch.status, patch.error ?? null, JSON.stringify(patch.timeline), id);
     return this.getMessage(id) as Message;
   }
 
@@ -392,25 +472,40 @@ export class Store {
     return rows.reverse().map(toMessage);
   }
 
-  // ---- routing ----
-  saveRouting(d: Omit<RoutingDecision, "createdAt">) {
-    this.db
-      .query("INSERT OR REPLACE INTO routing_decisions VALUES (?,?,?,?,?)")
-      .run(d.messageId, JSON.stringify(d.plan), JSON.stringify(d.attempts), d.chosenModel, Date.now());
+  // ---- ACP sessions: one per (room, agent) ----
+  getAcpSession(roomId: string, agentId: string): AcpSessionRow | null {
+    const r = this.db
+      .query("SELECT * FROM acp_sessions WHERE room_id = ? AND agent_id = ?")
+      .get(roomId, agentId) as Row | null;
+    return r
+      ? {
+          roomId: r.room_id as string,
+          agentId: r.agent_id as string,
+          harness: r.harness as string,
+          sessionId: r.session_id as string,
+          createdAt: r.created_at as number,
+        }
+      : null;
   }
 
-  routingFor(messageIds: string[]): RoutingDecision[] {
-    if (messageIds.length === 0) return [];
-    const rows = this.db
-      .query(`SELECT * FROM routing_decisions WHERE message_id IN (${messageIds.map(() => "?").join(",")})`)
-      .all(...messageIds) as Row[];
-    return rows.map((r) => ({
-      messageId: r.message_id as string,
-      plan: JSON.parse(r.plan as string),
-      attempts: JSON.parse(r.attempts as string),
-      chosenModel: (r.chosen_model as string | null) ?? null,
-      createdAt: r.created_at as number,
-    }));
+  setAcpSession(roomId: string, agentId: string, harness: string, sessionId: string) {
+    this.db
+      .query("INSERT OR REPLACE INTO acp_sessions VALUES (?,?,?,?,?)")
+      .run(roomId, agentId, harness, sessionId, Date.now());
+  }
+
+  clearAcpSession(roomId: string, agentId: string) {
+    this.db.query("DELETE FROM acp_sessions WHERE room_id = ? AND agent_id = ?").run(roomId, agentId);
+  }
+
+  // ---- settings ----
+  getSetting<T>(key: string, fallback: T): T {
+    const r = this.db.query("SELECT value FROM settings WHERE key = ?").get(key) as Row | null;
+    return r ? (JSON.parse(r.value as string) as T) : fallback;
+  }
+
+  setSetting(key: string, value: unknown) {
+    this.db.query("INSERT OR REPLACE INTO settings VALUES (?, ?)").run(key, JSON.stringify(value));
   }
 }
 
@@ -421,11 +516,12 @@ function toAgent(r: Row): Agent {
     color: r.color as string,
     avatar: r.avatar as string,
     avatarShape: r.avatar_shape as AvatarShape,
-    systemPrompt: r.system_prompt as string,
-    tools: JSON.parse(r.tools as string),
-    skills: JSON.parse(r.skills as string),
-    modelMode: r.model_mode as Agent["modelMode"],
-    pinnedModel: (r.pinned_model as string | null) ?? null,
+    identity: r.identity as string,
+    harness: r.harness as string,
+    cwd: r.cwd as string,
+    env: JSON.parse(r.env as string),
+    mcpServerIds: JSON.parse(r.mcp_server_ids as string),
+    permissionPolicy: r.permission_policy as PermissionPolicy,
     createdAt: r.created_at as number,
     updatedAt: r.updated_at as number,
   };
@@ -444,7 +540,7 @@ function toMessage(r: Row): Message {
     content: r.content as string,
     status: r.status as MessageStatus,
     error: (r.error as string | null) ?? null,
-    toolCalls: JSON.parse(r.tool_calls as string),
+    timeline: r.timeline ? (JSON.parse(r.timeline as string) as Timeline) : null,
     createdAt: r.created_at as number,
   };
 }

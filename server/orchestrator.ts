@@ -1,21 +1,19 @@
-import type { AppConfig } from "./config";
-import type { ChatMessage } from "./llm";
-import type { McpConnections } from "./mcp";
+import type * as acp from "@agentclientprotocol/sdk";
+import { applyUpdate, emptyTimeline, type Timeline, timelineText } from "../shared/timeline";
+import type { TerminalSnapshot } from "./acp";
+import type { HarnessHost, PermissionAsk, SessionView } from "./host";
 import { mentionsEveryone, parseMentions } from "./mentions";
-import { pickResponder, type Selection } from "./picker";
-import { type Attempt, planRoute, type RoutingPlan } from "./router";
-import { type Skill, skillCatalogPrompt } from "./skills";
-import type { Agent, Message, RoutingDecision, Store } from "./store";
+import type { Agent, Message, Room, Store } from "./store";
 import { ValidationError } from "./store";
-import { runToolLoop, type ToolCallRecord } from "./tool-loop";
-import { buildToolRuntime, type DeviceControl, HANDOFF_TOOL } from "./tools";
 
 export type RoomEvent =
   | { type: "message"; message: Message }
-  | { type: "delta"; roomId: string; messageId: string; text: string }
-  | { type: "tools"; roomId: string; messageId: string; toolCalls: ToolCallRecord[] }
-  | { type: "routing"; roomId: string; decision: RoutingDecision }
-  | { type: "room.state"; roomId: string; state: RoomState };
+  /** One ACP session/update for a streaming reply; clients fold it with shared/timeline.ts. */
+  | { type: "update"; roomId: string; messageId: string; update: acp.SessionUpdate }
+  | { type: "room.state"; roomId: string; state: RoomState }
+  | { type: "session"; roomId: string; agentId: string; view: SessionView }
+  | { type: "permission"; roomId: string; ask: PermissionAsk | null; resolvedId?: string }
+  | { type: "terminal"; roomId: string; terminal: TerminalSnapshot };
 
 export interface RoomState {
   /** Human message id whose agent chain is executing, if any. */
@@ -23,76 +21,76 @@ export interface RoomState {
   queued: number;
 }
 
+export interface ImageAttachment {
+  mimeType: string;
+  /** base64, no data: prefix */
+  data: string;
+}
+
 interface Trigger {
   agentId: string;
   hop: number;
-  selection?: Selection;
-  /** Set when another agent handed this work over via the handoff tool. */
-  handoff?: Handoff;
-}
-
-export interface Handoff {
-  fromName: string;
-  task: string;
 }
 
 const INTERJECTION = "被新消息打断";
+/** Agent-to-agent hops per human message (hand-off arrives in M2 via Tuantuan's MCP tool). */
+const MAX_AGENT_HOPS = 5;
+/** Group context sent with a prompt: messages since this agent last spoke, capped. */
+const GROUP_CONTEXT_MESSAGES = 30;
 
 interface RoomRuntime {
-  queue: Message[];
+  queue: { msg: Message; images: ImageAttachment[] }[];
   active: { runId: string; abort: AbortController } | null;
-  /** Resolves when the queue is drained; used by tests and graceful shutdown. */
   idle: Promise<void>;
 }
 
 /**
- * Owns all in-flight agent work. Each room processes one human message chain at a
- * time (later human messages queue); within a chain agents run sequentially in
- * trigger order. Persistent results go to the Store; live progress goes to `publish`.
+ * Owns in-flight agent work. Each room runs one human message chain at a time (later messages
+ * queue; in groups a new message interrupts). Each agent turn is one ACP session/prompt on that
+ * agent's harness; the reply's timeline is persisted and streamed as raw ACP updates.
  */
 export class Orchestrator {
   private rooms = new Map<string, RoomRuntime>();
 
   constructor(
     private store: Store,
-    private config: AppConfig,
-    private skills: Skill[],
-    private mcp: McpConnections,
+    private host: HarnessHost,
     private publish: (roomId: string, event: RoomEvent) => void,
-    private devices: { controlFor(roomId: string): DeviceControl | null } | null = null,
   ) {}
 
-  postHumanMessage(roomId: string, senderName: string, content: string): Message {
+  postHumanMessage(roomId: string, senderName: string, content: string, images: ImageAttachment[] = []): Message {
     const room = this.store.getRoom(roomId);
     if (!room) throw new ValidationError("房间不存在", 404);
     const text = content.trim();
-    if (!text) throw new ValidationError("消息不能为空");
-    const name = senderName.trim() || "我";
+    if (!text && images.length === 0) throw new ValidationError("消息不能为空");
     const id = crypto.randomUUID();
-    const msg = this.store.insertMessage({
+    let msg = this.store.insertMessage({
       id,
       roomId,
       runId: id,
       hop: 0,
       senderKind: "human",
       senderId: null,
-      senderName: name,
+      senderName: senderName.trim() || "我",
       content: text,
       status: "done",
     });
+    if (images.length > 0)
+      msg = this.store.updateReply(id, {
+        content: text,
+        status: "done",
+        timeline: { ...emptyTimeline(), parts: images.map((i) => ({ kind: "image" as const, ...i })) },
+      });
     this.publish(roomId, { type: "message", message: msg });
     const rt = this.runtime(roomId);
-    // Group interjection: a new human message stops the running chain (in-flight reply and
-    // pending hops) so the conversation follows the user. DMs keep queueing in order.
     if (room.kind === "group" && rt.active && !rt.active.abort.signal.aborted)
       rt.active.abort.abort(new DOMException(INTERJECTION, "AbortError"));
-    rt.queue.push(msg);
+    rt.queue.push({ msg, images });
     if (!rt.active && rt.queue.length === 1) rt.idle = this.drain(roomId, rt);
     this.publishState(roomId);
     return msg;
   }
 
-  /** Aborts the running chain and drops queued human messages. Returns false if nothing was running. */
   cancel(roomId: string): boolean {
     const rt = this.rooms.get(roomId);
     if (!rt?.active) return false;
@@ -112,6 +110,27 @@ export class Orchestrator {
     return this.rooms.get(roomId)?.idle ?? Promise.resolve();
   }
 
+  /** Identity doc + room context for an agent, delivered to its harness (plan §3.4). */
+  identityFor(room: Room, agent: Agent): string {
+    const members = room.agentIds
+      .map((id) => this.store.getAgent(id))
+      .filter((a): a is Agent => a !== null && a.id !== agent.id);
+    const context =
+      room.deviceId !== null
+        ? "你正通过一台桌面机器人和用户语音对话：回复要简短、口语化，适合朗读。"
+        : room.kind === "group"
+          ? [
+              `你在团团的群聊「${room.name}」里，名字是「${agent.name}」。用户的消息以「[发言者]: 内容」给出。`,
+              members.length > 0 ? `群里的其他 Agent：${members.map((m) => `@${m.name}`).join("、")}。` : "",
+              room.mainAgentId === agent.id ? "你是本群的主 Agent：没人被 @ 时由你回复。" : "",
+              "回复正文里的 @名字 只是普通文字，不会通知任何人。不要在回复开头写「[名字]:」。",
+            ]
+              .filter(Boolean)
+              .join("")
+          : `你在团团里和用户私聊，你的名字是「${agent.name}」。`;
+    return [context, agent.identity.trim()].filter(Boolean).join("\n\n");
+  }
+
   private runtime(roomId: string): RoomRuntime {
     let rt = this.rooms.get(roomId);
     if (!rt) {
@@ -126,119 +145,89 @@ export class Orchestrator {
   }
 
   private async drain(roomId: string, rt: RoomRuntime): Promise<void> {
-    for (let msg = rt.queue[0]; msg; msg = rt.queue[0]) {
+    for (let item = rt.queue[0]; item; item = rt.queue[0]) {
       const abort = new AbortController();
-      rt.active = { runId: msg.id, abort };
+      rt.active = { runId: item.msg.id, abort };
       rt.queue.shift();
       this.publishState(roomId);
       try {
-        await this.runChain(msg, abort.signal);
+        await this.runChain(item.msg, item.images, abort.signal);
       } catch (e) {
-        this.system(roomId, msg.id, 0, `内部错误，本轮已停止：${(e as Error).message}`);
+        this.system(roomId, item.msg.id, 0, `内部错误，本轮已停止：${(e as Error).message}`);
       }
       rt.active = null;
       this.publishState(roomId);
     }
   }
 
-  private async runChain(human: Message, signal: AbortSignal) {
+  private async runChain(human: Message, images: ImageAttachment[], signal: AbortSignal) {
     const room = this.store.getRoom(human.roomId);
     if (!room) return;
-    const members = () =>
-      (this.store.getRoom(human.roomId)?.agentIds ?? [])
-        .map((id) => this.store.getAgent(id))
-        .filter((a): a is Agent => a !== null);
+    const members = room.agentIds.map((id) => this.store.getAgent(id)).filter((a): a is Agent => a !== null);
 
     let initial: string[];
-    let fanOut = false;
-    let selection: Selection | undefined;
     if (room.kind === "dm") {
       initial = room.agentIds.slice(0, 1);
-      if (initial.length === 0) {
-        this.system(room.id, human.id, 0, "该私聊的 Agent 已被删除，消息不会得到回复。");
-        return;
-      }
+      if (initial.length === 0) return this.system(room.id, human.id, 0, "该私聊的 Agent 已被删除，消息不会得到回复。");
     } else if (mentionsEveryone(human.content)) {
-      fanOut = true;
-      initial = members().map((m) => m.id);
+      initial = members.map((m) => m.id);
     } else {
-      initial = parseMentions(human.content, members());
+      initial = parseMentions(human.content, members);
       if (initial.length === 0) {
-        const pool = members();
-        if (pool.length === 0) {
-          this.system(room.id, human.id, 0, "群里还没有 Agent，消息不会得到回复。");
-          return;
-        }
-        try {
-          selection = await pickResponder(this.config, human.content, pool, signal);
-        } catch (e) {
-          if (signal.aborted) return;
-          throw e;
-        }
-        initial = [selection.agentId];
+        const main = room.mainAgentId ?? members[0]?.id;
+        if (!main) return this.system(room.id, human.id, 0, "群里还没有 Agent，消息不会得到回复。");
+        initial = [main];
       }
     }
 
-    const queue: Trigger[] = initial.map((agentId) => ({ agentId, hop: 1, selection }));
-    const replied = new Set<string>();
-    const maxHops = this.config.limits.maxAgentHops;
+    const queue: Trigger[] = initial.map((agentId) => ({ agentId, hop: 1 }));
     let agentHops = 0;
     while (queue.length > 0) {
       if (signal.aborted) return this.noteInterjection(room.id, human.id, signal, queue);
       const t = queue.shift() as Trigger;
-      // In an @所有人 turn every member answers once; hand-offs to someone who already answered are skipped.
-      if (fanOut && replied.has(t.agentId)) continue;
-      if (t.hop >= 2) {
-        if (agentHops >= maxHops) {
-          const skipped = [t, ...queue].map((x) => this.store.getAgent(x.agentId)?.name ?? x.agentId);
-          this.system(
-            room.id,
-            human.id,
-            t.hop,
-            `已达到每条消息最多 ${maxHops} 次 Agent 互相 @ 的上限，未执行的触发：${skipped.map((n) => `@${n}`).join("、")}`,
-          );
-          return;
-        }
-        agentHops++;
+      if (t.hop >= 2 && ++agentHops > MAX_AGENT_HOPS) {
+        this.system(room.id, human.id, t.hop, `已达到每条消息最多 ${MAX_AGENT_HOPS} 次 Agent 交接的上限。`);
+        return;
       }
       const agent = this.store.getAgent(t.agentId);
       if (!agent) continue;
-      replied.add(agent.id);
-      const handoffs: { agentId: string; task: string }[] = [];
-      const reply = await this.runAgentTurn(agent, human, t.hop, members(), signal, t.selection, t.handoff, handoffs);
-      if (reply.status !== "done") {
-        if (reply.status === "cancelled") return this.noteInterjection(room.id, human.id, signal, queue);
-        continue;
-      }
-      // Only explicit handoff tool calls trigger other agents; "@名字" in reply text is display-only.
-      // An agent already waiting in the queue is not queued twice (e.g. human @A @B, then A hands off to B).
-      for (const h of handoffs)
-        if (!queue.some((q) => q.agentId === h.agentId) && !(fanOut && replied.has(h.agentId)))
-          queue.push({ agentId: h.agentId, hop: t.hop + 1, handoff: { fromName: agent.name, task: h.task } });
+      const reply = await this.runAgentTurn(room, agent, human, images, t.hop, signal);
+      if (reply.status === "cancelled") return this.noteInterjection(room.id, human.id, signal, queue);
     }
   }
 
-  /** After an interjection, says which pending hand-offs were dropped (silent for user cancel, which reports itself). */
   private noteInterjection(roomId: string, runId: string, signal: AbortSignal, pending: Trigger[]) {
     if ((signal.reason as Error | undefined)?.message !== INTERJECTION || pending.length === 0) return;
     const names = pending.map((x) => `@${this.store.getAgent(x.agentId)?.name ?? x.agentId}`);
     this.system(roomId, runId, 0, `${INTERJECTION}，未执行的触发：${names.join("、")}`);
   }
 
+  /** What the agent is told this turn: the human text in a DM; in a group, what happened since it last spoke. */
+  promptFor(room: Room, agent: Agent, human: Message, images: ImageAttachment[]): acp.ContentBlock[] {
+    const imageBlocks: acp.ContentBlock[] = images.map((i) => ({ type: "image", mimeType: i.mimeType, data: i.data }));
+    if (room.kind === "dm") return [{ type: "text", text: human.content }, ...imageBlocks];
+    const history = this.store.recentMessages(room.id, GROUP_CONTEXT_MESSAGES);
+    const lastOwn = history.findLastIndex(
+      (m) => m.senderKind === "agent" && m.senderId === agent.id && m.status === "done",
+    );
+    const lines = history
+      .slice(lastOwn + 1)
+      .filter((m) => m.senderKind !== "system" && m.status !== "streaming" && m.content.trim())
+      .map((m) => `[${m.senderName}]: ${m.content}`);
+    return [{ type: "text", text: lines.join("\n\n") || `[${human.senderName}]: ${human.content}` }, ...imageBlocks];
+  }
+
   private async runAgentTurn(
+    room: Room,
     agent: Agent,
     human: Message,
+    images: ImageAttachment[],
     hop: number,
-    members: Agent[],
     signal: AbortSignal,
-    selection?: Selection,
-    handoff?: Handoff,
-    handoffsOut?: { agentId: string; task: string }[],
   ): Promise<Message> {
-    const { limits } = this.config;
-    const history = this.store.recentMessages(human.roomId, limits.contextMessages);
+    const blocks = this.promptFor(room, agent, human, images);
     const placeholder = this.store.insertMessage({
-      roomId: human.roomId,
+      roomId: room.id,
       runId: human.id,
       hop,
       senderKind: "agent",
@@ -247,94 +236,42 @@ export class Orchestrator {
       content: "",
       status: "streaming",
     });
-    this.publish(human.roomId, { type: "message", message: placeholder });
-
-    const skills = this.skills.filter((s) => agent.skills.includes(s.name));
-    const room = this.store.getRoom(human.roomId);
-    const device = this.devices?.controlFor(human.roomId) ?? undefined;
-    const isGroup = room?.kind === "group" && device === undefined;
-    let systemPrompt = buildSystemPrompt(agent, members, room?.kind ?? "group", skills, device !== undefined);
-    if (handoff) systemPrompt += `\n\n「${handoff.fromName}」把这项工作交给了你：${handoff.task}`;
-    const messages = buildContext(systemPrompt, agent, history, limits.contextChars);
-    const trigger = [...history].reverse().find((m) => m.senderKind !== "system" && m.senderId !== agent.id);
-
-    let content = "";
-    let toolCalls: ToolCallRecord[] = [];
-    const attempts: Attempt[] = [];
-    let plan: RoutingPlan | null = null;
-    let chosenModel: string | null = null;
-    const finish = (status: Message["status"], error: string | null) => {
-      if (plan) {
-        const decision = { messageId: placeholder.id, plan, attempts, chosenModel, createdAt: Date.now() };
-        this.store.saveRouting(decision);
-        this.publish(human.roomId, { type: "routing", roomId: human.roomId, decision });
-      }
-      const done = this.store.finishMessage(placeholder.id, { content, status, error, toolCalls });
-      this.publish(human.roomId, { type: "message", message: done });
+    this.publish(room.id, { type: "message", message: placeholder });
+    let timeline: Timeline = emptyTimeline();
+    let saved = Date.now();
+    const finish = (status: Message["status"], error: string | null, stopReason: string | null = null) => {
+      timeline = { ...timeline, stopReason };
+      const done = this.store.updateReply(placeholder.id, { content: timelineText(timeline), status, error, timeline });
+      this.publish(room.id, { type: "message", message: done });
       return done;
     };
-
     try {
-      const { runtime, warnings } = await buildToolRuntime({
-        toolIds: agent.tools,
-        skills,
-        mcpServers: this.store.listMcpServers(),
-        mcp: this.mcp,
-        device,
-        handoff:
-          isGroup && handoffsOut
-            ? {
-                targets: members.filter((m) => m.id !== agent.id).map((m) => ({ id: m.id, name: m.name })),
-                record: (target, task) => {
-                  if (!handoffsOut.some((h) => h.agentId === target.id)) handoffsOut.push({ agentId: target.id, task });
-                },
-              }
-            : undefined,
-      });
-      const contextChars = messages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0);
-      plan = await planRoute(
-        this.config,
+      const { stopReason } = await this.host.prompt(
+        room,
         agent,
-        {
-          text: trigger?.content ?? human.content,
-          contextTokens: Math.ceil(contextChars / 3),
-          toolCount: runtime.specs.filter((s) => s.function.name !== HANDOFF_TOOL).length,
-          hasImages: false,
+        this.identityFor(room, agent),
+        blocks,
+        (update) => {
+          const next = applyUpdate(timeline, update);
+          if (next === timeline) return;
+          timeline = next;
+          this.publish(room.id, { type: "update", roomId: room.id, messageId: placeholder.id, update });
+          // Checkpoint so a refresh mid-reply still shows progress.
+          if (Date.now() - saved > 1000) {
+            saved = Date.now();
+            this.store.updateReply(placeholder.id, { content: timelineText(timeline), status: "streaming", timeline });
+          }
         },
         signal,
       );
-      if (warnings.length > 0) plan.reason += `；工具警告：${warnings.join("；")}`;
-      if (selection) plan.selection = selection;
-      this.publish(human.roomId, {
-        type: "routing",
-        roomId: human.roomId,
-        decision: { messageId: placeholder.id, plan, attempts: [], chosenModel: null, createdAt: Date.now() },
-      });
-      const result = await runToolLoop({
-        config: this.config,
-        candidates: plan.candidates,
-        messages,
-        tools: runtime,
-        attempts,
-        maxIterations: limits.maxToolIterations,
-        signal,
-        onDelta: (text) => {
-          content += text;
-          this.publish(human.roomId, { type: "delta", roomId: human.roomId, messageId: placeholder.id, text });
-        },
-        onToolCalls: (calls) => {
-          toolCalls = calls.map((c) => ({ ...c }));
-          this.publish(human.roomId, { type: "tools", roomId: human.roomId, messageId: placeholder.id, toolCalls });
-        },
-      });
-      chosenModel = result.modelId ?? null;
-      content = result.content;
-      toolCalls = result.toolCalls;
-      if (result.outcome === "max_iterations")
-        return finish("error", `达到最大工具迭代次数（${limits.maxToolIterations}），回复未完成`);
-      return finish("done", null);
+      if (stopReason === "cancelled" || signal.aborted)
+        return finish("cancelled", (signal.reason as Error | undefined)?.message || "已取消", stopReason);
+      if (stopReason === "refusal") return finish("error", "Agent 拒绝了这个请求", stopReason);
+      if (stopReason === "max_tokens" || stopReason === "max_turn_requests")
+        return finish("error", `回复未完成（${stopReason}）`, stopReason);
+      return finish("done", null, stopReason);
     } catch (e) {
-      if (signal.aborted) return finish("cancelled", (signal.reason as Error | undefined)?.message || "用户取消");
+      if (signal.aborted) return finish("cancelled", (signal.reason as Error | undefined)?.message || "已取消");
       return finish("error", (e as Error).message);
     }
   }
@@ -352,52 +289,4 @@ export class Orchestrator {
     });
     this.publish(roomId, { type: "message", message: msg });
   }
-}
-
-export function buildSystemPrompt(
-  agent: Agent,
-  members: Agent[],
-  kind: "group" | "dm",
-  skills: Skill[],
-  onDevice = false,
-): string {
-  const others = members.filter((m) => m.id !== agent.id).map((m) => `@${m.name}`);
-  const parts = [
-    `你的名字是「${agent.name}」。`,
-    onDevice
-      ? "你正通过一台桌面机器人和用户语音对话：回复要简短、口语化，适合朗读；可以调用 robot_express 设置表情、robot_action 做动作来配合表达。"
-      : kind === "dm"
-        ? "你正在和用户私聊。"
-        : `你在一个群聊中，消息以「[发言者]: 内容」的形式给出。${
-            others.length > 0
-              ? `群里的其他 Agent：${others.join("、")}。回复正文里的 @名字 只是普通文字，不会通知任何人。只有当用户这次的请求确实需要对方现在动手时，才调用 handoff 工具把具体任务交给对方；不要为了介绍、推荐或预告别人能做什么而交接。不要在回复开头写「[名字]:」。`
-              : ""
-          }`,
-    agent.systemPrompt,
-    skillCatalogPrompt(skills),
-  ];
-  return parts.filter(Boolean).join("\n\n");
-}
-
-/**
- * Converts room history into chat messages from this agent's point of view:
- * its own replies are `assistant`, everyone else is `user` prefixed with the speaker
- * name. Oldest messages are dropped first once `maxChars` is exceeded.
- */
-export function buildContext(systemPrompt: string, agent: Agent, history: Message[], maxChars: number): ChatMessage[] {
-  const out: ChatMessage[] = [];
-  let used = systemPrompt.length;
-  for (let i = history.length - 1; i >= 0; i--) {
-    const m = history[i] as Message;
-    if (m.status === "streaming" || m.content.trim() === "") continue;
-    const entry: ChatMessage =
-      m.senderKind === "agent" && m.senderId === agent.id
-        ? { role: "assistant", content: m.content }
-        : { role: "user", content: `[${m.senderName}]: ${m.content}` };
-    const len = (entry.content ?? "").length;
-    if (used + len > maxChars && out.length > 0) break;
-    used += len;
-    out.unshift(entry);
-  }
-  return [{ role: "system", content: systemPrompt }, ...out];
 }
