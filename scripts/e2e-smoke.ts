@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import { chromium, type Page } from "playwright-core";
 import { serve } from "../server/app";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
+import { repliesSmoke } from "./e2e-replies";
+import { terminalSmoke } from "./e2e-terminal";
 
 process.env.TUANTUAN_MOCK_HARNESS = "1";
 // The mock harness starts logged out; onboarding logs in through ACP `authenticate`, which creates this file.
@@ -20,7 +22,10 @@ process.env.TUANTUAN_WORKSPACES = workspaces;
 // adapters and grok/opencode/mock-cli offer one-click installs (mock-cli's installer is a local script).
 const fakeHome = mkdtempSync(join(tmpdir(), "tuantuan-e2e-home-"));
 const fakeShell = join(fakeHome, "login-shell");
-writeFileSync(fakeShell, `#!/bin/sh\nprintf 'PATH=/usr/bin:/bin\\0HOME=${fakeHome}\\0'\n`);
+writeFileSync(
+  fakeShell,
+  `#!/bin/sh\nprintf 'PATH=/usr/bin:/bin\\0HOME=${fakeHome}\\0SHELL=/bin/bash\\0BASH_SILENCE_DEPRECATION_WARNING=1\\0'\n`,
+);
 chmodSync(fakeShell, 0o755);
 process.env.SHELL = fakeShell;
 process.env.TUANTUAN_MOCK_INSTALL_DIR = join(fakeHome, "bin");
@@ -307,7 +312,7 @@ try {
     throw new Error("key not stored");
   await keyBox.fill("再试一次");
   await keyBox.press("Enter");
-  await page.getByText("收到：「再试一次」").waitFor();
+  await page.locator(".messages").getByText("收到：「再试一次」").waitFor();
   await nav("Harness");
   await page.getByRole("heading", { name: "Harness 管理" }).waitFor();
 
@@ -479,8 +484,10 @@ try {
   await input.press("Enter");
   await page.locator(".handoff-card", { hasText: "交接给 @Alice" }).waitFor();
   await page.locator(".handoff-from", { hasText: "接 @Bob 的交接：写一份需求文档" }).waitFor();
-  await page.getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
+  await page.locator(".messages").getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
   await shot("conversation-handoff");
+  await terminalSmoke(browser, `http://localhost:${server.port}`, group.id, project.id, cwd, shotsDir);
+  await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   // Single-agent conversation in 草稿
 
   // No project chosen → 草稿.
@@ -677,12 +684,12 @@ try {
     releaseAnswer();
     await page.unroute(/\/api\/permissions\/[^/]+$/);
   }
-  await page.getByText("已修改 mock-edit.txt。").waitFor();
+  await page.locator(".messages").getByText("已修改 mock-edit.txt。").waitFor();
   if (readFileSync(join(cwd, "mock-edit.txt"), "utf8") !== "hello\ntuantuan\n") throw new Error("edit not applied");
 
   await input.fill("/run");
   await input.press("Enter");
-  await page.getByText("命令跑完了。").waitFor();
+  await page.locator(".messages").getByText("命令跑完了。").waitFor();
   {
     // Tool calls are one collapsed row; the output opens on click.
     const card = page.locator("details.tool", { hasText: "echo hello" }).last();
@@ -697,7 +704,7 @@ try {
   // Already switched to Mock Smart via the composer picker above; sending confirms the preference stuck.
   await input.fill("换模型了");
   await input.press("Enter");
-  await page.getByText("收到：「换模型了」（mock-smart）").waitFor();
+  await page.locator(".messages").getByText("收到：「换模型了」（mock-smart）").waitFor();
   await page.locator(".ctx-usage").waitFor();
   await shot("conversation-capabilities");
 
@@ -968,7 +975,19 @@ try {
     writeFileSync(join(gdir, "usage.json"), JSON.stringify({ ...real, turns }));
     writeFileSync(
       join(gdir, "bin", "grok"),
-      `#!/bin/sh\ncase "$1" in --version) echo "grok 1.0.52";; usage) cat "${join(gdir, "usage.json")}";; *) exit 1;; esac\n`,
+      `#!${process.execPath}
+import { readFileSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+if (process.argv.includes('--version')) { console.log('grok 1.0.52'); process.exit(0); }
+if (process.argv[2] === 'usage') { console.log(readFileSync(${JSON.stringify(join(gdir, "usage.json"))}, 'utf8')); process.exit(0); }
+for await (const line of createInterface({input:process.stdin})) {
+  const r = JSON.parse(line);
+  if (r.id === undefined) continue;
+  const result = r.method === 'initialize' ? { protocolVersion:1, agentCapabilities:{}, authMethods:[] }
+    : r.method === '_x.ai/billing' ? { config:{ creditUsagePercent:10,currentPeriod:{type:'USAGE_PERIOD_TYPE_WEEKLY',end:'2026-10-22T01:00:00Z'},prepaidBalance:{val:1250}},subscription_tier:'SuperGrok' } : null;
+  console.log(JSON.stringify(result ? {jsonrpc:'2.0',id:r.id,result} : {jsonrpc:'2.0',id:r.id,error:{code:-32601,message:'Method not found'}}));
+}
+`,
     );
     chmodSync(join(gdir, "bin", "grok"), 0o755);
   }
@@ -995,11 +1014,14 @@ try {
   await codexCard.getByText("剩 19%").waitFor();
   await codexCard.getByText("plus").waitFor();
   await page.getByTestId("usage-claude-code").getByText("126.0k").first().waitFor();
-  await page.getByTestId("usage-opencode").getByText("暂不支持查询").waitFor();
+  if (await page.getByTestId("usage-opencode").count()) throw new Error("OpenCode quota placeholder remains");
   const grokCard = page.getByTestId("usage-grok");
   await grokCard.getByText("3.9k").first().waitFor();
   await grokCard.getByText("$0.12").waitFor();
-  await grokCard.getByText(/ACP 没有提供/).waitFor();
+  await grokCard.getByRole("button", { name: /刷新/ }).click();
+  await grokCard.getByText("剩 90%").waitFor();
+  await grokCard.getByText("SuperGrok").waitFor();
+  await grokCard.getByText("$12.50").waitFor();
   await page
     .getByTestId("usage-tuantuan")
     .getByText(/\d+ 轮/)
@@ -1343,6 +1365,19 @@ try {
     await dev.goto(`http://localhost:${vitePort}/`);
     await dev.locator(".side-foot .dot.ok").waitFor({ timeout: 15000 });
     await dev.getByText("冒烟会话").first().waitFor();
+    await dev.goto(`http://localhost:${vitePort}/#/c/${group.id}`);
+    await dev.getByRole("button", { name: "打开项目终端" }).click();
+    await dev.waitForFunction(() => document.querySelector(".terminal-status")?.textContent === "");
+    await dev.locator(".xterm-helper-textarea").focus();
+    await dev.keyboard.type("expr 33000 + 123");
+    await dev.keyboard.press("Enter");
+    await dev.waitForFunction(() =>
+      [...document.querySelectorAll(".xterm-accessibility-tree > div")].some(
+        (row) => row.textContent?.trim() === "33123",
+      ),
+    );
+    await dev.getByRole("button", { name: "结束终端" }).click();
+    await dev.getByRole("region", { name: "项目终端" }).waitFor({ state: "detached" });
     await dev.close();
   } finally {
     vite.kill();
@@ -1376,6 +1411,7 @@ try {
 } finally {
   await browser.close();
   app.host.shutdown();
+  await app.projectTerminals.shutdown();
   server.stop(true);
   registry.stop();
   rmSync(cwd, { recursive: true, force: true });

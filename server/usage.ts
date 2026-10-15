@@ -37,6 +37,8 @@ export interface HarnessUsage {
   limitsSource: string | null;
   /** USD spent today, when the harness records prices (Grok's costUsdTicks). */
   costToday?: number | null;
+  /** Purchased Grok credits, in USD; absent when the billing response omits the balance. */
+  creditBalanceUsd?: number | null;
   /** Why something is missing (honest "not available"). */
   notes: string[];
   plan: string | null;
@@ -228,6 +230,56 @@ export function parseCodexStatusMarkdown(md: string): { limits: LimitWindow[]; a
   }
   const account = /\*\*Account:\*\*\s*([^\n]+)/.exec(md)?.[1]?.trim() ?? null;
   return { limits, account };
+}
+
+/** Grok Build's read-only `_x.ai/billing` extension (verified with CLI 1.0.52). */
+export function parseGrokBilling(value: unknown): {
+  limits: LimitWindow[];
+  plan: string | null;
+  creditBalanceUsd: number | null;
+} {
+  const obj = (v: unknown): Record<string, unknown> | null =>
+    v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  const v = obj(value);
+  const config = obj(v?.config);
+  const period = obj(config?.currentPeriod);
+  const finite = (n: unknown): number | null => (typeof n === "number" && Number.isFinite(n) ? n : null);
+  // A present Cent {} is protobuf's representation of zero; a missing Cent stays unknown.
+  const cents = (v: unknown): number | null => {
+    const c = obj(v);
+    return c ? (c.val === undefined ? 0 : finite(c.val)) : null;
+  };
+  const limits: LimitWindow[] = [];
+  const monthly = cents(config?.monthlyLimit);
+  const used = cents(config?.used);
+  const percent =
+    finite(config?.creditUsagePercent) ??
+    (monthly !== null && monthly > 0 && used !== null ? (used / monthly) * 100 : null);
+  const resetsAt =
+    typeof period?.end === "string"
+      ? period.end
+      : typeof config?.billingPeriodEnd === "string"
+        ? config.billingPeriodEnd
+        : null;
+  if (percent !== null && percent >= 0) {
+    const label =
+      period?.type === "USAGE_PERIOD_TYPE_WEEKLY"
+        ? "每周额度"
+        : period?.type === "USAGE_PERIOD_TYPE_MONTHLY" || monthly !== null
+          ? "每月额度"
+          : "当前周期额度";
+    limits.push({ label, usedPercent: percent, resetsAt });
+  }
+  const cap = cents(config?.onDemandCap);
+  const onDemand = cents(config?.onDemandUsed);
+  if (v?.on_demand_enabled !== false && cap !== null && cap > 0 && onDemand !== null && onDemand >= 0)
+    limits.push({ label: "按需消费上限", usedPercent: (onDemand / cap) * 100, resetsAt: null });
+  const prepaid = cents(config?.prepaidBalance);
+  return {
+    limits,
+    plan: typeof v?.subscription_tier === "string" ? v.subscription_tier : null,
+    creditBalanceUsd: prepaid !== null && prepaid >= 0 ? prepaid / 100 : null,
+  };
 }
 
 /**

@@ -6,6 +6,7 @@ import { methods as acpMethods } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
 import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
+import { messagePreview } from "../shared/roomPreview";
 import { replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
@@ -31,6 +32,7 @@ import { installManaged, readManifest, setManagedRoot, uninstallManaged } from "
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import { ProfileSchema, readProfile } from "./profile";
+import { PROJECT_TERMINAL_LIMITS, ProjectTerminals } from "./project-terminal";
 import {
   codexProviderSet,
   PRESETS,
@@ -54,6 +56,7 @@ import {
   type LimitWindow,
   parseClaudeUsageMarkdown,
   parseCodexStatusMarkdown,
+  parseGrokBilling,
 } from "./usage";
 import {
   createProjectDir,
@@ -139,7 +142,7 @@ export interface AppDeps {
 }
 
 /** UI clients subscribe to room topics. */
-type WsData = { kind: "ui"; rooms: Set<string> };
+type WsData = { kind: "ui"; rooms: Set<string> } | { kind: "project-terminal"; id: string; unsubscribe?: () => void };
 
 function loopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname);
@@ -164,6 +167,8 @@ function localRequest(req: Request, url: URL): boolean {
 
 export function createApp(deps: AppDeps) {
   const store = new Store(deps.dbPath);
+  const projectTerminals = new ProjectTerminals();
+  const changingProjects = new Set<string>();
   const dataDir =
     deps.dbPath === ":memory:" ? join(tmpdir(), `tuantuan-data-${process.pid}`) : dirname(resolve(deps.dbPath));
   let server: Server<WsData> | null = null;
@@ -172,6 +177,8 @@ export function createApp(deps: AppDeps) {
     server?.publish(`room:${roomId}`, JSON.stringify(event));
     if (event.type === "room.state") publishAll({ type: "activity", roomId, busy: !!event.state.activeRunId });
     else if (event.type === "message") {
+      const last = messagePreview(event.message);
+      if (last) publishAll({ type: "room.preview", roomId, last });
       const n = notifyForMessage(roomId, event.message);
       if (n) publishAll(n);
     } else if (event.type === "permission" && event.ask) {
@@ -351,24 +358,29 @@ export function createApp(deps: AppDeps) {
 
   /**
    * Live limits straight from the harness: runs its own usage command (Claude Code `/usage`,
-   * codex-acp `/status`) in a throwaway session and parses the Markdown it prints. Uses the
-   * user's own login (no 服务商 override); nothing else is read.
+   * codex-acp `/status`) in a throwaway session and parses the Markdown it prints. Grok uses
+   * its read-only billing extension without a session or prompt. Uses the user's own login.
    */
   const liveLimits = new Map<
     string,
-    { at: number; limits: LimitWindow[]; plan: string | null; error: string | null }
+    { at: number; limits: LimitWindow[]; plan: string | null; error: string | null; creditBalanceUsd?: number | null }
   >();
-  async function harnessLiveLimits(id: "claude-code" | "codex") {
+  async function harnessLiveLimits(id: "claude-code" | "codex" | "grok") {
     const spec = harnessSpec(id);
     if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
     const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
-    const done = (limits: LimitWindow[], plan: string | null, error: string | null) => {
-      const r = { at: Date.now(), limits, plan, error };
+    const done = (
+      limits: LimitWindow[],
+      plan: string | null,
+      error: string | null,
+      creditBalanceUsd?: number | null,
+    ) => {
+      const r = { at: Date.now(), limits, plan, error, creditBalanceUsd };
       liveLimits.set(id, r);
       return r;
     };
     if (!status.command) return done([], null, status.error ?? "未安装");
-    const env = await loginShellEnv();
+    const env = { ...(await loginShellEnv()), ...status.env, ...harnessSecretEnv(store, id) };
     const scratch = mkdtempSync(join(tmpdir(), "tuantuan-usage-"));
     let text = "";
     const p = new AcpProcess(
@@ -383,6 +395,17 @@ export function createApp(deps: AppDeps) {
     );
     try {
       await p.initialize(30_000);
+      if (id === "grok") {
+        // Billing is an ACP extension request, never a prompt or a model call.
+        const billing = await withTimeout(p.agent.request("_x.ai/billing", {}), 30_000, "读取 Grok 额度超时");
+        const r = parseGrokBilling(billing);
+        return done(
+          r.limits,
+          r.plan,
+          r.limits.length || r.creditBalanceUsd !== null ? null : "Grok 未返回额度或余额数据",
+          r.creditBalanceUsd,
+        );
+      }
       const created = await withTimeout(
         p.agent.request(acpMethods.agent.session.new, { cwd: scratch, mcpServers: [] }),
         60_000,
@@ -413,9 +436,19 @@ export function createApp(deps: AppDeps) {
       return done(r.limits, r.account, err);
     } catch (e) {
       const msg = (e as Error).message;
-      return done([], null, /auth/i.test(msg) ? "未登录" : msg);
+      return done(
+        [],
+        null,
+        /auth/i.test(msg)
+          ? "未登录"
+          : id === "grok" && /method not found/i.test(msg)
+            ? "当前 Grok 版本不支持额度查询，请更新 Grok"
+            : msg,
+      );
     } finally {
-      p.kill();
+      // Grok has no session to save here; finish this read-only subprocess immediately.
+      // No graceful-save interval or delayed process-group signal is needed.
+      p.kill(id === "grok" ? "SIGKILL" : "SIGTERM");
       rmSync(scratch, { recursive: true, force: true });
     }
   }
@@ -469,26 +502,24 @@ export function createApp(deps: AppDeps) {
       notes: [...(cx ? [] : ["没有 ~/.codex/sessions 记录"]), ...(cxLive?.error && !liveFresh ? [cxLive.error] : [])],
     });
     const gk = await grokUsage();
+    const gkLive = liveLimits.get("grok");
     out.push({
       harness: "grok",
       today: gk.usage?.today ?? null,
       week: gk.usage?.week ?? null,
       costToday: gk.usage?.costToday ?? null,
-      limits: [],
-      limitsAt: null,
-      limitsSource: gk.usage ? "grok usage <session>" : null,
-      plan: null,
-      notes: [...(gk.note ? [gk.note] : []), "账号额度只在 Grok 界面的 /usage 里显示，ACP 没有提供"],
-    });
-    out.push({
-      harness: "opencode",
-      today: null,
-      week: null,
-      limits: [],
-      limitsAt: null,
-      limitsSource: null,
-      plan: null,
-      notes: ["没有公开的用量 / 额度来源"],
+      limits: gkLive?.limits ?? [],
+      limitsAt: gkLive?.at ?? null,
+      limitsSource:
+        [gkLive ? "Grok ACP x.ai/billing" : null, gk.usage ? "grok usage <session>" : null]
+          .filter(Boolean)
+          .join("；") || null,
+      plan: gkLive?.plan ?? null,
+      creditBalanceUsd: gkLive?.creditBalanceUsd ?? null,
+      notes: [
+        ...(gk.note ? [gk.note] : []),
+        ...(gkLive?.error ? [gkLive.error] : gkLive ? [] : ["额度：点刷新向 Grok 查询"]),
+      ],
     });
     return out;
   }
@@ -841,7 +872,7 @@ export function createApp(deps: AppDeps) {
         return json({ harnesses: await usageOverview() });
       }
       if (id === "grok" && sub === "live" && method === "POST") {
-        await grokUsage(true);
+        await Promise.all([grokUsage(true), harnessLiveLimits(id)]);
         return json({ harnesses: await usageOverview() });
       }
     }
@@ -1088,18 +1119,56 @@ export function createApp(deps: AppDeps) {
       }
       const project = id ? store.getProject(id) : null;
       if (id && !project) return json({ error: "项目不存在" }, 404);
-      if (project && method === "PATCH") {
+      if (project && sub === "terminal") {
+        if (method === "GET") return json(projectTerminals.forProject(project.id));
+        if (method === "POST") {
+          const text = await req.text();
+          const size = z
+            .object({ cols: z.number().optional(), rows: z.number().optional() })
+            .parse(text ? JSON.parse(text) : {});
+          const env = await loginShellEnv();
+          // Login environment loading is async; a project may have been deleted or moved meanwhile.
+          if (changingProjects.has(project.id)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
+          const current = store.getProject(project.id);
+          if (!current) throw new ValidationError("项目不存在", 404);
+          return json(projectTerminals.open(current, env, size.cols, size.rows));
+        }
+        if (method === "DELETE") {
+          const terminalId = url.searchParams.get("terminalId");
+          if (!terminalId) throw new ValidationError("缺少 terminalId");
+          await projectTerminals.remove(project.id, terminalId);
+          return json({ ok: true });
+        }
+      }
+      if (project && !sub && method === "PATCH") {
         const p = ProjectInputSchema.partial().parse(await body());
         const cwd = p.cwd === undefined ? undefined : existingFolder(p.cwd);
-        if (cwd !== undefined && cwd !== project.cwd)
-          for (const r of store.listRooms()) if (r.projectId === project.id) orchestrator.cancel(r.id);
-        return json(store.updateProject(project.id, { name: p.name, cwd }));
+        if (changingProjects.has(project.id)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
+        const current = store.getProject(project.id);
+        if (!current) throw new ValidationError("项目不存在", 404);
+        changingProjects.add(project.id);
+        try {
+          if (cwd !== undefined && cwd !== current.cwd) {
+            await projectTerminals.remove(project.id);
+            for (const r of store.listRooms()) if (r.projectId === project.id) orchestrator.cancel(r.id);
+          }
+          return json(store.updateProject(project.id, { name: p.name, cwd }));
+        } finally {
+          changingProjects.delete(project.id);
+        }
       }
-      if (project && method === "DELETE") {
+      if (project && !sub && method === "DELETE") {
         if (project.id === DRAFTS_PROJECT_ID) throw new ValidationError("「草稿」不能删除");
-        for (const r of store.listRooms()) if (r.projectId === project.id) orchestrator.cancel(r.id);
-        store.deleteProject(project.id);
-        return json({ ok: true });
+        if (changingProjects.has(project.id)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
+        changingProjects.add(project.id);
+        try {
+          await projectTerminals.remove(project.id);
+          for (const r of store.listRooms()) if (r.projectId === project.id) orchestrator.cancel(r.id);
+          store.deleteProject(project.id);
+          return json({ ok: true });
+        } finally {
+          changingProjects.delete(project.id);
+        }
       }
     }
 
@@ -1181,9 +1250,10 @@ export function createApp(deps: AppDeps) {
             senderName: z.string().max(32).default("我"),
             content: z.string().max(100000),
             images: z.array(ImageSchema).max(8).default([]),
+            replyToId: z.string().min(1).max(200).nullable().optional(),
           })
           .parse(await body());
-        return json(orchestrator.postHumanMessage(room.id, m.senderName, m.content, m.images), 201);
+        return json(orchestrator.postHumanMessage(room.id, m.senderName, m.content, m.images, m.replyToId), 201);
       }
       if (room && sub === "cancel" && method === "POST") return json({ cancelled: orchestrator.cancel(room.id) });
     }
@@ -1199,6 +1269,7 @@ export function createApp(deps: AppDeps) {
     mcp,
     installer,
     registry,
+    projectTerminals,
     attach(s: Server<WsData>) {
       server = s;
       mcp.baseUrl = `http://127.0.0.1:${s.port}`;
@@ -1206,6 +1277,12 @@ export function createApp(deps: AppDeps) {
     async fetch(req: Request, srv: Server<WsData>): Promise<Response | undefined> {
       const url = new URL(req.url);
       if (!localRequest(req, url)) return new Response("Only local clients are allowed", { status: 403 });
+      if (url.pathname.startsWith("/ws/terminal/")) {
+        const id = url.pathname.slice("/ws/terminal/".length);
+        if (!projectTerminals.get(id)) return json({ error: "终端不存在" }, 404);
+        if (srv.upgrade(req, { data: { kind: "project-terminal", id } })) return undefined;
+        return new Response("WebSocket upgrade failed", { status: 400 });
+      }
       if (url.pathname === "/ws") {
         if (srv.upgrade(req, { data: { kind: "ui", rooms: new Set<string>() } })) return undefined;
         return new Response("WebSocket upgrade failed", { status: 400 });
@@ -1230,11 +1307,33 @@ export function createApp(deps: AppDeps) {
       return new Response("Not found", { status: 404 });
     },
     websocket: {
+      maxPayloadLength: PROJECT_TERMINAL_LIMITS.message,
       open(ws: ServerWebSocket<WsData>) {
         if (ws.data.kind === "ui") ws.subscribe("all");
+        else {
+          try {
+            ws.data.unsubscribe = projectTerminals.subscribe(ws.data.id, (event) => {
+              if (ws.send(JSON.stringify(event)) < 0) ws.close(1013, "终端输出过快，请重新连接");
+            });
+          } catch (error) {
+            ws.send(JSON.stringify({ type: "error", error: (error as Error).message }));
+            ws.close(1008, "终端不存在");
+          }
+        }
+      },
+      close(ws: ServerWebSocket<WsData>) {
+        if (ws.data.kind === "project-terminal") ws.data.unsubscribe?.();
       },
       message(ws: ServerWebSocket<WsData>, raw: string | Buffer) {
         const data = ws.data;
+        if (data.kind === "project-terminal") {
+          try {
+            projectTerminals.message(data.id, String(raw));
+          } catch (error) {
+            ws.send(JSON.stringify({ type: "error", error: (error as Error).message }));
+          }
+          return;
+        }
         let msg: { type?: string; roomId?: string };
         try {
           msg = JSON.parse(String(raw));

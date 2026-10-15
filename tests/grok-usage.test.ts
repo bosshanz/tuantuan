@@ -4,7 +4,72 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProviderSecret } from "../server/providers";
 import { providerBalance } from "../server/providers";
-import { grokLocalUsage } from "../server/usage";
+import { grokLocalUsage, parseGrokBilling } from "../server/usage";
+
+describe("Grok ACP billing", () => {
+  test("reads the current weekly allowance and subscription returned by Grok 1.0.52", () => {
+    expect(
+      parseGrokBilling({
+        config: {
+          creditUsagePercent: 10,
+          currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", end: "2026-10-22T01:23:11.236248+00:00" },
+          prepaidBalance: { val: 0 },
+          onDemandCap: { val: 0 },
+          onDemandUsed: { val: 0 },
+        },
+        subscription_tier: "SuperGrok",
+      }),
+    ).toEqual({
+      limits: [{ label: "每周额度", usedPercent: 10, resetsAt: "2026-10-22T01:23:11.236248+00:00" }],
+      plan: "SuperGrok",
+      creditBalanceUsd: 0,
+    });
+  });
+
+  test("legacy monthly credits, on-demand cap and purchased credits keep their units", () => {
+    expect(
+      parseGrokBilling({
+        config: {
+          monthlyLimit: { val: 10000 },
+          used: { val: 2500 },
+          onDemandCap: { val: 2000 },
+          onDemandUsed: { val: 500 },
+          prepaidBalance: { val: 1250 },
+          billingPeriodEnd: "2026-11-01T00:00:00Z",
+        },
+      }),
+    ).toEqual({
+      limits: [
+        { label: "每月额度", usedPercent: 25, resetsAt: "2026-11-01T00:00:00Z" },
+        { label: "按需消费上限", usedPercent: 25, resetsAt: null },
+      ],
+      plan: null,
+      creditBalanceUsd: 12.5,
+    });
+  });
+
+  test("current usage takes precedence; disabled on-demand and absent or malformed data remain unknown", () => {
+    expect(
+      parseGrokBilling({ config: { creditUsagePercent: 0, monthlyLimit: { val: 100 }, used: { val: 99 } } }).limits[0]
+        ?.usedPercent,
+    ).toBe(0);
+    expect(
+      parseGrokBilling({
+        config: { onDemandCap: { val: 100 }, onDemandUsed: {}, prepaidBalance: {} },
+        on_demand_enabled: false,
+      }),
+    ).toEqual({ limits: [], plan: null, creditBalanceUsd: 0 });
+    for (const config of [
+      null,
+      {},
+      { monthlyLimit: {}, used: {} },
+      { creditUsagePercent: "10", prepaidBalance: { val: "0" } },
+      { creditUsagePercent: Number.NaN, prepaidBalance: { val: -1 } },
+    ])
+      expect(parseGrokBilling({ config })).toEqual({ limits: [], plan: null, creditBalanceUsd: null });
+    expect(parseGrokBilling(null)).toEqual({ limits: [], plan: null, creditBalanceUsd: null });
+  });
+});
 
 const xai = (x: Partial<ProviderSecret> = {}): ProviderSecret => ({
   id: "x",

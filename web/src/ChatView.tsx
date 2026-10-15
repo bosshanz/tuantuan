@@ -9,11 +9,15 @@ import {
   History,
   PanelRight,
   Plus,
+  Reply,
+  SquareTerminal,
   Trash2,
   Users,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
+import { canQuoteMessage, type MessageQuote, messageQuote } from "../../shared/messageQuote";
+import "./messageQuote.css";
 import type { ReplayTurn, Timeline } from "../../shared/timeline";
 import {
   type Agent,
@@ -38,6 +42,16 @@ import { insertSkill, matchingSkills, skillTokenAt } from "./skillCompletion";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
+const ProjectTerminal = lazy(() => import("./ProjectTerminal"));
+
+function terminalWasOpen(projectId: string | null) {
+  if (!projectId) return false;
+  try {
+    return sessionStorage.getItem(`tuantuan.terminal.${projectId}`) === "open";
+  } catch {
+    return false;
+  }
+}
 
 interface ImageAttachment {
   mimeType: string;
@@ -72,10 +86,40 @@ export function ChatView(props: {
   const [replay, setReplay] = useState<ReplayTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [images, setImages] = useState<ImageAttachment[]>([]);
+  const [quote, setQuote] = useState<MessageQuote | null>(null);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const wide = useMediaQuery("(min-width: 1181px)");
   const [panel, setPanel] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(() => terminalWasOpen(room.projectId));
+  const [terminalMounted, setTerminalMounted] = useState(terminalOpen);
+  const terminalButton = useRef<HTMLButtonElement>(null);
+  const showTerminal = useCallback(
+    (open: boolean) => {
+      setTerminalOpen(open);
+      if (open) setTerminalMounted(true);
+      try {
+        sessionStorage.setItem(`tuantuan.terminal.${room.projectId}`, open ? "open" : "closed");
+      } catch {
+        /* Private browsing may disable session storage. */
+      }
+      if (!open) terminalButton.current?.focus();
+    },
+    [room.projectId],
+  );
+  useEffect(() => {
+    const toggle = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.code === "Backquote" && !event.isComposing && props.project) {
+        event.preventDefault();
+        event.stopPropagation();
+        showTerminal(!terminalOpen);
+      }
+    };
+    window.addEventListener("keydown", toggle, true);
+    return () => window.removeEventListener("keydown", toggle, true);
+  }, [terminalOpen, props.project, showTerminal]);
   const panelPresence = usePresence(panel, 180);
   const listRef = useRef<HTMLDivElement>(null);
   // Content or size changes move the edges without a scroll event.
@@ -176,17 +220,21 @@ export function ChatView(props: {
 
   const send = async () => {
     const content = draft.trim();
-    if (!content && images.length === 0) return;
+    if (sendingRef.current || (!content && images.length === 0)) return;
+    sendingRef.current = true;
+    setSending(true);
     setSendError(null);
-    setDraft("");
     const imgs = images;
-    setImages([]);
     try {
       const sent = await api<Message>("POST", `/api/rooms/${room.id}/messages`, {
         senderName: props.userName,
         content,
         images: imgs,
+        replyToId: quote?.messageId,
       });
+      setDraft("");
+      setImages([]);
+      setQuote(null);
       // The server's reply is authoritative: show it now even if the socket is slow, reconnecting or raced.
       dispatch({ type: "event", event: { type: "message", message: sent } });
       requestAnimationFrame(() => {
@@ -194,9 +242,10 @@ export function ChatView(props: {
         if (el) el.scrollTop = el.scrollHeight;
       });
     } catch (e) {
-      setDraft(content);
-      setImages(imgs);
       setSendError(`发送失败：${(e as Error).message}`);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   };
 
@@ -261,230 +310,279 @@ export function ChatView(props: {
   const ask = asks[0];
 
   return (
-    <div className="chat-wrap">
-      <div className="chat">
-        <header className="main-head chat-head">
-          <button
-            type="button"
-            className="btn ghost icon back-btn"
-            onClick={props.onBack}
-            aria-label="返回会话列表"
-            data-shot="open-nav"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <button
-            type="button"
-            className="title-pill"
-            title={roomSubtitle(room, agents)}
-            onClick={() => setPanel(true)}
-          >
-            <RoomIcon room={room} agents={agents} size={22} />
-            <h2>{room.name}</h2>
-          </button>
-          {!(panel && wide) && (
+    <div className="conversation-workspace">
+      <div className="chat-wrap">
+        <div className="chat">
+          <header className="main-head chat-head">
             <button
               type="button"
-              className="btn ghost icon"
-              aria-pressed={panel}
-              aria-label={panel ? "收起详情面板" : "展开详情面板"}
-              title="详情面板"
-              onClick={() => {
-                setPanel((v) => !v);
-                setSelected(null);
-              }}
+              className="btn ghost icon back-btn"
+              onClick={props.onBack}
+              aria-label="返回会话列表"
+              data-shot="open-nav"
             >
-              <PanelRight size={18} />
+              <ChevronLeft size={18} />
             </button>
-          )}
-        </header>
+            <button
+              type="button"
+              className="title-pill"
+              title={roomSubtitle(room, agents)}
+              onClick={() => setPanel(true)}
+            >
+              <RoomIcon room={room} agents={agents} size={22} />
+              <h2>{room.name}</h2>
+            </button>
+            <div className="chat-head-actions">
+              {props.project && (
+                <button
+                  ref={terminalButton}
+                  type="button"
+                  className="btn ghost icon"
+                  aria-label={terminalOpen ? "收起项目终端" : "打开项目终端"}
+                  title="终端（Ctrl+`）"
+                  aria-expanded={terminalOpen}
+                  onClick={() => showTerminal(!terminalOpen)}
+                >
+                  <SquareTerminal size={18} />
+                </button>
+              )}
+              {!(panel && wide) && (
+                <button
+                  type="button"
+                  className="btn ghost icon"
+                  aria-pressed={panel}
+                  aria-label={panel ? "收起详情面板" : "展开详情面板"}
+                  title="详情面板"
+                  onClick={() => {
+                    setPanel((v) => !v);
+                    setSelected(null);
+                  }}
+                >
+                  <PanelRight size={18} />
+                </button>
+              )}
+            </div>
+          </header>
 
-        {loadError && (
-          <div className="form-error" role="alert" style={{ margin: 12 }}>
-            <AlertTriangle size={15} /> 消息加载失败：{loadError}
-          </div>
-        )}
-
-        <div className="messages-wrap">
-          <div
-            className="messages"
-            ref={listRef}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              const wrap = el.parentElement;
-              if (!wrap) return;
-              wrap.toggleAttribute("data-scrolled", el.scrollTop > 4);
-              wrap.toggleAttribute("data-more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
-            }}
-          >
-            {messages.length === 0 && replay.length === 0 && !loadError && (
-              <div className="empty">
-                <RoomIcon room={room} agents={agents} />
-                <h2 style={{ fontSize: 17 }}>
-                  {members.length > 1 ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
-                </h2>
-                {primary && !primary.harness && (
-                  <p className="muted">
-                    {primary.name} 还没有绑定 Harness，<a href={`#/a/${primary.id}`}>去设置</a>或
-                    <a href="#/harness">管理 Harness</a>。
-                  </p>
-                )}
-                {members.length > 1 && (
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-                    {members.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        className="chip-btn"
-                        onClick={() => setDraft((d) => `${d}@${a.name} `)}
-                      >
-                        <AgentAvatar agent={a} size={16} />
-                        <span>@{a.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {replay.length > 0 && primary && (
-              <ReplayHistory turns={replay} agentName={primary.name} terminals={terminals} />
-            )}
-            {groups.map((g) =>
-              g.kind === "system" ? (
-                <div key={g.messages[0]?.id} className="system-line" role="note">
-                  <span>{g.messages[0]?.content}</span>
-                </div>
-              ) : (
-                <div key={g.messages[0]?.id} className="msg-group" data-kind={g.kind}>
-                  {g.kind === "agent" ? (
-                    <LiveAvatar agent={agentById.get(g.senderId ?? "")} name={g.senderName} last={g.messages.at(-1)} />
-                  ) : (
-                    <HumanAvatar name={g.senderName} size={36} />
-                  )}
-                  <div className="msg-head">
-                    <span className="name">{g.senderName}</span>
-                    {g.kind === "agent" && !agentById.has(g.senderId ?? "") && <span className="badge">已删除</span>}
-                    <span className="time">{formatTime(g.messages[0]?.createdAt ?? 0)}</span>
-                  </div>
-                  {g.messages.map((m) => (
-                    <MessageItem
-                      key={m.id}
-                      m={m}
-                      terminals={terminals}
-                      mentionNames={mentionNames}
-                      selected={selected === m.id && panel}
-                      onDetails={() => openDetails(m.id)}
-                      harnessId={agentById.get(m.senderId ?? "")?.harness}
-                    />
-                  ))}
-                </div>
-              ),
-            )}
-          </div>
-          <div className="msg-fade msg-fade-top" aria-hidden />
-          <div className="msg-fade msg-fade-bottom" aria-hidden />
-        </div>
-
-        <footer className="composer">
-          {sendError && (
-            <div className="error-text" role="alert" style={{ marginBottom: 6 }}>
-              {sendError}
+          {loadError && (
+            <div className="form-error" role="alert" style={{ margin: 12 }}>
+              <AlertTriangle size={15} /> 消息加载失败：{loadError}
             </div>
           )}
-          <Composer
-            value={draft}
-            onChange={setDraft}
-            onSubmit={() => void send()}
-            members={members.length > 1 ? members : []}
-            interrupts={members.length > 1 && running}
-            placeholder={
-              primaryView?.commands.length || primaryView?.skills.length ? "发消息，/ 命令 · $ Skills…" : "发消息…"
-            }
-            commands={primaryView?.commands ?? []}
-            skills={primaryView?.skills ?? []}
-            images={images}
-            onImages={setImages}
-            imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
-            running={running}
-            queued={state.queued}
-            replyingName={replying?.senderName}
-            onStop={() => void cancel()}
-            modelPicker={<SessionChips members={members} sessions={sessions} onPick={pickOption} />}
-            usage={primaryView && members.length === 1 ? <CtxUsage view={primaryView} /> : null}
-          />
-        </footer>
-      </div>
 
-      {ask && (
-        <PermissionDialog
-          key={ask.id}
-          ask={ask}
-          agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
-          terminals={terminals}
-          pending={answers[ask.id]?.pending ?? false}
-          error={answers[ask.id]?.error ?? null}
-          onAnswer={(optionId) => void answer(ask.id, optionId)}
-        />
-      )}
-
-      {panelPresence.mounted && (
-        <>
-          {!wide && (
-            // biome-ignore lint/a11y/noStaticElementInteractions: scrim closes the overlay panel; the close button is the keyboard path
-            // biome-ignore lint/a11y/useKeyWithClickEvents: see above
-            <div className="scrim" data-state={panelPresence.state} onClick={() => setPanel(false)} />
-          )}
-          {/* The slot reserves the panel's column and resizes in step with the slide, so the chat never jumps. */}
-          <div className="details-slot" data-state={panelPresence.state}>
-            <aside className="details" data-state={panelPresence.state} aria-label="详情面板">
-              <div className="details-head">
-                {selectedMsg && (
-                  <button
-                    type="button"
-                    className="btn ghost icon"
-                    aria-label="返回会话信息"
-                    title="返回会话信息"
-                    onClick={() => setSelected(null)}
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                )}
-                <h3>{selectedMsg ? "回复详情" : ""}</h3>
-                <div className="details-actions">
-                  <button
-                    type="button"
-                    className="btn ghost icon"
-                    aria-label="关闭详情面板"
-                    onClick={() => setPanel(false)}
-                  >
-                    <X size={16} />
-                  </button>
+          <div className="messages-wrap">
+            <div
+              className="messages"
+              ref={listRef}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                const wrap = el.parentElement;
+                if (!wrap) return;
+                wrap.toggleAttribute("data-scrolled", el.scrollTop > 4);
+                wrap.toggleAttribute("data-more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+              }}
+            >
+              {messages.length === 0 && replay.length === 0 && !loadError && (
+                <div className="empty">
+                  <RoomIcon room={room} agents={agents} />
+                  <h2 style={{ fontSize: 17 }}>
+                    {members.length > 1 ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
+                  </h2>
+                  {primary && !primary.harness && (
+                    <p className="muted">
+                      {primary.name} 还没有绑定 Harness，<a href={`#/a/${primary.id}`}>去设置</a>或
+                      <a href="#/harness">管理 Harness</a>。
+                    </p>
+                  )}
+                  {members.length > 1 && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                      {members.map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className="chip-btn"
+                          onClick={() => setDraft((d) => `${d}@${a.name} `)}
+                        >
+                          <AgentAvatar agent={a} size={16} />
+                          <span>@{a.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-              <div className="details-body">
-                {selectedMsg ? (
-                  <MessageDetails
-                    m={selectedMsg}
-                    agent={agentById.get(selectedMsg.senderId ?? "")}
-                    harnessName={props.harnessName}
-                  />
+              )}
+              {replay.length > 0 && primary && (
+                <ReplayHistory turns={replay} agentName={primary.name} terminals={terminals} />
+              )}
+              {groups.map((g) =>
+                g.kind === "system" ? (
+                  <div key={g.messages[0]?.id} className="system-line" role="note">
+                    <span>{g.messages[0]?.content}</span>
+                  </div>
                 ) : (
-                  <RoomInfo
-                    room={room}
-                    project={props.project}
-                    agents={agents}
-                    members={members}
-                    messages={messages}
-                    sessions={sessions}
-                    harnessName={props.harnessName}
-                    onRoomChange={props.onRoomChange}
-                    onDeleted={props.onDeleted}
-                  />
-                )}
-              </div>
-            </aside>
+                  <div key={g.messages[0]?.id} className="msg-group" data-kind={g.kind}>
+                    {g.kind === "agent" ? (
+                      <LiveAvatar
+                        agent={agentById.get(g.senderId ?? "")}
+                        name={g.senderName}
+                        last={g.messages.at(-1)}
+                      />
+                    ) : (
+                      <HumanAvatar name={g.senderName} size={36} />
+                    )}
+                    <div className="msg-head">
+                      <span className="name">{g.senderName}</span>
+                      {g.kind === "agent" && !agentById.has(g.senderId ?? "") && <span className="badge">已删除</span>}
+                      <span className="time">{formatTime(g.messages[0]?.createdAt ?? 0)}</span>
+                    </div>
+                    {g.messages.map((m) => (
+                      <MessageItem
+                        key={m.id}
+                        m={m}
+                        onQuote={
+                          room.kind === "group" && canQuoteMessage(m) ? () => setQuote(messageQuote(m)) : undefined
+                        }
+                        quoteDisabled={sending}
+                        terminals={terminals}
+                        mentionNames={mentionNames}
+                        selected={selected === m.id && panel}
+                        onDetails={() => openDetails(m.id)}
+                        harnessId={agentById.get(m.senderId ?? "")?.harness}
+                      />
+                    ))}
+                  </div>
+                ),
+              )}
+            </div>
+            <div className="msg-fade msg-fade-top" aria-hidden />
+            <div className="msg-fade msg-fade-bottom" aria-hidden />
           </div>
-        </>
+
+          <footer className="composer">
+            {sendError && (
+              <div className="error-text" role="alert" style={{ marginBottom: 6 }}>
+                {sendError}
+              </div>
+            )}
+            <Composer
+              value={draft}
+              quote={quote}
+              onCancelQuote={() => setQuote(null)}
+              sending={sending}
+              onChange={setDraft}
+              onSubmit={() => void send()}
+              members={members.length > 1 ? members : []}
+              interrupts={members.length > 1 && running}
+              placeholder={
+                primaryView?.commands.length || primaryView?.skills.length ? "发消息，/ 命令 · $ Skills…" : "发消息…"
+              }
+              commands={primaryView?.commands ?? []}
+              skills={primaryView?.skills ?? []}
+              images={images}
+              onImages={setImages}
+              imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
+              running={running}
+              queued={state.queued}
+              replyingName={replying?.senderName}
+              onStop={() => void cancel()}
+              modelPicker={<SessionChips members={members} sessions={sessions} onPick={pickOption} />}
+              usage={primaryView && members.length === 1 ? <CtxUsage view={primaryView} /> : null}
+            />
+          </footer>
+        </div>
+
+        {ask && (
+          <PermissionDialog
+            key={ask.id}
+            ask={ask}
+            agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
+            terminals={terminals}
+            pending={answers[ask.id]?.pending ?? false}
+            error={answers[ask.id]?.error ?? null}
+            onAnswer={(optionId) => void answer(ask.id, optionId)}
+          />
+        )}
+
+        {panelPresence.mounted && (
+          <>
+            {!wide && (
+              // biome-ignore lint/a11y/noStaticElementInteractions: scrim closes the overlay panel; the close button is the keyboard path
+              // biome-ignore lint/a11y/useKeyWithClickEvents: see above
+              <div className="scrim" data-state={panelPresence.state} onClick={() => setPanel(false)} />
+            )}
+            {/* The slot reserves the panel's column and resizes in step with the slide, so the chat never jumps. */}
+            <div className="details-slot" data-state={panelPresence.state}>
+              <aside className="details" data-state={panelPresence.state} aria-label="详情面板">
+                <div className="details-head">
+                  {selectedMsg && (
+                    <button
+                      type="button"
+                      className="btn ghost icon"
+                      aria-label="返回会话信息"
+                      title="返回会话信息"
+                      onClick={() => setSelected(null)}
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                  )}
+                  <h3>{selectedMsg ? "回复详情" : ""}</h3>
+                  <div className="details-actions">
+                    <button
+                      type="button"
+                      className="btn ghost icon"
+                      aria-label="关闭详情面板"
+                      onClick={() => setPanel(false)}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+                <div className="details-body">
+                  {selectedMsg ? (
+                    <MessageDetails
+                      m={selectedMsg}
+                      agent={agentById.get(selectedMsg.senderId ?? "")}
+                      harnessName={props.harnessName}
+                    />
+                  ) : (
+                    <RoomInfo
+                      room={room}
+                      project={props.project}
+                      agents={agents}
+                      members={members}
+                      messages={messages}
+                      sessions={sessions}
+                      harnessName={props.harnessName}
+                      onRoomChange={props.onRoomChange}
+                      onDeleted={props.onDeleted}
+                    />
+                  )}
+                </div>
+              </aside>
+            </div>
+          </>
+        )}
+      </div>
+      {terminalMounted && props.project && (
+        <Suspense
+          fallback={
+            terminalOpen ? (
+              <div className="terminal-loading" role="status">
+                正在打开终端…
+              </div>
+            ) : null
+          }
+        >
+          <ProjectTerminal
+            project={props.project}
+            visible={terminalOpen}
+            onHide={() => showTerminal(false)}
+            onEnded={() => {
+              showTerminal(false);
+              setTerminalMounted(false);
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );
@@ -528,6 +626,8 @@ function MessageItem(props: {
   selected: boolean;
   onDetails: () => void;
   harnessId?: string;
+  onQuote?: () => void;
+  quoteDisabled?: boolean;
 }) {
   const { m } = props;
   const streaming = m.status === "streaming";
@@ -536,10 +636,12 @@ function MessageItem(props: {
   return (
     <div
       className="msg"
+      data-message-id={m.id}
       data-sender={m.senderKind}
       data-status={m.status}
       data-fresh={Date.now() - m.createdAt < 4000 ? "" : undefined}
     >
+      {m.quote && <QuoteExcerpt quote={m.quote} />}
       {t?.handoffFrom && (
         <div className="handoff-from">
           <ArrowRightLeft size={12} />
@@ -592,6 +694,12 @@ function MessageItem(props: {
           <span>{m.error ?? "回复被中断"}</span>
         </div>
       )}
+      {props.onQuote && (
+        <button type="button" className="quote-reply" onClick={props.onQuote} disabled={props.quoteDisabled}>
+          <Reply size={13} aria-hidden />
+          引用回复
+        </button>
+      )}
       {m.senderKind === "agent" && !streaming && (
         <div className="msg-meta">
           {m.status === "cancelled" && (
@@ -615,6 +723,15 @@ function MessageItem(props: {
         </div>
       )}
     </div>
+  );
+}
+
+function QuoteExcerpt({ quote }: { quote: MessageQuote }) {
+  return (
+    <blockquote className="message-quote" aria-label={`引用 ${quote.senderName} 的消息`}>
+      <span className="message-quote-author">{quote.senderName}</span>
+      <span className="message-quote-text">{quote.text}</span>
+    </blockquote>
   );
 }
 
@@ -988,6 +1105,9 @@ const EVERYONE = { id: "__everyone", name: "所有人" } as const;
 
 function Composer(props: {
   value: string;
+  quote: MessageQuote | null;
+  onCancelQuote: () => void;
+  sending: boolean;
   onChange: (v: string) => void;
   onSubmit: () => void;
   members: Agent[];
@@ -1010,17 +1130,21 @@ function Composer(props: {
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const addFiles = async (files: Iterable<File>) => {
+    if (props.sending) return;
     const next = [...props.images];
     for (const f of files) if (f.type.startsWith("image/")) next.push(await readImage(f));
     props.onImages(next.slice(0, 8));
   };
   const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (props.quote) ref.current?.focus();
+  }, [props.quote]);
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerId = useId();
   const [caret, setCaret] = useState(0);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
-  const query = /(?:^|\s)@([^\s@]*)$/.exec(props.value.slice(0, caret));
+  const query = props.sending ? null : /(?:^|\s)@([^\s@]*)$/.exec(props.value.slice(0, caret));
   const q = (query?.[1] ?? "").toLowerCase();
   // "所有人" is offered first in groups with 2+ agents; it matches 所有人 / all / everyone.
   const everyone =
@@ -1030,14 +1154,15 @@ function Composer(props: {
       ? [...(everyone ? [EVERYONE] : []), ...props.members.filter((a) => a.name.toLowerCase().includes(q))]
       : [];
   // / = harness commands (available_commands_update); $ = skills (Codex and Tuantuan-managed).
-  const slash = /^\/(\S*)$/.exec(props.value.slice(0, caret));
-  const dollar = skillTokenAt(props.value, caret);
+  const slash = props.sending ? null : /^\/(\S*)$/.exec(props.value.slice(0, caret));
+  const dollar = props.sending ? null : skillTokenAt(props.value, caret);
   const commands =
     slash && !dismissed && options.length === 0
       ? props.commands.filter((c) => c.name.toLowerCase().startsWith((slash[1] ?? "").toLowerCase())).slice(0, 12)
       : [];
   const skillHits = dollar && !dismissed && options.length === 0 ? matchingSkills(props.skills, dollar.query) : [];
   const pickCommand = (name: string, prefix: "/" | "$") => {
+    if (props.sending) return;
     const next =
       prefix === "$" && dollar
         ? insertSkill(props.value, dollar, name)
@@ -1070,6 +1195,7 @@ function Composer(props: {
   }, [props.value]);
 
   const pick = (a: Pick<Agent, "name">) => {
+    if (props.sending) return;
     const before = props.value.slice(0, caret).replace(/@[^\s@]*$/, `@${a.name} `);
     props.onChange(before + props.value.slice(caret));
     setCaret(before.length);
@@ -1130,6 +1256,7 @@ function Composer(props: {
               <img src={`data:${img.mimeType};base64,${img.data}`} alt={`附件 ${i + 1}`} />
               <button
                 type="button"
+                disabled={props.sending}
                 aria-label="移除图片"
                 onClick={() => props.onImages(props.images.filter((_, j) => j !== i))}
               >
@@ -1166,7 +1293,25 @@ function Composer(props: {
           ))}
         </div>
       )}
+      {props.quote && (
+        <div className="composer-quote" data-testid="composer-quote">
+          <QuoteExcerpt quote={props.quote} />
+          <button
+            type="button"
+            className="btn ghost icon sm"
+            aria-label="取消引用"
+            disabled={props.sending}
+            onClick={() => {
+              props.onCancelQuote();
+              ref.current?.focus();
+            }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
       <textarea
+        readOnly={props.sending}
         ref={ref}
         rows={1}
         value={props.value}
@@ -1176,6 +1321,7 @@ function Composer(props: {
         aria-activedescendant={picker ? `${pickerId}-${active % picker.items.length}` : undefined}
         placeholder={props.placeholder}
         onChange={(e) => {
+          if (props.sending) return;
           props.onChange(e.target.value);
           setCaret(e.target.selectionStart);
           setActive(0);
@@ -1190,6 +1336,10 @@ function Composer(props: {
           }
         }}
         onKeyDown={(e) => {
+          if (props.sending) {
+            if (e.key === "Enter") e.preventDefault();
+            return;
+          }
           if (e.nativeEvent.isComposing) return;
           if (picker && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
             e.preventDefault();
@@ -1242,6 +1392,7 @@ function Composer(props: {
               <button
                 type="button"
                 className="btn ghost icon sm"
+                disabled={props.sending}
                 aria-label="添加图片"
                 title={props.imageNote || "添加图片"}
                 onClick={() => fileRef.current?.click()}
@@ -1255,7 +1406,7 @@ function Composer(props: {
         <div className="composer-status">
           {props.usage}
           {(() => {
-            const stop = !!props.running && !props.value.trim() && props.images.length === 0;
+            const stop = !!props.running && (props.sending || (!props.value.trim() && props.images.length === 0));
             const label = stop ? "停止" : "发送";
             return (
               <button
@@ -1263,7 +1414,7 @@ function Composer(props: {
                 className="send-btn"
                 data-mode={stop ? "stop" : "send"}
                 onClick={stop ? props.onStop : props.onSubmit}
-                disabled={!stop && !props.value.trim() && props.images.length === 0}
+                disabled={!stop && (props.sending || (!props.value.trim() && props.images.length === 0))}
                 aria-label={label}
                 title={
                   stop

@@ -24,6 +24,7 @@ const stop = async () => {
   stopping = true;
   app.host.shutdown();
   app.installer.shutdown();
+  await app.projectTerminals.shutdown();
   server.stop(true);
   // Process groups get a TERM grace period followed by KILL; keep the escalation timer alive.
   await Bun.sleep(300);

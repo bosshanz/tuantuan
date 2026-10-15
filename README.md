@@ -17,7 +17,8 @@
 
 - **桌面版**（macOS / Windows / Linux，Electron）或浏览器 + 本机服务。
 - **Harness**：自动发现你自己装的版本；没有时一键装到团团自己的目录（官方 ACP Registry，固定版本、校验和、不用 sudo）；握手测试与登录引导。
-- **会话**：按项目分组；单 Agent 直接对话，多 Agent 支持 @、@所有人、主 Agent、`handoff` 交接。
+- **会话**：按项目分组；单 Agent 直接对话，多 Agent 支持 @、@所有人、主 Agent、`handoff` 交接和引用回复。侧栏随回复完成更新预览，断线重连后补齐。
+- **项目终端**：会话右上角打开内嵌交互式终端（macOS / Linux），默认进入项目目录；支持 Ctrl+C、调整高度、收起及重连。每个项目复用一个 shell，收起不会结束命令。
 - **服务商与用量**：给 Claude Code / Codex / 自定义 API 配置服务商（Key 只在服务端、打码显示），只读导入 CC Switch，查看本机用量和余额。
 - **Skills**：自动发现 `~/.agents`、`~/.claude`、`~/.codex`、插件和项目里的 Skills，按 Agent 勾选；可从链接或文件夹导入。
 - **通知**：「通知」页提供主开关与回复完成、需要批准、出错、需要登录或 Key 的分类开关；测试发送与签名诊断已移除。看着当前会话时不提醒，其他会话保留未读计数。
@@ -233,7 +234,7 @@ Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的
 
 ![Token 统计](docs/screenshots/usage-dashboard.png)
 
-**额度**（同一页，每个 Harness 一张卡片，可单独刷新）：
+**额度**（同一页，支持查询的 Harness 各有卡片，可单独刷新）：
 
 | 来源 | 内容 | 说明 |
 | --- | --- | --- |
@@ -241,9 +242,9 @@ Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的
 | Claude Code `/usage`（点刷新） | 5 小时 / 每周额度、重置时间、套餐 | 由 claude-agent-acp 自己查询；只用 API Key 时没有额度信息 |
 | Codex 本机记录 `~/.codex/sessions/**/rollout-*.jsonl` | token、`rate_limits`（5 小时 / 每周）、套餐 | 取最新一条 `token_count` |
 | Codex `/status`（点刷新） | 额度 | 需要已 `codex login` |
-| Grok：官方 `grok usage <session-id>`（文档建议用它，不直接读会话文件） | 今天 / 7 天 token、今天花费（有价格时） | 只查最近 7 天动过的会话；账号额度只在 Grok 界面的 `/usage` 里，ACP 没有提供，如实注明 |
+| Grok：官方 `grok usage <session-id>` | 今天 / 7 天 token、今天花费（有价格时） | 只查最近 7 天动过的会话 |
+| Grok ACP `x.ai/billing` 扩展（点刷新） | 周期额度、重置时间、套餐、预付余额 | 沿用 Grok 自己的登录；只握手和查询，不创建会话、不发模型请求；旧版本不支持时提示更新 |
 | Grok 每轮 ACP 返回的 `_meta.usage` | 计入「团团今天」 | |
-| OpenCode | — | 没有公开来源，显示「暂不支持查询」 |
 | 余额：xAI `GET /v1/api-key`（检查 Key / 团队是否被停用，拿 team_id）+ Management API `GET /v1/billing/teams/{team_id}/prepaid/balance`（需另填 Management Key） | 预付余额（美元） | 没填 Management Key 时只显示 Key 状态 |
 | 余额：DeepSeek `/user/balance`、OpenRouter `/api/v1/credits`、Kimi `/v1/users/me/balance`、硅基流动 `/v1/user/info` | 余额 | 其它服务商显示「没有公开的余额接口」 |
 | 团团自己 | 今天每个 Harness / 服务商的轮数和 token | 来自每轮 ACP `session/prompt` 返回的 `usage` |

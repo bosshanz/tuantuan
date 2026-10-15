@@ -288,10 +288,16 @@ function UsageCard({ u, onUpdate }: { u: HarnessUsage; onUpdate: (h: HarnessUsag
                 <LimitBar key={l.label} l={l} />
               ))}
             </div>
-          ) : (
+          ) : typeof u.creditBalanceUsd !== "number" ? (
             <div className="usage-na muted">额度未知</div>
-          )}
+          ) : null}
           <div className="toks">
+            {typeof u.creditBalanceUsd === "number" && (
+              <div className="tok">
+                <span className="muted">预付余额</span>
+                <b>${u.creditBalanceUsd.toFixed(2)}</b>
+              </div>
+            )}
             <Tokens label="今天" t={u.today} />
             <Tokens label="7 天" t={u.week} />
             {typeof u.costToday === "number" && (
