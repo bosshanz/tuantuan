@@ -45,7 +45,14 @@ const KIND_LABEL: Record<OptKind, string> = {
   thinking: "思考",
   other: "",
 };
-const ID_LABEL: Record<string, string> = { fast: "快速", fast_mode: "快速", verbosity: "详细度", sandbox: "沙箱" };
+const ID_LABEL: Record<string, string> = {
+  fast: "快速模式",
+  fast_mode: "快速模式",
+  "fast-mode": "快速模式",
+  collaboration_mode: "协作模式",
+  verbosity: "详细度",
+  sandbox: "沙箱",
+};
 
 const VALUES: Record<string, Record<string, string>> = {
   mode: {
@@ -59,6 +66,7 @@ const VALUES: Record<string, Record<string, string>> = {
     "read-only": "只读",
     readonly: "只读",
     "full-access": "完全访问",
+    "agent-full-access": "完全访问",
     "danger-full-access": "完全访问",
     yolo: "全部允许",
   },
@@ -73,12 +81,14 @@ const VALUES: Record<string, Record<string, string>> = {
     max: "最高",
   },
   bool: { on: "开", off: "关", true: "开", false: "关", enabled: "开", disabled: "关" },
+  collaboration_mode: { default: "默认", plan: "计划" },
 };
 
 const DANGER = new Set([
   "bypasspermissions",
   "danger-full-access",
   "full-access",
+  "agent-full-access",
   "yolo",
   "dangerously-skip-permissions",
 ]);
@@ -101,11 +111,14 @@ function flatChoices(o: acp.SessionConfigOption): { value: string; name: string;
   return out;
 }
 
-function choice(kind: OptKind, c: { value: string; name: string; description?: string | null }): OptChoice {
+function choice(kind: OptKind, c: { value: string; name: string; description?: string | null }, id = ""): OptChoice {
   return {
     value: c.value,
     name: c.name,
-    label: choiceLabel(kind, c.value, c.name),
+    label:
+      id === "collaboration_mode"
+        ? (VALUES.collaboration_mode?.[c.value] ?? c.name)
+        : choiceLabel(kind, c.value, c.name),
     description: c.description ?? null,
     danger: DANGER.has(c.value.toLowerCase()),
     recommended: /recommended|推荐/i.test(c.name),
@@ -119,7 +132,7 @@ export function describeOptions(configOptions: acp.SessionConfigOption[], modes?
     const kind = optKind(o);
     const label = KIND_LABEL[kind] || ID_LABEL[o.id.toLowerCase()] || o.name;
     if (o.type === "select") {
-      const choices = flatChoices(o).map((c) => choice(kind, c));
+      const choices = flatChoices(o).map((c) => choice(kind, c, o.id));
       // two-valued on/off selects read like switches
       out.push({
         id: o.id,

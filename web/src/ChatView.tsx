@@ -7,36 +7,34 @@ import {
   CircleSlash,
   CircleStop,
   History,
-  ImagePlus,
-  Loader2,
   PanelRight,
   Plus,
   Trash2,
   Users,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyUpdate, emptyTimeline, type ReplayTurn, type Timeline, timelineText } from "../../shared/timeline";
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
+import type { ReplayTurn, Timeline } from "../../shared/timeline";
 import {
   type Agent,
+  ApiError,
   api,
   type Message,
-  type PermissionAsk,
   type Project,
   type Room,
-  type RoomState,
   type SessionView,
   type TerminalSnapshot,
   type WsEvent,
 } from "./api";
 import { agentActivity, messageExpression } from "./avatarState";
 import { SessionChips } from "./ConfigChips";
+import { type ChatSnapshot, chatReducer, emptyChat } from "./chatState";
 import type { Opt } from "./config";
 import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
 import { MissingKey } from "./HarnessAuth";
-import { mergeMessages, upsertMessage } from "./messageMerge";
 import { usePresence } from "./motion";
 import { PickList } from "./PickList";
+import { insertSkill, matchingSkills, skillTokenAt } from "./skillCompletion";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
@@ -67,11 +65,9 @@ export function ChatView(props: {
   onDeleted: () => void;
 }) {
   const { room, agents } = props;
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [state, setState] = useState<RoomState>({ activeRunId: null, queued: 0 });
-  const [sessions, setSessions] = useState<Record<string, SessionView>>({});
-  const [asks, setAsks] = useState<PermissionAsk[]>([]);
-  const [terminals, setTerminals] = useState<Record<string, TerminalSnapshot>>({});
+  const [{ messages, state, sessions, asks, terminals }, dispatch] = useReducer(chatReducer, room.id, emptyChat);
+  const [answers, setAnswers] = useState<Record<string, { pending: boolean; error: string | null }>>({});
+  const pendingAnswers = useRef(new Set<string>());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [replay, setReplay] = useState<ReplayTurn[]>([]);
   const [draft, setDraft] = useState("");
@@ -109,51 +105,35 @@ export function ChatView(props: {
 
   useEffect(() => {
     let alive = true;
-    setSessions({});
-    setAsks([]);
+    let requestId = 0;
     const load = async () => {
+      const id = ++requestId;
+      dispatch({ type: "load", roomId: room.id, id });
       try {
-        const data = await api<{
-          messages: Message[];
-          state: RoomState;
-          sessions: Record<string, SessionView>;
-          asks: PermissionAsk[];
-        }>("GET", `/api/rooms/${room.id}/messages?limit=200`);
-        if (!alive) return;
-        // A snapshot can be older than live events that arrived while it was in flight: merge, never replace.
-        setMessages((prev) => mergeMessages(data.messages, prev, room.id));
-        setState(data.state);
-        setSessions((s) => ({ ...data.sessions, ...s }));
-        setAsks(data.asks);
+        const data = await api<ChatSnapshot>("GET", `/api/rooms/${room.id}/messages?limit=200`);
+        if (!alive || id !== requestId) return;
+        dispatch({ type: "snapshot", roomId: room.id, id, data });
         setLoadError(null);
       } catch (e) {
-        if (alive) setLoadError((e as Error).message);
+        if (!alive || id !== requestId) return;
+        dispatch({ type: "load.failed", roomId: room.id, id });
+        setLoadError((e as Error).message);
       }
     };
     void load();
     const off = props.subscribeEvents((e) => {
       if (e.type === "subscribed" && e.roomId === room.id) {
-        setState(e.state);
+        dispatch({ type: "event", event: { ...e, type: "room.state" } });
         void load();
-      } else if (e.type === "message" && e.message.roomId === room.id) {
-        setMessages((ms) => upsertMessage(ms, e.message));
-      } else if (e.type === "update" && e.roomId === room.id) {
-        setMessages((ms) =>
-          ms.map((m) => {
-            if (m.id !== e.messageId) return m;
-            const timeline = applyUpdate(m.timeline ?? emptyTimeline(), e.update);
-            return { ...m, timeline, content: timelineText(timeline) };
-          }),
-        );
-      } else if (e.type === "session" && e.roomId === room.id) {
-        setSessions((s) => ({ ...s, [e.agentId]: e.view }));
-      } else if (e.type === "permission" && e.roomId === room.id) {
-        const ask = e.ask;
-        setAsks((a) => (ask ? [...a.filter((x) => x.id !== ask.id), ask] : a.filter((x) => x.id !== e.resolvedId)));
-      } else if (e.type === "terminal" && e.roomId === room.id) {
-        setTerminals((t) => ({ ...t, [e.terminal.terminalId]: e.terminal }));
-      } else if (e.type === "room.state" && e.roomId === room.id) {
-        setState(e.state);
+      } else if (
+        e.type === "message" ||
+        e.type === "update" ||
+        e.type === "session" ||
+        e.type === "permission" ||
+        e.type === "terminal" ||
+        e.type === "room.state"
+      ) {
+        dispatch({ type: "event", event: e });
       }
     });
     return () => {
@@ -170,7 +150,7 @@ export function ChatView(props: {
       if (!a.harness || sessions[a.id] || warming.current.has(key)) continue;
       warming.current.add(key);
       api<SessionView>("GET", `/api/rooms/${room.id}/agents/${a.id}/session`).then(
-        (v) => setSessions((s) => ({ ...s, [a.id]: v })),
+        (view) => dispatch({ type: "event", event: { type: "session", roomId: room.id, agentId: a.id, view } }),
         () => {}, // errors (not installed / login needed) surface when a message is sent
       );
     }
@@ -187,7 +167,6 @@ export function ChatView(props: {
 
   // Open at the latest message; afterwards stick to the bottom only when the reader is already there.
   const opened = useRef(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: run on every content change
   useEffect(() => {
     const el = listRef.current;
     if (!el || messages.length === 0) return;
@@ -209,7 +188,7 @@ export function ChatView(props: {
         images: imgs,
       });
       // The server's reply is authoritative: show it now even if the socket is slow, reconnecting or raced.
-      setMessages((ms) => upsertMessage(ms, sent));
+      dispatch({ type: "event", event: { type: "message", message: sent } });
       requestAnimationFrame(() => {
         const el = listRef.current;
         if (el) el.scrollTop = el.scrollHeight;
@@ -229,10 +208,31 @@ export function ChatView(props: {
     }
   };
 
-  const answer = useCallback(async (askId: string, optionId: string | null) => {
-    setAsks((a) => a.filter((x) => x.id !== askId));
-    await api("POST", `/api/permissions/${askId}`, { optionId }).catch(() => {});
-  }, []);
+  const answer = useCallback(
+    async (askId: string, optionId: string | null) => {
+      if (pendingAnswers.current.has(askId)) return;
+      pendingAnswers.current.add(askId);
+      setAnswers((a) => ({ ...a, [askId]: { pending: true, error: null } }));
+      try {
+        await api("POST", `/api/permissions/${askId}`, { optionId });
+        dispatch({ type: "event", event: { type: "permission", roomId: room.id, ask: null, resolvedId: askId } });
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) {
+          // Another client or cancellation already resolved this request.
+          dispatch({ type: "event", event: { type: "permission", roomId: room.id, ask: null, resolvedId: askId } });
+        } else {
+          setAnswers((a) => ({
+            ...a,
+            [askId]: { pending: false, error: `授权提交失败：${(e as Error).message}。请重试。` },
+          }));
+        }
+      } finally {
+        pendingAnswers.current.delete(askId);
+        setAnswers((a) => ({ ...a, [askId]: { pending: false, error: a[askId]?.error ?? null } }));
+      }
+    },
+    [room.id],
+  );
 
   const pickOption = async (agentId: string, opt: Opt, value: string) => {
     try {
@@ -243,7 +243,7 @@ export function ChatView(props: {
               configId: opt.id,
               value: opt.type === "boolean" ? value === "true" : value,
             });
-      setSessions((s) => ({ ...s, [agentId]: v }));
+      dispatch({ type: "event", event: { type: "session", roomId: room.id, agentId, view: v } });
     } catch (e) {
       setSendError((e as Error).message);
     }
@@ -409,12 +409,8 @@ export function ChatView(props: {
             queued={state.queued}
             replyingName={replying?.senderName}
             onStop={() => void cancel()}
-            modelPicker={
-              <>
-                {primaryView && members.length === 1 && <CtxUsage view={primaryView} />}
-                <SessionChips members={members} sessions={sessions} onPick={pickOption} />
-              </>
-            }
+            modelPicker={<SessionChips members={members} sessions={sessions} onPick={pickOption} />}
+            usage={primaryView && members.length === 1 ? <CtxUsage view={primaryView} /> : null}
           />
         </footer>
       </div>
@@ -425,6 +421,8 @@ export function ChatView(props: {
           ask={ask}
           agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
           terminals={terminals}
+          pending={answers[ask.id]?.pending ?? false}
+          error={answers[ask.id]?.error ?? null}
           onAnswer={(optionId) => void answer(ask.id, optionId)}
         />
       )}
@@ -1003,6 +1001,7 @@ function Composer(props: {
   /** null = the harness does not take images (button hidden). */
   imageNote: string | null;
   modelPicker?: React.ReactNode;
+  usage?: React.ReactNode;
   /** A reply is in flight: the send button becomes 停止 while the draft is empty. */
   running?: boolean;
   queued?: number;
@@ -1016,6 +1015,8 @@ function Composer(props: {
     props.onImages(next.slice(0, 8));
   };
   const ref = useRef<HTMLTextAreaElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerId = useId();
   const [caret, setCaret] = useState(0);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -1030,22 +1031,22 @@ function Composer(props: {
       : [];
   // / = harness commands (available_commands_update); $ = skills (Codex and Tuantuan-managed).
   const slash = /^\/(\S*)$/.exec(props.value.slice(0, caret));
-  const dollar = /^\$(\S*)$/.exec(props.value.slice(0, caret));
+  const dollar = skillTokenAt(props.value, caret);
   const commands =
     slash && !dismissed && options.length === 0
       ? props.commands.filter((c) => c.name.toLowerCase().startsWith((slash[1] ?? "").toLowerCase())).slice(0, 12)
       : [];
-  const skillHits =
-    dollar && !dismissed && options.length === 0
-      ? props.skills.filter((c) => c.name.toLowerCase().startsWith((dollar[1] ?? "").toLowerCase())).slice(0, 12)
-      : [];
+  const skillHits = dollar && !dismissed && options.length === 0 ? matchingSkills(props.skills, dollar.query) : [];
   const pickCommand = (name: string, prefix: "/" | "$") => {
-    const v = `${prefix}${name} `;
-    props.onChange(v + props.value.slice(caret));
-    setCaret(v.length);
+    const next =
+      prefix === "$" && dollar
+        ? insertSkill(props.value, dollar, name)
+        : { value: `${prefix}${name} ${props.value.slice(caret)}`, caret: name.length + 2 };
+    props.onChange(next.value);
+    setCaret(next.caret);
     requestAnimationFrame(() => {
       ref.current?.focus();
-      ref.current?.setSelectionRange(v.length, v.length);
+      ref.current?.setSelectionRange(next.caret, next.caret);
     });
   };
   const picker = commands.length
@@ -1053,6 +1054,12 @@ function Composer(props: {
     : skillHits.length
       ? { kind: "skill" as const, items: skillHits, prefix: "$" as const, title: "Skills" }
       : null;
+  const pickerCount = picker?.items.length ?? 0;
+  const pickerQuery = dollar?.query ?? slash?.[1] ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rendered selection and filtered results change the scroll target
+  useEffect(() => {
+    pickerRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [active, pickerCount, pickerQuery]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resize on value change
   useEffect(() => {
@@ -1084,19 +1091,27 @@ function Composer(props: {
       }}
     >
       {picker && (
-        <div className="popover mention-pop slash-pop" role="listbox" aria-label={picker.title}>
+        <div
+          ref={pickerRef}
+          id={pickerId}
+          className="popover mention-pop slash-pop"
+          role="listbox"
+          aria-label={picker.title}
+          style={picker.kind === "skill" ? { maxHeight: "min(320px, 50dvh)", overflowY: "auto" } : undefined}
+        >
           <div className="pop-title">{picker.title}</div>
           {picker.items.map((c, i) => (
             <button
               type="button"
               role="option"
+              id={`${pickerId}-${i}`}
               aria-selected={i === active % picker.items.length}
               key={c.name}
               className="pop-item"
               onMouseDown={(e) => {
                 e.preventDefault();
-                pickCommand(c.name, picker.prefix);
               }}
+              onClick={() => pickCommand(c.name, picker.prefix)}
             >
               <code className="slash-name">
                 {picker.prefix}
@@ -1156,6 +1171,9 @@ function Composer(props: {
         rows={1}
         value={props.value}
         aria-label="消息输入框"
+        aria-autocomplete={picker ? "list" : undefined}
+        aria-controls={picker ? pickerId : undefined}
+        aria-activedescendant={picker ? `${pickerId}-${active % picker.items.length}` : undefined}
         placeholder={props.placeholder}
         onChange={(e) => {
           props.onChange(e.target.value);
@@ -1172,12 +1190,13 @@ function Composer(props: {
           }
         }}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
           if (picker && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
             e.preventDefault();
             setActive((i) => (i + (e.key === "ArrowDown" ? 1 : picker.items.length - 1)) % picker.items.length);
           } else if (picker && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
             const c = picker.items[active % picker.items.length] as { name: string };
-            if (props.value.trim() !== `${picker.prefix}${c.name}`) {
+            if (picker.prefix === "$" || props.value.trim() !== `${picker.prefix}${c.name}`) {
               e.preventDefault();
               pickCommand(c.name, picker.prefix);
             } else if (e.key === "Enter") {
@@ -1200,65 +1219,70 @@ function Composer(props: {
           }
         }}
       />
-      <div className="composer-foot">
-        {props.imageNote !== null && (
-          <>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/png,image/jpeg,image/gif,image/webp"
-              multiple
-              hidden
-              onChange={(e) => {
-                void addFiles(e.target.files ?? []);
-                e.target.value = "";
-              }}
-            />
-            <button
-              type="button"
-              className="btn ghost icon sm"
-              aria-label="添加图片"
-              title={props.imageNote || "添加图片"}
-              onClick={() => fileRef.current?.click()}
-            >
-              <Plus size={17} />
-            </button>
-          </>
-        )}
-        {props.members.length > 0 && props.value.trim() ? (
+      {props.members.length > 0 && props.value.trim() && (
+        <div className="composer-recipients">
           <Recipients text={props.value} members={props.members} interrupts={props.interrupts} />
-        ) : (
-          <span className="grow" />
-        )}
-        {props.modelPicker}
-        {(() => {
-          const stop = !!props.running && !props.value.trim() && props.images.length === 0;
-          const label = stop ? "停止" : "发送";
-          return (
-            <button
-              type="button"
-              className="send-btn"
-              data-mode={stop ? "stop" : "send"}
-              onClick={stop ? props.onStop : props.onSubmit}
-              disabled={!stop && !props.value.trim() && props.images.length === 0}
-              aria-label={label}
-              title={
-                stop
-                  ? `停止${props.replyingName ? ` · ${props.replyingName} 正在回复` : ""}${props.queued ? ` · ${props.queued} 条排队中` : ""}`
-                  : props.queued
-                    ? `发送 · ${props.queued} 条排队中`
-                    : "发送"
-              }
-            >
-              <span className="send-ico send-ico-arrow" aria-hidden>
-                <ArrowUp size={17} />
-              </span>
-              <span className="send-ico send-ico-stop" aria-hidden>
-                <i />
-              </span>
-            </button>
-          );
-        })()}
+        </div>
+      )}
+      <div className="composer-foot">
+        <div className="composer-tools">
+          {props.imageNote !== null && (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                hidden
+                onChange={(e) => {
+                  void addFiles(e.target.files ?? []);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="btn ghost icon sm"
+                aria-label="添加图片"
+                title={props.imageNote || "添加图片"}
+                onClick={() => fileRef.current?.click()}
+              >
+                <Plus size={17} />
+              </button>
+            </>
+          )}
+          {props.modelPicker}
+        </div>
+        <div className="composer-status">
+          {props.usage}
+          {(() => {
+            const stop = !!props.running && !props.value.trim() && props.images.length === 0;
+            const label = stop ? "停止" : "发送";
+            return (
+              <button
+                type="button"
+                className="send-btn"
+                data-mode={stop ? "stop" : "send"}
+                onClick={stop ? props.onStop : props.onSubmit}
+                disabled={!stop && !props.value.trim() && props.images.length === 0}
+                aria-label={label}
+                title={
+                  stop
+                    ? `停止${props.replyingName ? ` · ${props.replyingName} 正在回复` : ""}${props.queued ? ` · ${props.queued} 条排队中` : ""}`
+                    : props.queued
+                      ? `发送 · ${props.queued} 条排队中`
+                      : "发送"
+                }
+              >
+                <span className="send-ico send-ico-arrow" aria-hidden>
+                  <ArrowUp size={17} />
+                </span>
+                <span className="send-ico send-ico-stop" aria-hidden>
+                  <i />
+                </span>
+              </button>
+            );
+          })()}
+        </div>
       </div>
     </div>
   );

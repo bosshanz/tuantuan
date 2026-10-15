@@ -20,12 +20,13 @@
 - **会话**：按项目分组；单 Agent 直接对话，多 Agent 支持 @、@所有人、主 Agent、`handoff` 交接。
 - **服务商与用量**：给 Claude Code / Codex / 自定义 API 配置服务商（Key 只在服务端、打码显示），只读导入 CC Switch，查看本机用量和余额。
 - **Skills**：自动发现 `~/.agents`、`~/.claude`、`~/.codex`、插件和项目里的 Skills，按 Agent 勾选；可从链接或文件夹导入。
+- **通知**：「通知」页提供主开关与回复完成、需要批准、出错、需要登录或 Key 的分类开关；测试发送与签名诊断已移除。看着当前会话时不提醒，其他会话保留未读计数。
 - 模型、登录由 Harness 自己管理；团团从不改 `~/.claude` / `~/.codex`。
 - 不装任何 CLI 也能体验：`TUANTUAN_MOCK_HARNESS=1` 启用内置 mock ACP agent。
 
 ## 快速开始
 
-需要 [Bun](https://bun.sh)（开发与测试使用 1.4.2；Skill 解析依赖内置的 `Bun.YAML`，更早版本未验证）。
+需要 [Bun](https://bun.sh)。CI 固定为 1.4.2；本轮本机在 1.3.14 上通过完整检查、构建与 Chrome 冒烟，见 [修复记录](docs/plan-harness-acp.md#2026-10-15-本机边界与状态恢复修复)。Skill 解析依赖内置的 `Bun.YAML`；其他版本未验证。
 
 ```bash
 git clone https://github.com/bosshanz/tuantuan.git
@@ -45,7 +46,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 2. 「Agents → + 新建」创建 Agent：选 Harness、权限策略、身份文档、MCP 服务器和环境变量。
 3. 「会话」侧栏按**项目**分组。先建项目（新建目录，或选择已有文件夹；根目录默认 `~/Tuantuan`，可用 `TUANTUAN_WORKSPACES` 改），再在项目下建会话。未选项目时进默认项目「草稿」（`~/Tuantuan/drafts`）。会话共用项目目录；2+ Agent 时可设**主 Agent**。更换项目目录会重置该项目下会话的 Harness 上下文。
 
-生产方式：`bun run build && bun start`（API 同时托管 `web/dist`，访问 http://localhost:8787）。
+生产方式：`bun run build && bun start`（API 同时托管 `web/dist`，访问 http://localhost:8787）。API 默认只监听 `127.0.0.1`；HTTP（含 MCP）与 WebSocket 升级均校验本机 Host、浏览器 Origin 和跨站请求标记，正常的本机 Vite 代理可用。原生本机客户端可省略 Origin。`TUANTUAN_HOST` 可改监听地址，但不会关闭请求检查，也不提供远程访问鉴权。
 
 ## 桌面版（Electron）
 
@@ -82,7 +83,7 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 
 ![Harness 页：内置适配器与一键安装](docs/screenshots/harness.png)
 
-一键安装只在你点按钮后运行官方安装命令：后台执行，日志实时显示，可取消，失败时显示最后一行错误，完成后自动重新检测。不会用 sudo；某种方式在这台机器上不可用（没有 curl / brew，npm 全局目录需要 sudo）时按钮置灰并说明原因。都不可用时显示手动安装命令。
+一键安装只在你点按钮后运行官方安装命令：后台执行，日志实时显示，可取消，失败时显示最后一行错误，完成后自动重新检测。取消或超时会回收安装命令及其子进程组。不会用 sudo；某种方式在这台机器上不可用（没有 curl / brew，npm 全局目录需要 sudo）时按钮置灰并说明原因。都不可用时显示手动安装命令。
 
 ### ACP Registry 与「更多 Agent」
 
@@ -90,6 +91,7 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 
 - 常用列表：Claude Code、Codex、Grok Build、OpenCode、Pi、MiniMax Code。「更多 Agent」列出 Registry 里所有 Agent（图标、名称、简介、版本、协议、平台），可搜索。
 - 一键安装只在点按钮后执行，装到团团自己的目录（`<数据目录>/harnesses/agents/<id>/<版本>`，可用 `TUANTUAN_HARNESS_DIR` 改），固定版本，不用 sudo，不装全局：npx 包用团团自带的 Bun 安装运行；需要 Node ≥ 22 的（如 MiniMax Code）自动下载团团专用的 Node 22（校验 SHASUMS256）；uvx 包用你的 uv，没有就下载一份；二进制包按平台下载，带 sha256 时校验。
+- Registry 的 Agent id、版本必须是安全的单个目录段；拒绝路径穿越和保留名称。二进制 / npx 安装先写入独立随机暂存目录，成功后更新版本目录与 manifest，失败或取消时清理暂存；uvx 因 venv 固定路径仍直接写目标版本目录，失败时清理该目录。
 - Registry 版本变了显示「更新到 x」；可卸载团团装的版本。你自己装的版本始终优先（`TUANTUAN_PREFER_MANAGED=1` 反过来）。
 - 装好的 Agent 可在新建 Agent 时选择；「握手」会显示它支持的登录方式（Harness 自带登录、终端命令、环境变量）。
 - **API Key 登录**：Agent 通过 ACP 声明 `env_var` 登录方式（如 glm-acp-agent 的 `Z_AI_API_KEY`）时，握手结果里直接出现输入框：Key 保存在团团的数据库里（和服务商 Key 一样只在服务端、打码显示），只注入这个 Harness 的进程环境（Agent 自己的环境变量优先），保存后自动重新握手，可修改、清除。回复因为缺 Key 失败时，会话里显示「需要 API Key」并可当场填写。
@@ -125,7 +127,9 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 ## 能力
 
 - 流式回复、思考过程、工具卡片（文件 diff、终端输出）、计划清单、用量。
-- 权限请求弹窗：允许一次 / 总是允许 / 拒绝。文件读写和终端只能在项目目录内。
+- 权限请求弹窗：允许一次 / 总是允许 / 拒绝。提交期间禁止重复操作，服务端确认成功后关闭；提交失败保留弹窗并提示重试，404（请求已失效）也会关闭。
+- 经过团团 ACP `fs/*` 的文件路径按真实路径校验，拒绝工作目录外的目标与符号链接逃逸；新文件校验最近的现存父目录。ACP 终端只校验初始 `cwd`，命令仍以当前用户权限运行，可访问其他路径；Harness 自带工具也由其自身权限 / 沙箱控制。这里没有操作系统沙箱，不能将旧文档中的「文件读写和终端只能在项目目录内」理解为所有执行都被隔离。
+- 慢历史快照不会覆盖期间收到的运行状态、会话与权限事件；切换会话后旧响应不进入新会话。
 - 会话开始前可在输入框旁选**模型**（Harness 通过 ACP 声明的 model 选项；BYOK 可改会话级模型 ID）。多人会话按 Agent 分别记住。中途切换走 `set_config_option`。没有模型选项时不显示。
 - Harness 提供的其他配置项（模式、推理强度等）和斜杠命令（输入 `/` 弹出）。
 - 粘贴或拖入图片（Harness 支持时）、随时停止、会话列表（切换 / 恢复历史会话 / 新会话）。
@@ -137,7 +141,7 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 
 ## 环境变量
 
-见 `.env.example`：`PORT`、`DB_PATH`（默认 `data/agent-hub.db`）、`TUANTUAN_MOCK_HARNESS`。其他常用：`TUANTUAN_WORKSPACES`（项目根目录）、`TUANTUAN_HARNESS_DIR`（团团安装的 Harness）、`TUANTUAN_REGISTRY_URL` / `TUANTUAN_REGISTRY_OFFLINE`、`TUANTUAN_PREFER_MANAGED`、`TUANTUAN_NATIVE_PICKER=0`。
+见 `.env.example`：`PORT`、`TUANTUAN_HOST`（默认 `127.0.0.1`）、`DB_PATH`（默认 `data/agent-hub.db`）、`TUANTUAN_MOCK_HARNESS`。其他常用：`TUANTUAN_WORKSPACES`（项目根目录）、`TUANTUAN_HARNESS_DIR`（团团安装的 Harness）、`TUANTUAN_REGISTRY_URL` / `TUANTUAN_REGISTRY_OFFLINE`、`TUANTUAN_PREFER_MANAGED`、`TUANTUAN_NATIVE_PICKER=0`。
 
 ## 界面
 
@@ -171,17 +175,17 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 新建 Agent 时 Harness 选「自定义 API（BYOK）」：接口格式（OpenAI Chat Completions / OpenAI Responses / Anthropic Messages）、Base URL、API Key、模型，可点「测试连接」。
 
 - 团团内置的轻量 harness，只做对话：SSE 流式、身份文档作系统提示、会话转述；多 Agent 时 `handoff` / `list_members` 以原生 function/tool call 提供（与 MCP 走同一处理逻辑）。**没有文件读写和终端。**
-- API Key 只存服务端（SQLite），接口只返回掩码（如 `sk-••••abcd`），不写日志；编辑时留空即保持原 Key。
+- API Key 以明文保存在服务端 SQLite，专用接口只返回掩码（如 `sk-••••abcd`），不写日志；编辑时留空即保持原 Key。服务商 Key、管理 Key 与 Harness `env_var` 登录 Key 也保存在同一数据库；打码不代表磁盘加密。Harness 原生登录态仍由 Harness 管理。普通 Agent 环境变量属于可读写配置，不能视为专用密钥存储。系统钥匙串集成仍未实现。
 
 ## 会话设置（模型 / 权限 / 推理…）
 
-Harness 通过 ACP `configOptions`（及旧的 `modes`）提供的设置，显示在输入框底栏里的小标签上：图标、简短中文名和当前值，比如 `权限 询问`、`推理 高`。点开后是和模型选择器一样的弹层，列出选项名和 Harness 自己的说明。已知的 id/category（mode、model、effort/thought_level、thinking）会翻译成中文，其余沿用 Harness 给的名称。危险选项（Bypass permissions、full-access 等）用浅橙色标出。窗口较窄时，次要设置收进「…」。多 Agent 会话只显示一个「各自设置」标签，点开后按 Agent 分组。
+Harness 通过 ACP `configOptions`（及旧的 `modes`）提供设置。输入框底栏优先显示**模型、权限、推理**这些常用入口，带图标、简短中文名和当前值，比如 `权限 询问`、`推理 高`；思考、协作、快速模式等其余选项统一放在「更多设置」。点开后列出选项名和 Harness 自己的说明。已知的 id/category（mode、model、effort/thought_level、thinking、collaboration_mode、fast-mode 等）会翻译成中文，其余沿用 Harness 给的名称。危险选项（Bypass permissions、full-access 等）用浅橙色标出。窗口较窄时，次要入口继续收进「更多设置」。多 Agent 会话只显示一个「各自设置」标签，点开后按 Agent 分组。
 
 弹层渲染在 `<body>` 下，跟随触发按钮定位：默认向上展开，空间不够时向下，不超出窗口。
 
 **Agent 默认设置**：在 Agent 页选好 Harness 后，团团会在临时目录开一个一次性 ACP 会话来读取可用选项（按 Harness 缓存 30 分钟）。读不到时（例如未登录）会显示原因和「重试」按钮。新会话按「会话里改过的 > Agent 默认 > Harness 默认」依次生效。
 
-**卡住与停止**：`session/resume` / `load` 超过 45 秒会改开新会话；切换设置超过 20 秒算失败，Harness 拒绝时会直接显示它返回的原因。点「停止」后，如果 Harness 4 秒内没有结束这一轮，团团会自己结束。回复 15 秒还没有任何输出时，会显示等了多久。
+**卡住与停止**：`session/resume` / `load` 超过 45 秒会改开新会话；切换设置超过 20 秒算失败，Harness 拒绝时会直接显示它返回的原因。初始化会话期间点「停止」会立即停止等待，不再发送该轮 prompt；已发出 prompt 时先发 `session/cancel`，默认 4 秒内仍未结束则强制终止对应 Harness 及其 ACP 终端进程组，保留已生成内容。共用该进程的其他会话也会受影响，下次使用时重建进程并按 Harness 能力恢复。Agent 设置、项目目录或会话选择变更后，旧的初始化结果不会重新挂回。回复 15 秒还没有任何输出时，会显示等了多久。
 
 ## Skills 与插件
 
@@ -288,7 +292,7 @@ Agent 页「Skills」是一张勾选清单（新建 Agent 时就能勾选，保�
 
 不改 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`：它们同时存放 Harness 的登录信息，隔离会导致需要重新登录。会话目录里已有的 `.claude/` / `.agents/` / `.opencode/` Skills 也会被发现。
 
-输入框里 `/` 弹出 Harness 通过 ACP `available_commands_update` 提供的命令，`$` 弹出 Skills；方向键选择，Tab / Enter 补全，Esc 关闭。
+输入框里 `/` 弹出 Harness 通过 ACP `available_commands_update` 提供的命令；`$` 显示当前会话收到的完整 Skill 清单，可滚动浏览，并按名称或描述关键词搜索（名称前缀优先，也能匹配插件名称中的片段）。正文空白后也可输入 `$`，补全时保留前后文；金额和 Markdown 代码中的 `$` 不触发补全。方向键可遍历全部结果，Tab / Enter 选择，Esc 关闭并保留草稿。清单不因补全而启用其他目录或插件中的 Skill，Harness 实际可用范围仍由其会话和配置决定。
 
 
 ### ACP 能力对照（各 Harness）
@@ -312,7 +316,7 @@ Agent 页「Skills」是一张勾选清单（新建 Agent 时就能勾选，保�
 | --- | --- |
 | 「Harness」页显示未安装 | 在终端里 `which <命令>` 确认已安装；GUI 启动时找不到的话，在「Harness」页填绝对路径。 |
 | 发消息后提示 Authentication required | 该 Harness 没登录：按「Harness」页的登录方式在终端登录后重试。 |
-| Agent 想改文件但没反应 | 正在等你在权限弹窗里选择；或者目标路径在工作目录之外（会被拒绝）。 |
+| Agent 想改文件但没反应 | 查看权限弹窗；提交失败可原地重试。经团团 ACP 文件接口访问的目录外路径会被拒绝。 |
 | e2e 找不到浏览器 | 设置 `CHROME_PATH` 指向本机 Chrome。 |
 
 ## 文档

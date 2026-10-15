@@ -32,6 +32,7 @@ interface Sess {
   title: string | null;
 }
 const sessions = new Map<string, Sess>();
+let loads = 0;
 
 const COMMANDS: acp.AvailableCommand[] = [
   { name: "plan", description: "演示计划清单" },
@@ -259,7 +260,8 @@ acp
     if (authFile) await Bun.write(authFile, "ok");
     return {};
   })
-  .onRequest(acp.methods.agent.session.new, (ctx) => {
+  .onRequest(acp.methods.agent.session.new, async (ctx) => {
+    if (process.env.MOCK_AGENT_SESSION_DELAY_MS) await Bun.sleep(Number(process.env.MOCK_AGENT_SESSION_DELAY_MS));
     if (needsAuth()) throw acp.RequestError.authRequired();
     const [sessionId, s] = newSess(ctx.params.cwd, ctx.params.mcpServers);
     setTimeout(() => {
@@ -274,6 +276,12 @@ acp
     sessions: [...sessions.entries()].map(([sessionId, s]) => ({ sessionId, cwd: s.cwd, title: s.title })),
   }))
   .onRequest(acp.methods.agent.session.load, async (ctx) => {
+    const failureGate = process.env.MOCK_AGENT_FIRST_LOAD_FAILURE_GATE;
+    if (++loads === 1 && failureGate) {
+      await Bun.write(`${failureGate}.waiting`, "ready");
+      while (!existsSync(failureGate)) await Bun.sleep(10);
+      throw new Error("mock delayed load failure");
+    }
     const s = sessions.get(ctx.params.sessionId);
     if (!s) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
     s.mcpServers = ctx.params.mcpServers;
@@ -297,7 +305,7 @@ acp
     return { configOptions: configOptions(s) };
   })
   .onNotification(acp.methods.agent.session.cancel, (ctx) => {
-    sessions.get(ctx.params.sessionId)?.abort?.abort();
+    if (process.env.MOCK_AGENT_IGNORE_CANCEL !== "1") sessions.get(ctx.params.sessionId)?.abort?.abort();
   })
   .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
     if (keyVar && !process.env[keyVar]) {

@@ -1,4 +1,5 @@
 import type { InstallerSpec } from "./harness";
+import { killProcessTree, processGroupOptions } from "./process-tree";
 
 /**
  * One-click harness installs: runs a harness's own official install command in the background, only
@@ -29,10 +30,18 @@ const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07/g;
 export class Installer {
   private jobs = new Map<
     string,
-    { job: InstallJob; proc: ReturnType<typeof Bun.spawn> | null; abort?: AbortController }
+    {
+      job: InstallJob;
+      proc: ReturnType<typeof Bun.spawn> | null;
+      abort?: AbortController;
+      timer: ReturnType<typeof setTimeout> | null;
+    }
   >();
 
-  constructor(private onFinish: (job: InstallJob) => void = () => {}) {}
+  constructor(
+    private onFinish: (job: InstallJob) => void = () => {},
+    private timeoutMs = TIMEOUT_MS,
+  ) {}
 
   start(harnessId: string, spec: InstallerSpec, env: Record<string, string>): InstallJob {
     const cur = this.jobs.get(harnessId);
@@ -51,15 +60,21 @@ export class Installer {
     };
     const shell = Bun.which("bash", { PATH: env.PATH ?? "" }) ?? "/bin/sh";
     const proc = Bun.spawn([shell, "-c", command], {
+      ...processGroupOptions,
       cwd: env.HOME || undefined,
       env: { ...env, NONINTERACTIVE: "1", CI: "1", npm_config_yes: "true", TERM: "dumb" },
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
     });
-    const entry = { job, proc: proc as ReturnType<typeof Bun.spawn> | null };
+    const entry = {
+      job,
+      proc: proc as ReturnType<typeof Bun.spawn> | null,
+      timer: null as ReturnType<typeof setTimeout> | null,
+    };
     this.jobs.set(harnessId, entry);
-    const timer = setTimeout(() => this.stop(harnessId, "error", "安装超时（15 分钟）"), TIMEOUT_MS);
+    const timer = setTimeout(() => this.stop(harnessId, "error", "安装超时（15 分钟）"), this.timeoutMs);
+    entry.timer = timer;
     const pump = async (stream: ReadableStream<Uint8Array>) => {
       const dec = new TextDecoder();
       let buf = "";
@@ -108,9 +123,15 @@ export class Installer {
       endedAt: null,
     };
     const ac = new AbortController();
-    const entry = { job, proc: null as ReturnType<typeof Bun.spawn> | null, abort: ac };
+    const entry = {
+      job,
+      proc: null as ReturnType<typeof Bun.spawn> | null,
+      abort: ac,
+      timer: null as ReturnType<typeof setTimeout> | null,
+    };
     this.jobs.set(harnessId, entry);
-    const timer = setTimeout(() => this.stop(harnessId, "error", "安装超时（15 分钟）"), TIMEOUT_MS);
+    const timer = setTimeout(() => this.stop(harnessId, "error", "安装超时（15 分钟）"), this.timeoutMs);
+    entry.timer = timer;
     void task((l) => this.push(job, l), ac.signal).then(
       () => {
         clearTimeout(timer);
@@ -153,16 +174,14 @@ export class Installer {
 
   private stop(harnessId: string, state: InstallState, error: string | null) {
     const cur = this.jobs.get(harnessId);
-    if (!cur || cur.job.state !== "running") return;
-    const pid = cur.proc?.pid;
-    // Stop the pipeline too (curl | bash), not just the shell.
-    if (pid) Bun.spawnSync(["pkill", "-TERM", "-P", String(pid)], { stdout: "ignore", stderr: "ignore" });
-    cur.proc?.kill();
-    cur.proc = null;
-    cur.abort?.abort();
+    if (cur?.job.state !== "running") return;
     cur.job.state = state;
     cur.job.error = error;
     cur.job.endedAt = Date.now();
+    if (cur.timer) clearTimeout(cur.timer);
+    if (cur.proc) killProcessTree(cur.proc, "SIGKILL");
+    cur.proc = null;
+    cur.abort?.abort();
     this.push(cur.job, state === "cancelled" ? "已取消" : (error ?? ""));
     this.onFinish(cur.job);
   }

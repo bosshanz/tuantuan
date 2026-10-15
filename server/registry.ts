@@ -27,7 +27,10 @@ const Binary = z.object({
 export const RegistryAgentSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/i),
   name: z.string().min(1),
-  version: z.string().min(1),
+  version: z
+    .string()
+    .regex(/^[a-z0-9][\w.+-]*$/i)
+    .refine((v) => v.toLowerCase() !== "manifest.json", "version conflicts with the install manifest"),
   description: z.string().default(""),
   repository: z.string().optional(),
   website: z.string().optional(),

@@ -36,6 +36,12 @@ putSkill(join(fakeHome, ".claude", "skills"), "code-review", "审查改动并指
 putSkill(join(fakeHome, ".agents", "skills"), "pdf-tools", "读取、拆分和合并 PDF");
 putSkill(join(fakeHome, ".codex", "skills"), "release-notes", "根据提交生成发布说明");
 putSkill(join(cwd, ".agents", "skills"), "deploy", "部署到预发环境");
+for (let i = 1; i <= 18; i++)
+  putSkill(
+    join(cwd, ".agents", "skills"),
+    `completion-${String(i).padStart(2, "0")}`,
+    i === 18 ? "中文技能列表回归" : `Completion fixture ${i}`,
+  );
 // A Claude plugin installed under ~/.claude/plugins and a plugin repo to import into the library.
 const putPlugin = (root: string, name: string) => {
   mkdirSync(join(root, ".claude-plugin"), { recursive: true });
@@ -547,12 +553,82 @@ try {
   await shot("chips-narrow");
   if (popIssues.length) throw new Error(`popover: ${popIssues.join("; ")}`);
   await page.keyboard.press("Escape");
+  // Narrow layouts move secondary options into More, while keeping them editable and keyboard-accessible.
+  const moreSettings = page.getByRole("button", { name: "更多设置", exact: true });
+  await moreSettings.click();
+  await page.locator(".opt-entry", { hasText: "权限" }).click();
+  await page.waitForFunction(() => {
+    const pop = document.querySelector(".pop-menu")?.getBoundingClientRect();
+    const trigger = document.querySelector(".chip-more")?.getBoundingClientRect();
+    return pop && trigger && pop.top >= 0 && pop.bottom <= Math.min(innerHeight, trigger.top);
+  });
+  await shot("chips-narrow-permissions");
+  await page.getByRole("option", { name: /^自动/ }).click();
+  await page.locator(".opt-entry", { hasText: "权限" }).filter({ hasText: "自动" }).waitFor();
+  await page.locator(".opt-entry", { hasText: "权限" }).click();
+  await page.getByRole("option", { name: /询问/ }).click();
+  await page.locator(".opt-entry", { hasText: "权限" }).filter({ hasText: "询问" }).waitFor();
+  await page.keyboard.press("Escape");
+  if (!(await moreSettings.evaluate((el) => document.activeElement === el)))
+    throw new Error("More settings did not restore keyboard focus");
+  const composerIssues = await page.locator(".composer-foot").evaluate((foot) => {
+    const bounds = foot.getBoundingClientRect();
+    const buttons = [...foot.querySelectorAll("button")].map((b) => b.getBoundingClientRect());
+    return buttons.some((b, i) => b.left < (buttons[i - 1]?.right ?? bounds.left) || b.right > bounds.right);
+  });
+  if (composerIssues) throw new Error("composer controls overlap or extend outside the footer");
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(200);
   await page.locator(".chip-opt", { hasText: "推理" }).click();
   await page.waitForTimeout(250);
   await shot("chips");
   await page.keyboard.press("Escape");
+  // $ exposes every session skill, including entries past 12, and keyboard selection scrolls into view.
+  await input.fill("$");
+  const skillList = page.getByRole("listbox", { name: "Skills", exact: true });
+  await skillList.waitFor();
+  if ((await skillList.getByRole("option").count()) < 19) throw new Error("skill list was truncated");
+  await skillList.getByRole("option").filter({ hasText: "$completion-18" }).waitFor();
+  const lastSkill = await skillList.getByRole("option").last().locator("code").innerText();
+  await input.press("ArrowUp");
+  if ((await skillList.locator('[aria-selected="true"] code').innerText()) !== lastSkill)
+    throw new Error("skill keyboard selection cannot reach the last entry");
+  await page.waitForFunction(() => {
+    const list = document.querySelector('[role="listbox"][aria-label="Skills"]');
+    const option = list?.querySelector('[aria-selected="true"]');
+    if (!list || !option) return false;
+    const box = list.getBoundingClientRect();
+    const row = option.getBoundingClientRect();
+    return row.top >= box.top - 1 && row.bottom <= box.bottom + 1;
+  });
+  await shot("skills-completion");
+  await input.press("Escape");
+  if ((await input.inputValue()) !== "$") throw new Error("closing skill completion changed the draft");
+  await input.fill("$中文");
+  await skillList.getByRole("option").filter({ hasText: "$completion-18" }).waitFor();
+  await input.press("Enter");
+  if ((await input.inputValue()) !== "$completion-18 ") throw new Error("skill Enter completion submitted the draft");
+  await input.fill("请用 $tion-18 后文");
+  for (let i = 0; i < " 后文".length; i++) await input.press("ArrowLeft");
+  await skillList.getByRole("option").filter({ hasText: "$completion-18" }).waitFor();
+  await input.press("Tab");
+  if ((await input.inputValue()) !== "请用 $completion-18 后文")
+    throw new Error("skill completion lost surrounding text");
+  const completedDraft = await input.inputValue();
+  const skillSendPath = /\/api\/rooms\/[^/]+\/messages$/;
+  await page.route(skillSendPath, (route) => route.fulfill({ status: 503, json: { error: "技能草稿发送暂时失败" } }));
+  try {
+    await input.press("Enter");
+    await page.getByRole("alert").filter({ hasText: "发送失败：技能草稿发送暂时失败" }).waitFor();
+    if ((await input.inputValue()) !== completedDraft) throw new Error("failed send lost the completed skill draft");
+  } finally {
+    await page.unroute(skillSendPath);
+  }
+  for (const draft of ["费用 $100.00", "`echo $completion", "```sh\necho $completion", "$no-matching-skill"]) {
+    await input.fill(draft);
+    if (await skillList.count()) throw new Error(`unexpected skill completion: ${draft}`);
+    if ((await input.inputValue()) !== draft) throw new Error("unmatched skill completion changed the draft");
+  }
   await input.fill("/pl");
   await page.locator(".slash-pop").getByText("/plan").waitFor();
   await input.press("Tab");
@@ -565,7 +641,42 @@ try {
   const dialog = page.getByRole("alertdialog");
   await dialog.locator('.diff-line[data-op="+"]', { hasText: "tuantuan" }).waitFor();
   await shot("permission");
-  await dialog.getByRole("button", { name: "允许", exact: true }).click();
+  // A transient POST failure must leave a visible, retryable decision. Hold the retry to check duplicate prevention.
+  let permissionPosts = 0;
+  let releaseAnswer = () => {};
+  const answerGate = new Promise<void>((resolve) => {
+    releaseAnswer = resolve;
+  });
+  await page.route(/\/api\/permissions\/[^/]+$/, async (route) => {
+    permissionPosts++;
+    if (permissionPosts === 1) {
+      await route.fulfill({ status: 503, json: { error: "暂时无法提交" } });
+      return;
+    }
+    await answerGate;
+    await route.continue();
+  });
+  try {
+    await dialog.getByRole("button", { name: "允许", exact: true }).click();
+    await dialog
+      .getByRole("alert")
+      .getByText(/授权提交失败.*暂时无法提交.*请重试/)
+      .waitFor();
+    await shot("permission-retry");
+    await dialog.getByRole("button", { name: "允许", exact: true }).click();
+    await dialog.locator("button:disabled").first().waitFor();
+    if ((await dialog.locator("button:not(:disabled)").count()) !== 0)
+      throw new Error("permission choices enabled during POST");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
+    if (permissionPosts !== 2) throw new Error(`duplicate permission POST: ${permissionPosts}`);
+    if (await dialog.getByRole("alert").count()) throw new Error("permission retry kept an obsolete error");
+    releaseAnswer();
+    await dialog.waitFor({ state: "detached" });
+  } finally {
+    releaseAnswer();
+    await page.unroute(/\/api\/permissions\/[^/]+$/);
+  }
   await page.getByText("已修改 mock-edit.txt。").waitFor();
   if (readFileSync(join(cwd, "mock-edit.txt"), "utf8") !== "hello\ntuantuan\n") throw new Error("edit not applied");
 
@@ -771,6 +882,62 @@ try {
   await page.locator(".li-title", { hasText: "与 Bob" }).click();
   await live("与 Bob", "切换后-3", /收到：「切换后-3」/);
   await page.unroute(/\/api\/rooms\/[^/]+\/messages\?/);
+  // Hold history snapshots at idle, then deliver a running permission request over WS.
+  await page.locator(".li-title", { hasText: "冒烟会话" }).click();
+  await page.locator(".main-head h2", { hasText: "冒烟会话" }).waitFor();
+  const permissionRoom = app.store.listRooms().find((r) => r.name === "与 Bob");
+  if (!permissionRoom) throw new Error("no permission race room");
+  const historyPattern = new RegExp(`/api/rooms/${permissionRoom.id}/messages\\?`);
+  let releaseHistory = () => {};
+  const historyGate = new Promise<void>((resolve) => {
+    releaseHistory = resolve;
+  });
+  let captured = 0;
+  let delivered = 0;
+  await page.route(historyPattern, async (route) => {
+    const response = await route.fetch();
+    captured++;
+    await historyGate;
+    await route.fulfill({ response });
+    delivered++;
+  });
+  try {
+    await page.locator(".li-title", { hasText: "与 Bob" }).click();
+    await page.locator(".main-head h2", { hasText: "与 Bob" }).waitFor();
+    for (let i = 0; captured === 0 && i < 100; i++) await Bun.sleep(50);
+    if (captured === 0) throw new Error("no idle snapshot captured");
+    // A subscription acknowledgement can start another load immediately after the initial request.
+    await page.waitForTimeout(150);
+    await input.fill("/edit");
+    await input.press("Enter");
+    await dialog.waitFor();
+    await page.getByRole("button", { name: "停止", exact: true }).waitFor();
+    releaseHistory();
+    for (let i = 0; delivered < captured && i < 100; i++) await Bun.sleep(50);
+    if (delivered !== captured) throw new Error("held history responses did not finish");
+    await page.waitForTimeout(100);
+    if (!(await dialog.isVisible())) throw new Error("slow snapshot removed a live permission");
+    if (!(await page.getByRole("button", { name: "停止", exact: true }).isVisible()))
+      throw new Error("slow snapshot removed stop control");
+    await shot("permission-snapshot-race");
+    // A 404 means the ask was already resolved elsewhere. The UI must dismiss it without needing a WS event.
+    const staleAsk = app.host.pendingAsks(permissionRoom.id)[0];
+    if (!staleAsk) throw new Error("no pending permission for stale-answer check");
+    const staleAnswerPath = `**/api/permissions/${staleAsk.id}`;
+    await page.route(staleAnswerPath, (route) => route.fulfill({ status: 404, json: { error: "授权请求已失效" } }));
+    try {
+      await dialog.getByRole("button", { name: "拒绝", exact: true }).click();
+      await dialog.waitFor({ state: "detached" });
+    } finally {
+      await page.unroute(staleAnswerPath);
+      // The HTTP fixture withheld the WS resolution so the assertion above exercises the response path alone.
+      app.host.answer(staleAsk.id, null);
+    }
+    await page.getByRole("button", { name: "停止", exact: true }).waitFor({ state: "detached" });
+  } finally {
+    releaseHistory();
+    await page.unroute(historyPattern);
+  }
   if ((await page.evaluate(() => performance.getEntriesByType("navigation").length)) !== navs)
     throw new Error("page reloaded during live checks");
 
@@ -1023,17 +1190,22 @@ try {
     await page.waitForTimeout(200);
     await shot("chat-fade");
 
-    // Notifications: settings page, test notification, and a real reply in another conversation.
+    // Notifications: normal settings controls and a real reply in another conversation.
     await nav("通知");
     await page.getByRole("heading", { name: "通知", exact: true }).waitFor();
-    await page.getByRole("checkbox", { name: "回复完成" }).waitFor();
-    await page.locator(".notify-diag b", { hasText: "已允许" }).waitFor();
-    await page.getByRole("button", { name: "发送测试通知" }).click();
-    await page.getByRole("status").filter({ hasText: "已发送" }).waitFor();
+    const notifyEnabled = page.getByRole("checkbox", { name: "开启通知" });
+    const replyNotify = page.getByRole("checkbox", { name: "回复完成" });
+    await replyNotify.waitFor();
+    await notifyEnabled.uncheck();
+    if ((await page.locator(".notify-row input:disabled").count()) !== 4)
+      throw new Error("notification categories should be disabled with the main switch off");
+    await notifyEnabled.check();
+    if (await page.locator(".notify-row input:disabled").count())
+      throw new Error("notification categories should be enabled with the main switch on");
+    if (!(await replyNotify.isChecked())) throw new Error("reply notification preference was lost");
     await shot("notifications");
     const notes = () =>
       page.evaluate(() => (window as unknown as { __notes: { title: string; body?: string }[] }).__notes);
-    if (!(await notes()).some((n) => n.title === "团团")) throw new Error("test notification not shown");
     const r = await fetch(`http://localhost:${server.port}/api/rooms/${dm.id}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1053,12 +1225,8 @@ try {
     await page.locator(".side-room", { hasText: dm.name }).first().click();
     await page.locator(".side-room[aria-current] .unread").waitFor({ state: "detached" });
     // Off switch: no notification for the next reply.
-    await page.evaluate(() =>
-      localStorage.setItem(
-        "tuantuan:notify",
-        JSON.stringify({ enabled: true, reply: false, permission: true, error: true, auth: true }),
-      ),
-    );
+    await nav("通知");
+    await replyNotify.uncheck();
     await nav("Harness");
     const before = (await notes()).length;
     await fetch(`http://localhost:${server.port}/api/rooms/${dm.id}/messages`, {
@@ -1068,7 +1236,9 @@ try {
     });
     await page.waitForTimeout(1500);
     if ((await notes()).length !== before) throw new Error("reply notification should be off");
-    await page.evaluate(() => localStorage.removeItem("tuantuan:notify"));
+    await nav("通知");
+    await replyNotify.check();
+    await nav("Harness");
   }
 
   // @mentions share the baseline with the text around them.

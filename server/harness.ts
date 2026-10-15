@@ -528,7 +528,7 @@ export async function detectHarness(spec: HarnessSpec, override: string | null):
  * Login command to show. With only the bundled adapter, the user may have no `claude` / `codex` on
  * PATH: point at the engine that ships inside the adapter instead.
  */
-function loginCommand(spec: HarnessSpec, env: Record<string, string>): string {
+export function loginCommand(spec: HarnessSpec, env: Record<string, string>): string {
   const path = env.PATH ?? "";
   // Bundled copy first, else the one Tuantuan installed from the registry.
   const roots = [req];

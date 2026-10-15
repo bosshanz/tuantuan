@@ -70,6 +70,7 @@ interface SessionSlot {
   view: SessionView;
   /** Set while a prompt turn runs; receives reply content updates. */
   turn: ((u: acp.SessionUpdate) => void) | null;
+  turnSignal: AbortSignal | null;
   /** While loading/resuming, replayed history is dropped (Tuantuan keeps its own transcript). */
   replaying: boolean;
   /** Updates the harness replayed on session/load (history Tuantuan may not have); shown read-only. */
@@ -89,9 +90,13 @@ interface SessionSlot {
 export class HarnessHost {
   private procs = new Map<string, Proc>();
   private slots = new Map<string, SessionSlot>(); // `${roomId}|${agentId}` -> slot
+  private opening = new Map<
+    string,
+    { signature: string; generation: symbol; harness: string; pending: Promise<{ proc: Proc; slot: SessionSlot }> }
+  >();
   private asks = new Map<
     string,
-    { ask: PermissionAsk; resolve: (r: acp.RequestPermissionResponse) => void; signal?: AbortSignal }
+    { ask: PermissionAsk; slot: SessionSlot; resolve: (r: acp.RequestPermissionResponse) => void }
   >();
 
   /** Slots whose next attach should session/load (to get the harness's history) rather than resume. */
@@ -138,13 +143,14 @@ export class HarnessHost {
   }
 
   /** Starts (or reuses) the harness process for this agent and working directory. */
-  private async proc(agent: Agent, cwd: string, identity: string): Promise<Proc> {
+  private async proc(agent: Agent, cwd: string, identity: string, assertCurrent: () => void): Promise<Proc> {
     const spec = harnessSpec(agent.harness);
     if (!spec) throw new ValidationError(`「${agent.name}」还没有绑定 Harness，请在 Agent 设置或新手引导里选择`);
     const overrides = this.store.getSetting<Record<string, string>>("harnessPaths", {});
     const status = await detectHarness(spec, overrides[spec.id] ?? null);
     if (!status.command) throw new ValidationError(`${spec.name} 未安装：${status.error}。在「Harness」页安装`);
     const base = await loginShellEnv();
+    assertCurrent();
     const mat = materializeSkills(
       this.dataDir,
       agent.id,
@@ -215,13 +221,16 @@ export class HarnessHost {
     return proc;
   }
 
-  private dropProc(p: Proc) {
+  private dropProc(p: Proc, signal?: NodeJS.Signals) {
     if (this.procs.get(p.key) === p) this.procs.delete(p.key);
-    const rooms = new Set([...p.sessions.values()].map((s) => `${s.roomId}|${s.agentId}`));
-    for (const [id, a] of this.asks) if (rooms.has(`${a.ask.roomId}|${a.ask.agentId}`)) this.answer(id, null);
-    for (const k of rooms) this.slots.delete(k);
+    const slots = new Set(p.sessions.values());
+    for (const [id, a] of this.asks) if (slots.has(a.slot)) this.answer(id, null);
+    for (const slot of p.sessions.values()) {
+      const key = `${slot.roomId}|${slot.agentId}`;
+      if (this.slots.get(key) === slot) this.slots.delete(key);
+    }
     p.sessions.clear();
-    p.acp.kill();
+    p.acp.kill(signal);
   }
 
   private onUpdate(p: Proc, n: acp.SessionNotification) {
@@ -259,13 +268,17 @@ export class HarnessHost {
       default:
         changed = false;
     }
-    if (changed) this.events.session(slot.roomId, slot.agentId, { ...v });
-    else if (slot.replaying) slot.replay.push(u);
+    if (changed) {
+      if (this.slots.get(`${slot.roomId}|${slot.agentId}`) === slot)
+        this.events.session(slot.roomId, slot.agentId, { ...v });
+    } else if (slot.replaying) slot.replay.push(u);
     else slot.turn?.(u);
   }
 
   private requestPermission(p: Proc, agentId: string, req: acp.RequestPermissionRequest) {
     const slot = p.sessions.get(req.sessionId);
+    if (!slot || slot.turnSignal?.aborted)
+      return Promise.resolve<acp.RequestPermissionResponse>({ outcome: { outcome: "cancelled" } });
     const agent = this.store.getAgent(agentId);
     if (agent?.permissionPolicy === "allow") {
       const allow =
@@ -275,7 +288,6 @@ export class HarnessHost {
           outcome: { outcome: "selected", optionId: allow.optionId },
         });
     }
-    if (!slot) return Promise.resolve<acp.RequestPermissionResponse>({ outcome: { outcome: "cancelled" } });
     const ask: PermissionAsk = {
       id: crypto.randomUUID(),
       roomId: slot.roomId,
@@ -284,7 +296,7 @@ export class HarnessHost {
       options: req.options,
     };
     return new Promise<acp.RequestPermissionResponse>((res) => {
-      this.asks.set(ask.id, { ask, resolve: res });
+      this.asks.set(ask.id, { ask, slot, resolve: res });
       this.events.permission(ask);
     });
   }
@@ -294,9 +306,43 @@ export class HarnessHost {
    * `identity` is the Tuantuan identity + group context, delivered per the harness (plan §3.4).
    */
   async session(room: Room, agent: Agent, identity: string): Promise<{ proc: Proc; slot: SessionSlot }> {
+    const key = `${room.id}|${agent.id}`;
+    const signature = JSON.stringify([this.cwdFor(room), agent, identity]);
+    const opening = this.opening.get(key);
+    if (opening?.signature === signature) return opening.pending;
+    // A cancelled caller can stop waiting while the shared warm-up finishes. A subsequent turn
+    // must join that same initialization instead of racing it for the room's session mapping.
+    const generation = Symbol();
+    const assertCurrent = () => {
+      const currentRoom = this.store.getRoom(room.id);
+      const currentAgent = this.store.getAgent(agent.id);
+      if (
+        this.opening.get(key)?.generation !== generation ||
+        !currentRoom ||
+        !currentAgent ||
+        JSON.stringify([this.cwdFor(currentRoom), currentAgent, identity]) !== signature
+      )
+        throw new ValidationError("会话配置已更改，请重试", 409);
+    };
+    const pending = this.openSession(room, agent, identity, assertCurrent);
+    this.opening.set(key, { signature, generation, harness: agent.harness, pending });
+    try {
+      return await pending;
+    } finally {
+      if (this.opening.get(key)?.generation === generation) this.opening.delete(key);
+    }
+  }
+
+  private async openSession(
+    room: Room,
+    agent: Agent,
+    identity: string,
+    assertCurrent: () => void,
+  ): Promise<{ proc: Proc; slot: SessionSlot }> {
     const cwd = this.cwdFor(room, agent);
-    const proc = await this.proc(agent, cwd, identity);
+    const proc = await this.proc(agent, cwd, identity, assertCurrent);
     const init = await proc.ready;
+    assertCurrent();
     const slotKey = `${room.id}|${agent.id}`;
     const cached = this.slots.get(slotKey);
     if (cached?.view.sessionId && proc.sessions.get(cached.view.sessionId) === cached) return { proc, slot: cached };
@@ -325,11 +371,21 @@ export class HarnessHost {
       agentId: agent.id,
       view,
       turn: null,
+      turnSignal: null,
       replaying: false,
       replay: [],
       identityPending: false,
       costBase: null,
       usageModel: null,
+    };
+    const checkCurrent = () => {
+      try {
+        assertCurrent();
+      } catch (error) {
+        const id = slot.view.sessionId;
+        if (id && proc.sessions.get(id) === slot) proc.sessions.delete(id);
+        throw error;
+      }
     };
     const mcpServers = [...this.mcpServers(agent), ...plugins.mcp];
     const own = this.mcp?.serverEntry({ roomId: room.id, agentId: agent.id }, caps.mcpCapabilities);
@@ -369,13 +425,14 @@ export class HarnessHost {
                 "session/load 超时",
               );
       } catch {
-        proc.sessions.delete(saved.sessionId);
+        if (proc.sessions.get(saved.sessionId) === slot) proc.sessions.delete(saved.sessionId);
         view.sessionId = null;
         res = null;
       } finally {
         slot.replaying = false;
       }
     }
+    checkCurrent();
     let fresh = false;
     if (!view.sessionId) {
       let created: acp.NewSessionResponse;
@@ -388,10 +445,10 @@ export class HarnessHost {
       } catch (e) {
         throw harnessError(proc, e);
       }
+      checkCurrent();
       view.sessionId = created.sessionId;
       proc.sessions.set(created.sessionId, slot);
       slot.identityPending = proc.spec.identity === "first-prompt" && identity.trim() !== "";
-      this.store.setAcpSession(room.id, agent.id, proc.spec.id, created.sessionId);
       res = created;
       fresh = true;
       slot.costBase = 0;
@@ -403,6 +460,7 @@ export class HarnessHost {
     if (fresh) {
       const want = { ...agent.configDefaults, ...this.store.getRoomConfig(room.id, agent.id) };
       for (const [configId, value] of Object.entries(want)) {
+        checkCurrent();
         const opt = view.configOptions.find((o) => o.id === configId);
         if (!opt) continue;
         let params: acp.SetSessionConfigOptionRequest;
@@ -431,6 +489,8 @@ export class HarnessHost {
         }
       }
     }
+    checkCurrent();
+    if (fresh) this.store.setAcpSession(room.id, agent.id, proc.spec.id, view.sessionId as string);
     this.slots.set(slotKey, slot);
     this.events.session(room.id, agent.id, { ...view });
     return { proc, slot };
@@ -463,35 +523,37 @@ export class HarnessHost {
     onUpdate: (u: acp.SessionUpdate) => void,
     signal: AbortSignal,
   ): Promise<{ stopReason: acp.StopReason }> {
+    signal.throwIfAborted();
     if (agent.harness === CUSTOM_HARNESS) return this.promptCustom(room, agent, identity, blocks, onUpdate, signal);
-    const { proc, slot } = await this.session(room, agent, identity);
+    const { proc, slot } = await waitForSession(this.session(room, agent, identity), signal);
+    signal.throwIfAborted();
     const sessionId = slot.view.sessionId as string;
     if (slot.identityPending) {
       blocks = [{ type: "text", text: `<tuantuan-identity>\n${identity}\n</tuantuan-identity>` }, ...blocks];
       slot.identityPending = false;
     }
     if (!slot.view.capabilities.image) blocks = blocks.filter((b) => b.type !== "image");
-    slot.turn = onUpdate;
+    slot.turn = (update) => {
+      if (!signal.aborted) onUpdate(update);
+    };
+    slot.turnSignal = signal;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let abandon!: (reason: unknown) => void;
+    const abandoned = new Promise<never>((_, reject) => {
+      abandon = reject;
+    });
     const onAbort = () => {
-      void proc.acp.agent.notify(methods.agent.session.cancel, { sessionId });
+      void proc.acp.agent.notify(methods.agent.session.cancel, { sessionId }).catch(() => {});
       for (const [id, a] of this.asks)
         if (a.ask.roomId === room.id && a.ask.agentId === agent.id) this.answer(id, null);
+      // An unresponsive harness must not keep executing or send old updates into the next turn.
+      // Other sessions sharing this process also stop and will resume on their next use.
+      graceTimer = setTimeout(() => {
+        this.dropProc(proc, "SIGKILL");
+        abandon(signal.reason ?? new DOMException("用户取消", "AbortError"));
+      }, CANCEL_GRACE_MS);
     };
     signal.addEventListener("abort", onAbort);
-    // A harness stuck upstream (e.g. a proxy that never answers) may ignore session/cancel; don't let
-    // 停止 hang: give it a moment to wind down, then end the turn here.
-    let graceTimer: ReturnType<typeof setTimeout> | undefined;
-    const abandoned = new Promise<never>((_, reject) => {
-      const go = () => {
-        graceTimer = setTimeout(
-          () => reject(signal.reason ?? new DOMException("用户取消", "AbortError")),
-          CANCEL_GRACE_MS,
-        );
-      };
-      if (signal.aborted) go();
-      else signal.addEventListener("abort", go, { once: true });
-    });
-    abandoned.catch(() => {});
     const stderrBefore = proc.acp.stderr;
     const costBefore = slot.view.usage?.cost?.amount ?? slot.costBase;
     slot.usageModel = null;
@@ -535,6 +597,7 @@ export class HarnessHost {
       clearTimeout(graceTimer);
       signal.removeEventListener("abort", onAbort);
       slot.turn = null;
+      slot.turnSignal = null;
     }
   }
 
@@ -568,6 +631,7 @@ export class HarnessHost {
           capabilities: { image: false, loadSession: false, list: false, resume: false },
         },
         turn: null,
+        turnSignal: null,
         replaying: false,
         replay: [],
         identityPending: false,
@@ -725,6 +789,7 @@ export class HarnessHost {
       return this.ensureCustom(room, agent).view;
     }
     const slotKey = `${room.id}|${agent.id}`;
+    this.opening.delete(slotKey);
     const old = this.slots.get(slotKey);
     if (old) {
       this.slots.delete(slotKey);
@@ -739,11 +804,28 @@ export class HarnessHost {
 
   /** Stop every process of one harness (before uninstalling it). */
   dropHarness(harnessId: string) {
+    for (const [key, opening] of this.opening) if (opening.harness === harnessId) this.opening.delete(key);
     for (const p of [...this.procs.values()]) if (p.spec.id === harnessId) this.dropProc(p);
   }
 
   shutdown() {
+    this.opening.clear();
     for (const p of [...this.procs.values()]) this.dropProc(p);
+  }
+}
+
+/** Stop waiting promptly without cancelling another caller's session warm-up. */
+async function waitForSession<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  let onAbort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason ?? new DOMException("用户取消", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    return await Promise.race([pending, cancelled]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
   }
 }
 

@@ -1,8 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { methods } from "@agentclientprotocol/sdk";
+import { AcpProcess, withTimeout } from "../server/acp";
 import { serve } from "../server/app";
+import { bundledAdapter, harnessSpec, resetLoginShellEnv } from "../server/harness";
 import { harnessProcessEnv, mergeCodexConfig } from "../server/harness-env";
 import { materializeSkills } from "../server/skills";
 import type { Agent, Message, Room } from "../server/store";
@@ -45,8 +48,8 @@ describe("harness env inherits user config", () => {
     expect(env.OPENAI_API_KEY).toBe("sk");
     expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
     expect(env.CODEX_HOME).toBe("/home/user/.codex"); // login shell's, not skill's
-    expect(JSON.parse(env.CODEX_CONFIG!).model_provider).toBe("mine");
-    expect(JSON.parse(env.CODEX_CONFIG!).developer_instructions).toBe("id");
+    expect(JSON.parse(env.CODEX_CONFIG as string).model_provider).toBe("mine");
+    expect(JSON.parse(env.CODEX_CONFIG as string).developer_instructions).toBe("id");
     expect(env.EXTRA).toBe("1");
   });
 
@@ -73,9 +76,14 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
   let base = "";
   let prev: string | undefined;
   let mockPort = 0;
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "tt-harness-env-"));
+  const previousShell = process.env.SHELL;
 
-  beforeAll(async () => {
-    const { resetLoginShellEnv } = await import("../server/harness");
+  beforeAll(() => {
+    const shell = join(fixtureRoot, "login-shell");
+    writeFileSync(shell, `#!/bin/sh\nprintf 'PATH=/usr/bin:/bin\\0HOME=${fixtureRoot}\\0'\n`);
+    chmodSync(shell, 0o755);
+    process.env.SHELL = shell;
     mockLlm = Bun.serve({
       port: 0,
       fetch(req) {
@@ -88,176 +96,133 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
     process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${mockPort}/v1`;
     process.env.TUANTUAN_MOCK_HARNESS = "1";
     resetLoginShellEnv();
-    ({ app, server } = serve({ dbPath: ":memory:" }, 0));
+    ({ app, server } = serve({ dbPath: join(fixtureRoot, "data", "env.db") }, 0));
     base = `http://localhost:${server.port}`;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     if (prev === undefined) delete process.env.ANTHROPIC_BASE_URL;
     else process.env.ANTHROPIC_BASE_URL = prev;
     mockLlm.stop(true);
     app.host.shutdown();
+    app.registry.stop();
     server.stop(true);
-    void import("../server/harness").then((m) => m.resetLoginShellEnv());
+    app.store.db.close();
+    if (previousShell === undefined) delete process.env.SHELL;
+    else process.env.SHELL = previousShell;
+    resetLoginShellEnv();
+    await Bun.sleep(300);
+    rmSync(fixtureRoot, { recursive: true, force: true });
   });
 
   test("mock ACP agent inherits ANTHROPIC_BASE_URL (CC Switch style)", async () => {
-    const a = (await fetch(base + "/api/agents", {
+    const a = (await fetch(`${base}/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(agentInput("EnvBot")),
     }).then((r) => r.json())) as Agent;
-    const room = (await fetch(base + "/api/rooms", {
+    const room = (await fetch(`${base}/api/rooms`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "e", kind: "dm", agentIds: [a.id] }),
     }).then((r) => r.json())) as Room;
-    await fetch(base + `/api/rooms/${room.id}/messages`, {
+    await fetch(`${base}/api/rooms/${room.id}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: "/env ANTHROPIC_BASE_URL", senderName: "Andy" }),
     });
     await app.orchestrator.idle(room.id);
-    const ms = (await fetch(base + `/api/rooms/${room.id}/messages`).then((r) => r.json())) as {
+    const ms = (await fetch(`${base}/api/rooms/${room.id}/messages`).then((r) => r.json())) as {
       messages: Message[];
     };
     const reply = ms.messages.at(-1)?.content ?? "";
     expect(reply).toContain(`ANTHROPIC_BASE_URL=http://127.0.0.1:${mockPort}/v1`);
   });
 
-  test("bundled claude-agent-acp + codex-acp (run by bun) hit local mocks via user-style env / CODEX_HOME", async () => {
-    const { bundledAdapter, harnessSpec, loginShellEnv } = await import("../server/harness");
-    const { AcpProcess, withTimeout } = await import("../server/acp");
-    const { harnessProcessEnv } = await import("../server/harness-env");
-    const { methods } = await import("@agentclientprotocol/sdk");
-    const { mkdtempSync, writeFileSync, mkdirSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const { tmpdir } = await import("node:os");
-
-    const claudeHits: string[] = [];
-    const codexHits: string[] = [];
-    const claudeMock = Bun.serve({
-      port: 0,
-      fetch: async (req) => {
-        claudeHits.push(`${req.method} ${new URL(req.url).pathname}`);
-        // Minimal Anthropic-ish error so the client stops cleanly.
-        return Response.json(
-          { type: "error", error: { type: "invalid_request_error", message: "mock" } },
-          { status: 400 },
-        );
-      },
-    });
-    const codexMock = Bun.serve({
-      port: 0,
-      fetch: async (req) => {
-        codexHits.push(`${req.method} ${new URL(req.url).pathname}`);
-        return Response.json({ error: { message: "mock" } }, { status: 400 });
-      },
-    });
-
-    const report: Record<string, unknown> = {};
-    try {
-      // Tuantuan's own node_modules copies, launched with bun: no global install, no node on PATH needed.
-      const claude = bundledAdapter(harnessSpec("claude-code")!);
-      const codex = bundledAdapter(harnessSpec("codex")!);
-      expect(claude).not.toBeNull();
-      expect(codex).not.toBeNull();
-      report.claudeBundled = claude?.version;
-      report.codexBundled = codex?.version;
-
-      if (claude) {
-        const cwd = mkdtempSync(join(tmpdir(), "tt-claude-"));
-        const login = await loginShellEnv();
-        const env = harnessProcessEnv(
-          {
-            ...login,
-            ANTHROPIC_BASE_URL: `http://127.0.0.1:${claudeMock.port}`,
-            ANTHROPIC_API_KEY: "sk-mock",
-            ANTHROPIC_AUTH_TOKEN: "sk-mock",
-          },
-          {},
-          {},
-          { identity: "claude-meta" },
-          "",
-        );
-        expect(env.ANTHROPIC_BASE_URL).toContain(String(claudeMock.port));
+  for (const id of ["claude-code", "codex"] as const) {
+    test(`bundled ${id} inherits a synthetic user's provider config and reaches only the local mock`, async () => {
+      const hits: string[] = [];
+      const mock = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(req) {
+          hits.push(`${req.method} ${new URL(req.url).pathname}`);
+          // Stop the model request without invoking any tools or making a paid call.
+          return Response.json(
+            { type: "error", error: { type: "invalid_request_error", message: "mock" } },
+            { status: 400 },
+          );
+        },
+      });
+      let adapterProcess: AcpProcess | undefined;
+      try {
+        const spec = harnessSpec(id);
+        if (!spec) throw new Error(`Missing harness ${id}`);
+        const adapter = bundledAdapter(spec);
+        expect(adapter).not.toBeNull();
+        if (!adapter) throw new Error(`Missing bundled ${id} adapter`);
+        const home = join(fixtureRoot, `${id}-home`);
+        const cwd = join(fixtureRoot, `${id}-cwd`);
+        mkdirSync(home);
+        mkdirSync(cwd);
+        // This is the test user's login environment, not the developer machine's config or credentials.
+        const login = { HOME: home, PATH: "/usr/bin:/bin", TMPDIR: tmpdir(), LANG: "en_US.UTF-8" };
+        const baseUrl = `http://127.0.0.1:${mock.port}`;
+        if (id === "codex") {
+          writeFileSync(
+            join(home, "config.toml"),
+            `model_provider = "ttmock"\nmodel = "mock"\n\n[model_providers.ttmock]\nname = "ttmock"\nbase_url = "${baseUrl}/v1"\nwire_api = "responses"\n`,
+          );
+          writeFileSync(join(home, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-mock" }));
+        }
+        const env =
+          id === "claude-code"
+            ? harnessProcessEnv(
+                { ...login, ANTHROPIC_BASE_URL: baseUrl, ANTHROPIC_API_KEY: "sk-mock" },
+                {},
+                {},
+                { identity: "claude-meta" },
+                "",
+              )
+            : harnessProcessEnv(
+                { ...login, CODEX_HOME: home },
+                { CODEX_HOME: "/tmp/should-not-win" },
+                {},
+                { identity: "codex-env" },
+                "tuantuan-identity",
+              );
         expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
-        const p = new AcpProcess(
-          { command: process.execPath, args: [claude.script], env, cwd },
+        if (id === "codex") {
+          expect(env.CODEX_HOME).toBe(home);
+          expect(JSON.parse(env.CODEX_CONFIG as string).model_provider).toBeUndefined(); // inherited from config.toml
+          expect(JSON.parse(env.CODEX_CONFIG as string).developer_instructions).toBe("tuantuan-identity");
+        } else expect(env.ANTHROPIC_BASE_URL).toBe(baseUrl);
+        adapterProcess = new AcpProcess(
+          { command: process.execPath, args: [adapter.script], env, cwd },
           { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
         );
-        try {
-          await p.initialize(20_000);
-          const s = await withTimeout(
-            p.agent.request(methods.agent.session.new, { cwd, mcpServers: [] }),
-            30_000,
-            "claude session/new",
-          );
-          await withTimeout(
-            p.agent.request(methods.agent.session.prompt, {
-              sessionId: s.sessionId,
-              prompt: [{ type: "text", text: "ping" }],
-            }),
-            45_000,
-            "claude prompt",
-          ).catch((e: Error) => e.message);
-        } finally {
-          p.kill();
-        }
-        report.claudeHits = claudeHits;
+        await adapterProcess.initialize(10_000);
+        const session = await withTimeout(
+          adapterProcess.agent.request(methods.agent.session.new, { cwd, mcpServers: [] }),
+          10_000,
+          `${id} session/new`,
+        );
+        // The synthetic endpoint deliberately rejects the model request; reaching it is the assertion.
+        await withTimeout(
+          adapterProcess.agent.request(methods.agent.session.prompt, {
+            sessionId: session.sessionId,
+            prompt: [{ type: "text", text: "ping" }],
+          }),
+          15_000,
+          `${id} prompt`,
+        ).catch(() => {});
+        expect(
+          hits.some((path) => path.startsWith(id === "claude-code" ? "POST /v1/messages" : "POST /v1/responses")),
+        ).toBe(true);
+      } finally {
+        adapterProcess?.kill();
+        mock.stop(true);
       }
-
-      if (codex) {
-        const cwd = mkdtempSync(join(tmpdir(), "tt-codex-"));
-        const home = mkdtempSync(join(tmpdir(), "tt-codex-home-"));
-        writeFileSync(
-          join(home, "config.toml"),
-          `model_provider = "ttmock"\nmodel = "mock"\n\n[model_providers.ttmock]\nname = "ttmock"\nbase_url = "http://127.0.0.1:${codexMock.port}/v1"\nwire_api = "responses"\n`,
-        );
-        writeFileSync(join(home, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-mock" }));
-        const login = await loginShellEnv();
-        const env = harnessProcessEnv(
-          { ...login, CODEX_HOME: home },
-          { CODEX_HOME: "/tmp/should-not-win" },
-          {},
-          { identity: "codex-env" },
-          "tuantuan-identity",
-        );
-        expect(env.CODEX_HOME).toBe(home);
-        expect(JSON.parse(env.CODEX_CONFIG!).model_provider).toBeUndefined(); // from file, not CODEX_CONFIG
-        expect(JSON.parse(env.CODEX_CONFIG!).developer_instructions).toBe("tuantuan-identity");
-        const p = new AcpProcess(
-          { command: process.execPath, args: [codex.script], env, cwd },
-          { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
-        );
-        try {
-          await p.initialize(20_000);
-          const s = await withTimeout(
-            p.agent.request(methods.agent.session.new, { cwd, mcpServers: [] }),
-            30_000,
-            "codex session/new",
-          );
-          await withTimeout(
-            p.agent.request(methods.agent.session.prompt, {
-              sessionId: s.sessionId,
-              prompt: [{ type: "text", text: "ping" }],
-            }),
-            45_000,
-            "codex prompt",
-          ).catch((e: Error) => e.message);
-        } finally {
-          p.kill();
-        }
-        report.codexHits = codexHits;
-        report.codexHomeUsed = home;
-      }
-    } finally {
-      claudeMock.stop(true);
-      codexMock.stop(true);
-    }
-    console.log(JSON.stringify(report));
-    // At least one adapter should have talked to its mock if installed.
-    expect((report.claudeHits as string[]).length).toBeGreaterThan(0);
-    expect((report.codexHits as string[]).length).toBeGreaterThan(0);
-  });
+    }, 45_000);
+  }
 });

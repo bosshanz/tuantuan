@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AcpProcess } from "../server/acp";
@@ -509,7 +509,7 @@ describe("client-side fs is confined to the agent's working directory", () => {
       { command: process.execPath, args: ["--version"], env: {}, cwd: root },
       { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
     );
-    expect(p.inside("a/b.txt")).toBe(join(root, "a/b.txt"));
+    expect(p.inside("a/b.txt")).toBe(join(realpathSync(root), "a/b.txt"));
     expect(() => p.inside("../etc/passwd")).toThrow();
     expect(() => p.inside("/etc/passwd")).toThrow();
     expect(() => p.inside(`${root}kit/x`)).toThrow();

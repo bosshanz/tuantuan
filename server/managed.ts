@@ -2,6 +2,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -11,7 +12,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, delimiter, dirname, join, relative, resolve } from "node:path";
-import { platformKey, type RegistryAgent } from "./registry";
+import { killProcessTree, processGroupOptions } from "./process-tree";
+import { platformKey, type RegistryAgent, RegistryAgentSchema } from "./registry";
 
 /**
  * Harnesses installed by Tuantuan from the ACP registry, into a directory it owns
@@ -103,11 +105,19 @@ const parseVer = (s: string) =>
 
 /** Install (or update to) the registry's version of an agent; returns the new manifest. */
 export async function installManaged(agent: RegistryAgent, ctx: Ctx): Promise<ManagedManifest> {
+  // Also validate direct callers: TypeScript types do not protect filesystem side effects.
+  RegistryAgentSchema.parse(agent);
+  ctx.signal.throwIfAborted();
   const d = agent.distribution;
   const plat = platformKey();
-  const base = agentDir(agent.id);
-  const dir = join(base, agent.version.replace(/[^\w.-]/g, "_"));
-  const tmp = `${dir}.partial`;
+  const agents = resolve(managedRoot(), "agents");
+  const base = resolve(agents, agent.id);
+  const dir = resolve(base, agent.version.replace(/[^\w.-]/g, "_"));
+  if (dirname(base) !== agents || dirname(dir) !== base) throw new Error("安装目录超出 Agent 目录");
+  const tmp = `${dir}.${crypto.randomUUID()}.partial`;
+  for (const path of [agents, base, dir, tmp]) {
+    if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error("安装目录不能是符号链接");
+  }
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
   let m: Omit<ManagedManifest, "dir" | "installedAt">;
@@ -119,6 +129,7 @@ export async function installManaged(agent: RegistryAgent, ctx: Ctx): Promise<Ma
       rmSync(dir, { recursive: true, force: true });
       m = await installUvx(agent, dir, ctx);
     } else throw new Error(`${agent.name} 没有适合这台电脑（${plat}）的安装包`);
+    ctx.signal.throwIfAborted();
     if (m.kind === "uvx") rmSync(tmp, { recursive: true, force: true });
     else {
       rmSync(dir, { recursive: true, force: true });
@@ -130,6 +141,7 @@ export async function installManaged(agent: RegistryAgent, ctx: Ctx): Promise<Ma
     throw e;
   }
   const manifest: ManagedManifest = { ...m, dir, installedAt: Date.now() };
+  ctx.signal.throwIfAborted();
   writeFileSync(join(base, "manifest.json"), JSON.stringify(manifest, null, 2));
   // Older versions go once the new one is in place.
   for (const n of readdirSync(base))
@@ -159,6 +171,7 @@ async function installNpx(agent: RegistryAgent, tmp: string, final: string, ctx:
     runtime = min && min[0] >= 22 ? "node" : "bun";
     ctx.log(`运行环境：${runtime === "node" ? `Node（要求 ${engines}）` : "团团内置的 Bun"}`);
   }
+  ctx.signal.throwIfAborted();
   writeFileSync(
     join(tmp, "package.json"),
     JSON.stringify(
@@ -247,6 +260,7 @@ export async function ensureNode(min: [number, number, number], ctx: Ctx): Promi
   const exe = (dir: string) => (process.platform === "win32" ? join(dir, "node.exe") : join(dir, "bin", "node"));
   if (have[0] && existsSync(exe(join(rt, have[0].n)))) return exe(join(rt, have[0].n));
   const version = await latestNode(22, min, ctx);
+  ctx.signal.throwIfAborted();
   const os = process.platform === "win32" ? "win" : process.platform;
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const ext = process.platform === "win32" ? "zip" : "tar.gz";
@@ -265,6 +279,7 @@ export async function ensureNode(min: [number, number, number], ctx: Ctx): Promi
   const archive = join(tmp, file);
   await download(`${dist}/${version}/${file}`, archive, sha, ctx);
   await extract(archive, tmp, ctx);
+  ctx.signal.throwIfAborted();
   const inner = join(tmp, file.replace(/\.(tar\.gz|zip)$/, ""));
   const dest = join(rt, `node-${version}`);
   rmSync(dest, { recursive: true, force: true });
@@ -349,6 +364,7 @@ export async function ensureUv(ctx: Ctx): Promise<string> {
   mkdirSync(tmp, { recursive: true });
   await download(url, join(tmp, file), sha && /^[a-f0-9]{64}$/.test(sha) ? sha : undefined, ctx);
   await extract(join(tmp, file), tmp, ctx);
+  ctx.signal.throwIfAborted();
   mkdirSync(rt, { recursive: true });
   const found = findFile(tmp, basename(exe));
   if (!found) throw new Error("uv 压缩包里没有 uv");
@@ -397,6 +413,7 @@ async function installBinary(
 // ---------- helpers ----------
 
 export async function download(url: string, to: string, sha256: string | undefined, ctx: Ctx) {
+  ctx.signal.throwIfAborted();
   ctx.log(`下载 ${url}`);
   const res = await fetch(url, { signal: ctx.signal, redirect: "follow" });
   if (!res.ok || !res.body) throw new Error(`下载失败：HTTP ${res.status}`);
@@ -405,16 +422,21 @@ export async function download(url: string, to: string, sha256: string | undefin
   const sink = Bun.file(to).writer();
   let got = 0;
   let shown = 0;
-  for await (const chunk of res.body) {
-    hasher.update(chunk);
-    sink.write(chunk);
-    got += chunk.length;
-    if (total && got / total >= shown + 0.2) {
-      shown = Math.floor((got / total) * 5) / 5;
-      ctx.log(`  ${Math.round((got / total) * 100)}%  ${(got / 1e6).toFixed(1)} MB`);
+  try {
+    for await (const chunk of res.body) {
+      ctx.signal.throwIfAborted();
+      hasher.update(chunk);
+      sink.write(chunk);
+      got += chunk.length;
+      if (total && got / total >= shown + 0.2) {
+        shown = Math.floor((got / total) * 5) / 5;
+        ctx.log(`  ${Math.round((got / total) * 100)}%  ${(got / 1e6).toFixed(1)} MB`);
+      }
     }
+  } finally {
+    await sink.end();
   }
-  await sink.end();
+  ctx.signal.throwIfAborted();
   const hex = hasher.digest("hex");
   if (sha256 && hex.toLowerCase() !== sha256.toLowerCase())
     throw new Error(`校验和不匹配（期望 ${sha256.slice(0, 12)}…，实际 ${hex.slice(0, 12)}…），已停止安装`);
@@ -445,16 +467,19 @@ export async function run(
   args: string[],
   ctx: Ctx & { cwd?: string; env?: Record<string, string> },
 ): Promise<void> {
+  ctx.signal.throwIfAborted();
   ctx.log(`$ ${basename(cmd)} ${args.join(" ")}`);
+  ctx.signal.throwIfAborted();
   const p = Bun.spawn([cmd, ...args], {
+    ...processGroupOptions,
     cwd: ctx.cwd,
     env: { ...ctx.env, CI: "1", NO_COLOR: "1", npm_config_yes: "true", TERM: "dumb" },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
   });
-  const onAbort = () => p.kill();
-  ctx.signal.addEventListener("abort", onAbort);
+  const onAbort = () => killProcessTree(p, "SIGKILL");
+  ctx.signal.addEventListener("abort", onAbort, { once: true });
   const pump = async (s: ReadableStream<Uint8Array>) => {
     const dec = new TextDecoder();
     let buf = "";
@@ -466,9 +491,15 @@ export async function run(
     }
     if (buf.trim()) ctx.log(buf);
   };
-  await Promise.all([pump(p.stdout), pump(p.stderr)]);
-  const code = await p.exited;
-  ctx.signal.removeEventListener("abort", onAbort);
-  if (ctx.signal.aborted) throw new Error("已取消");
-  if (code !== 0) throw new Error(`${basename(cmd)} 退出码 ${code}`);
+  try {
+    await Promise.all([pump(p.stdout), pump(p.stderr)]);
+    const code = await p.exited;
+    if (ctx.signal.aborted) throw new Error("已取消");
+    if (code !== 0) throw new Error(`${basename(cmd)} 退出码 ${code}`);
+  } catch (e) {
+    killProcessTree(p, "SIGKILL");
+    throw e;
+  } finally {
+    ctx.signal.removeEventListener("abort", onAbort);
+  }
 }

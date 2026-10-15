@@ -282,6 +282,8 @@ export function PermissionDialog(props: {
   ask: PermissionAsk;
   agentName: string;
   terminals: Record<string, TerminalSnapshot>;
+  pending: boolean;
+  error: string | null;
   onAnswer: (optionId: string | null) => void;
 }) {
   const { ask } = props;
@@ -305,8 +307,11 @@ export function PermissionDialog(props: {
         role="alertdialog"
         aria-modal="true"
         aria-label={`${props.agentName} 请求授权`}
+        aria-busy={props.pending}
         onKeyDown={(e) =>
-          e.key === "Escape" && props.onAnswer(options.find((o) => o.kind === "reject_once")?.optionId ?? null)
+          e.key === "Escape" &&
+          !props.pending &&
+          props.onAnswer(options.find((o) => o.kind === "reject_once")?.optionId ?? null)
         }
       >
         <div className="perm-head">
@@ -320,12 +325,18 @@ export function PermissionDialog(props: {
             <ToolCard tool={tool} terminals={props.terminals} defaultOpen />
           ) : null}
         </div>
+        {props.error && (
+          <div className="form-error" role="alert">
+            {props.error}
+          </div>
+        )}
         <div className="perm-actions">
           {options.map((o, i) => (
             <button
               key={o.optionId}
               ref={i === 0 ? first : undefined}
               type="button"
+              disabled={props.pending}
               className={o.kind.startsWith("allow") ? (o.kind === "allow_once" ? "btn primary" : "btn") : "btn danger"}
               onClick={() => props.onAnswer(o.optionId)}
             >

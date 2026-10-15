@@ -62,6 +62,14 @@ export function Popover(props: {
   useLayoutEffect(() => {
     place();
   });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Drilling into an option changes a child's state without rendering this popover again.
+    const observer = new ResizeObserver(place);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [place]);
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node;
@@ -449,7 +457,8 @@ function PanelChip(props: {
         {props.text && <ChevronDown size={12} className="model-chev" />}
       </button>
       {open && (
-        <Popover anchor={btn.current} onClose={() => setOpen(false)} label={props.label} align="start" width={300}>
+        <Popover anchor={btn.current} onClose={() => setOpen(false)} label={props.label} align="end" width={320}>
+          <div className="pop-head">{props.label}</div>
           <OptionsPanel groups={props.groups} showAgents={props.showAgents} onPick={props.onPick} />
         </Popover>
       )}
@@ -458,8 +467,8 @@ function PanelChip(props: {
 }
 
 /**
- * Composer settings: one chip per setting (model, 权限, 推理, 思考…) for a single agent, collapsing the
- * less-used ones into "…" when narrow. Multi-agent conversations show one summary chip with per-agent
+ * Composer settings: model, permissions and reasoning stay visible when space allows; other
+ * options live in the settings panel. Multi-agent conversations show one summary chip with per-agent
  * groups (each agent starts from its own defaults).
  */
 export function SessionChips(props: {
@@ -470,7 +479,7 @@ export function SessionChips(props: {
   const root = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   useLayoutEffect(() => {
-    const host = root.current?.closest(".composer-box, .composer") as HTMLElement | null;
+    const host = root.current;
     if (!host) return;
     const ro = new ResizeObserver(() => setWidth(host.clientWidth));
     ro.observe(host);
@@ -517,9 +526,9 @@ export function SessionChips(props: {
         </span>
       </div>
     );
-  const max = width >= 680 ? 4 : width >= 520 ? 2 : 1;
-  const shown = g.opts.slice(0, max);
-  const rest = g.opts.slice(max);
+  const max = width >= 520 ? 3 : width >= 360 ? 2 : 1;
+  const shown = g.opts.filter((o) => o.kind === "model" || o.kind === "mode" || o.kind === "effort").slice(0, max);
+  const rest = g.opts.filter((o) => !shown.includes(o));
   return (
     <div className="chips" ref={root}>
       {shown.map((o) => (

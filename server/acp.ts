@@ -1,5 +1,7 @@
-import { resolve, sep } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
+import { killProcessTree, processGroupOptions } from "./process-tree";
 
 /**
  * One harness process speaking ACP over stdio. Tuantuan is the ACP *client*: it answers the agent's
@@ -40,6 +42,7 @@ export class AcpProcess {
   private conn: acp.ClientConnection;
   private terms = new Map<string, Term>();
   private stderrTail = "";
+  private root: string;
   init: acp.InitializeResponse | null = null;
   /** Resolves (never rejects) when the process exits. */
   readonly exited: Promise<number>;
@@ -48,12 +51,14 @@ export class AcpProcess {
     readonly launch: AcpLaunch,
     private h: AcpHandlers,
   ) {
+    this.root = realpathSync(launch.cwd);
     this.proc = Bun.spawn([launch.command, ...launch.args], {
       cwd: launch.cwd,
       env: launch.env,
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      ...processGroupOptions,
     });
     const sink = this.proc.stdin as import("bun").FileSink;
     const input = new WritableStream<Uint8Array>({
@@ -110,10 +115,10 @@ export class AcpProcess {
     return res;
   }
 
-  kill() {
-    for (const t of this.terms.values()) t.proc.kill();
+  kill(signal: NodeJS.Signals = "SIGTERM") {
+    for (const t of this.terms.values()) killProcessTree(t.proc, signal);
     this.conn.close();
-    this.proc.kill();
+    killProcessTree(this.proc, signal);
   }
 
   private async collectStderr() {
@@ -126,11 +131,38 @@ export class AcpProcess {
 
   /** Resolves a path the agent sent and refuses anything outside the agent's working directory. */
   inside(path: string): string {
-    const root = resolve(this.launch.cwd);
-    const p = resolve(root, path);
-    if (p !== root && !p.startsWith(root + sep))
+    const lexicalRoot = resolve(this.launch.cwd);
+    const p = resolve(lexicalRoot, path);
+    const within = (candidate: string, root: string) =>
+      candidate === root || candidate.startsWith(root.endsWith(sep) ? root : root + sep);
+    const denied = () => acp.RequestError.invalidParams({ path }, `路径不在 Agent 工作目录内：${path}`);
+    if (!within(p, lexicalRoot) && !within(p, this.root)) throw denied();
+
+    // New files may have missing parents. Resolve the nearest existing ancestor, including links,
+    // then append only missing components. A dangling link is an error, never a missing directory.
+    let ancestor = p;
+    const missing: string[] = [];
+    for (;;) {
+      try {
+        lstatSync(ancestor);
+        break;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+        const parent = dirname(ancestor);
+        if (parent === ancestor) throw denied();
+        missing.unshift(basename(ancestor));
+        ancestor = parent;
+      }
+    }
+    let target: string;
+    try {
+      target = join(realpathSync(ancestor), ...missing);
+    } catch {
+      throw denied();
+    }
+    if (!within(target, this.root))
       throw acp.RequestError.invalidParams({ path }, `路径不在 Agent 工作目录内：${path}`);
-    return p;
+    return target;
   }
 
   private async readTextFile(p: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
@@ -155,7 +187,14 @@ export class AcpProcess {
     const env = { ...this.launch.env, ...Object.fromEntries((p.env ?? []).map((e) => [e.name, e.value])) };
     // Agents send either a shell line in `command` or an argv split; run both through the shell like Zed does.
     const line = [p.command, ...(p.args ?? []).map(shellQuote)].join(" ");
-    const proc = Bun.spawn(["/bin/sh", "-c", line], { cwd, env, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const proc = Bun.spawn(["/bin/sh", "-c", line], {
+      cwd,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+      ...processGroupOptions,
+    });
     const t: Term = {
       terminalId: crypto.randomUUID(),
       sessionId: p.sessionId,
@@ -209,13 +248,13 @@ export class AcpProcess {
   }
 
   private killTerminal(id: string): acp.KillTerminalResponse {
-    this.term(id).proc.kill();
+    killProcessTree(this.term(id).proc);
     return {};
   }
 
   private releaseTerminal(id: string): acp.ReleaseTerminalResponse {
     const t = this.terms.get(id);
-    if (t && !t.exitStatus) t.proc.kill();
+    if (t) killProcessTree(t.proc);
     this.terms.delete(id);
     return {};
   }

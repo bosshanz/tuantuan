@@ -56,7 +56,17 @@ export const IDENTITY_DELIVERY: Record<HarnessInfo["identity"], string> = {
   "first-prompt": "放在每个新会话的第一条消息前",
 };
 
-/** Throws an Error carrying the server's error message for any non-2xx response. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/** Throws an ApiError carrying the HTTP status and server's message for any non-2xx response. */
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -64,7 +74,7 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError((data as { error?: string }).error ?? `HTTP ${res.status}`, res.status);
   return data as T;
 }
 

@@ -141,6 +141,27 @@ export interface AppDeps {
 /** UI clients subscribe to room topics. */
 type WsData = { kind: "ui"; rooms: Set<string> };
 
+function loopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
+/** Local clients and the Vite proxy share this boundary, including WebSocket upgrades and MCP. */
+function localRequest(req: Request, url: URL): boolean {
+  const host = req.headers.get("host");
+  try {
+    if (!loopbackHost(url.hostname) || (host && !loopbackHost(new URL(`http://${host}`).hostname))) return false;
+    const origin = req.headers.get("origin");
+    if (origin) {
+      const source = new URL(origin);
+      if (!/^https?:$/.test(source.protocol) || !loopbackHost(source.hostname)) return false;
+    }
+    // Browser navigation can omit Origin. Native local API/MCP clients omit both headers.
+    return req.headers.get("sec-fetch-site") !== "cross-site";
+  } catch {
+    return false;
+  }
+}
+
 export function createApp(deps: AppDeps) {
   const store = new Store(deps.dbPath);
   const dataDir =
@@ -1184,6 +1205,7 @@ export function createApp(deps: AppDeps) {
     },
     async fetch(req: Request, srv: Server<WsData>): Promise<Response | undefined> {
       const url = new URL(req.url);
+      if (!localRequest(req, url)) return new Response("Only local clients are allowed", { status: 403 });
       if (url.pathname === "/ws") {
         if (srv.upgrade(req, { data: { kind: "ui", rooms: new Set<string>() } })) return undefined;
         return new Response("WebSocket upgrade failed", { status: 400 });
@@ -1239,11 +1261,11 @@ export function createApp(deps: AppDeps) {
   };
 }
 
-export function serve(deps: AppDeps, port: number, hostname?: string) {
+export function serve(deps: AppDeps, port: number, hostname = "127.0.0.1") {
   const app = createApp(deps);
   const server = Bun.serve<WsData>({
     port,
-    ...(hostname ? { hostname } : {}),
+    hostname,
     fetch: (req, srv) => app.fetch(req, srv),
     websocket: app.websocket,
   });

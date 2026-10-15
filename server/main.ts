@@ -8,7 +8,7 @@ const staticDir = process.env.TUANTUAN_STATIC_DIR || (existsSync("web/dist") ? "
 const { server, app } = serve(
   { dbPath: process.env.DB_PATH ?? "data/agent-hub.db", staticDir },
   port,
-  process.env.TUANTUAN_HOST || undefined,
+  process.env.TUANTUAN_HOST || "127.0.0.1",
 );
 
 console.log(`团团 Tuantuan 已启动: http://localhost:${server.port}`);
@@ -19,12 +19,14 @@ console.log(
 );
 if (!staticDir) console.log("未找到 web/dist，前端请通过 Vite 开发服务器访问");
 let stopping = false;
-const stop = () => {
+const stop = async () => {
   if (stopping) return;
   stopping = true;
   app.host.shutdown();
   app.installer.shutdown();
   server.stop(true);
+  // Process groups get a TERM grace period followed by KILL; keep the escalation timer alive.
+  await Bun.sleep(300);
   process.exit(0);
 };
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(sig, stop);

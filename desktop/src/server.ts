@@ -36,7 +36,7 @@ export async function startServer(opts: {
   const log = createWriteStream(join(opts.logDir, "server.log"), { flags: "a" });
   const child = spawn(opts.layout.bun, [opts.layout.entry], {
     cwd: opts.layout.root,
-    // Own process group (POSIX) so the whole tree — server + every harness — goes down together.
+    // The server owns this group; cancellable harnesses / terminals own additional groups.
     detached: process.platform !== "win32",
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -77,41 +77,106 @@ export async function startServer(opts: {
     await new Promise((r) => setTimeout(r, 150));
   }
   let stopping: Promise<void> | null = null;
+  const tree: TrackedTree = { groups: new Map() };
   return {
     url,
     port,
     child,
     stop: () => {
       stopping ??= new Promise<void>((done) => {
-        if (child.exitCode !== null || child.signalCode !== null) return done();
-        const force = setTimeout(() => killTree(child, "SIGKILL"), 4000);
+        if (child.exitCode !== null || child.signalCode !== null) {
+          killTree(child, "SIGKILL", tree);
+          log.end();
+          return done();
+        }
+        const force = setTimeout(() => killTree(child, "SIGKILL", tree), 4000);
         child.once("exit", () => {
           clearTimeout(force);
-          // Stragglers in the group (a harness that ignored SIGTERM) go too.
-          killTree(child, "SIGKILL");
+          // Retain ownership after reparenting when the server exits before its descendants.
+          killTree(child, "SIGKILL", tree);
           log.end();
           done();
         });
-        killTree(child, "SIGTERM");
+        killTree(child, "SIGTERM", tree);
       });
       return stopping;
     },
   };
 }
 
-export function killTree(child: ChildProcess, sig: NodeJS.Signals) {
+type ProcessRow = { pid: number; parent: number; group: number; started: string };
+type TrackedTree = { rootStarted?: string; groups: Map<number, Map<number, string>> };
+
+function processTable(): ProcessRow[] {
+  const ps = spawnSync("ps", ["-axo", "pid=,ppid=,pgid=,lstart="], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  if (ps.error || ps.status !== 0) throw ps.error ?? new Error(ps.stderr || "ps failed");
+  return ps.stdout.split("\n").flatMap((line) => {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
+    return match
+      ? [{ pid: Number(match[1]), parent: Number(match[2]), group: Number(match[3]), started: match[4] as string }]
+      : [];
+  });
+}
+
+export function killTree(child: ChildProcess, sig: NodeJS.Signals, tree: TrackedTree = { groups: new Map() }) {
   if (!child.pid) return;
   if (process.platform === "win32") {
     spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
     return;
   }
+  const running = child.exitCode === null && child.signalCode === null;
+  let groups: number[];
   try {
-    process.kill(-child.pid, sig);
-  } catch {
+    const rows = processTable();
+    const callerGroup = rows.find((row) => row.pid === process.pid)?.group;
+    if (callerGroup === undefined) throw new Error("ps did not identify the desktop process group");
+    const root = rows.find((row) => row.pid === child.pid);
+    if (running && root && (!tree.rootStarted || tree.rootStarted === root.started)) {
+      tree.rootStarted = root.started;
+      const descendants = new Set([child.pid]);
+      for (;;) {
+        const before = descendants.size;
+        for (const row of rows) if (descendants.has(row.parent)) descendants.add(row.pid);
+        if (before === descendants.size) break;
+      }
+      for (const row of rows) {
+        if (descendants.has(row.pid) && row.group !== callerGroup && !tree.groups.has(row.group))
+          tree.groups.set(row.group, new Map());
+      }
+    }
+    groups = [];
+    for (const [group, members] of tree.groups) {
+      if (group === callerGroup) continue;
+      const current = rows.filter((row) => row.group === group);
+      // A group id can be reused. Signal it only while at least one recorded process identity
+      // remains (or this snapshot first discovered it beneath the still-running server).
+      if (members.size && !current.some((row) => members.get(row.pid) === row.started)) continue;
+      if (!current.length) continue;
+      tree.groups.set(group, new Map(current.map((row) => [row.pid, row.started])));
+      groups.push(group);
+    }
+  } catch (error) {
+    console.warn("无法读取服务进程树，回收服务原进程组", error);
+    // Keep the original group fallback when ps is unavailable. Detached descendants cannot be
+    // safely rediscovered after reparenting, so never guess ownership of a reused group id.
+    groups = running ? [child.pid] : [];
+  }
+  // Descendant groups first: the root can exit immediately after receiving its signal.
+  groups.sort((a, b) => Number(a === child.pid) - Number(b === child.pid));
+  for (const group of groups) {
     try {
-      child.kill(sig);
+      process.kill(-group, sig);
     } catch {
-      // already gone
+      if (group === child.pid && running) {
+        try {
+          child.kill(sig);
+        } catch {
+          // already gone
+        }
+      }
     }
   }
 }

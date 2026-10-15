@@ -2,20 +2,26 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { shellQuote } from "../server/acp";
 import {
   bundledAdapter,
   bundledClaudeBinary,
   detectHarness,
+  getRegistry,
   harnessSpec,
+  loginCommand,
   loginShellEnv,
   resetLoginShellEnv,
+  setRegistry,
 } from "../server/harness";
 import { Installer, type InstallJob } from "../server/installer";
+import { Registry } from "../server/registry";
 
 const dir = mkdtempSync(join(tmpdir(), "tt-install-"));
 const home = mkdtempSync(join(tmpdir(), "tt-home-"));
 const fakeShell = join(dir, "fake-login-shell");
 const saved = { SHELL: process.env.SHELL, DIR: process.env.TUANTUAN_MOCK_INSTALL_DIR };
+const savedRegistry = getRegistry();
 
 beforeAll(() => {
   // A login shell whose PATH has no harness adapters: what a fresh machine looks like.
@@ -23,6 +29,7 @@ beforeAll(() => {
   chmodSync(fakeShell, 0o755);
   process.env.SHELL = fakeShell;
   process.env.TUANTUAN_MOCK_INSTALL_DIR = join(dir, "bin");
+  setRegistry(new Registry(join(dir, "registry")));
   resetLoginShellEnv();
 });
 afterAll(() => {
@@ -30,6 +37,7 @@ afterAll(() => {
   if (saved.DIR === undefined) delete process.env.TUANTUAN_MOCK_INSTALL_DIR;
   else process.env.TUANTUAN_MOCK_INSTALL_DIR = saved.DIR;
   resetLoginShellEnv();
+  setRegistry(savedRegistry);
   rmSync(dir, { recursive: true, force: true });
   rmSync(home, { recursive: true, force: true });
 });
@@ -61,7 +69,9 @@ describe("bundled ACP adapters", () => {
     }
     // The Agent SDK ships the Claude Code binary for this platform; no separate CLI needed.
     expect(bundledClaudeBinary()).toMatch(/claude-agent-sdk-[a-z0-9-]+\/claude$/);
-    expect((await detectHarness(harnessSpec("claude-code") as never, null)).login).toContain("claude-agent-sdk-");
+    // loginShellEnv also adds common global install directories, which may contain a real Claude.
+    // Check the no-CLI case with a controlled PATH instead of depending on the developer's machine.
+    expect(loginCommand(harnessSpec("claude-code") as never, { PATH: "/usr/bin:/bin" })).toContain("claude-agent-sdk-");
   });
 
   test("the user's own install on PATH wins over the bundled one", async () => {
@@ -146,4 +156,40 @@ describe("one-click installer (mock)", () => {
     await Bun.sleep(200);
     expect(existsSync(join(dir, "bin", "mock-cli"))).toBe(false);
   });
+
+  for (const stop of ["cancel", "shutdown", "timeout"] as const) {
+    test(`${stop} stops grandchildren, including shells that ignore TERM`, async () => {
+      const started = join(dir, `${stop}-started`);
+      const marker = join(dir, `${stop}-survived`);
+      const grandchild = join(dir, `${stop}-grandchild.sh`);
+      const child = join(dir, `${stop}-child.sh`);
+      writeFileSync(
+        grandchild,
+        `trap '' TERM\nprintf ready > ${shellQuote(started)}\n/bin/sleep ${stop === "timeout" ? "0.35" : "0.1"}\nprintf survived > ${shellQuote(marker)}\n`,
+      );
+      writeFileSync(child, `sh ${shellQuote(grandchild)} &\nwait\n`);
+      let finishes = 0;
+      const installer = new Installer(() => finishes++, stop === "timeout" ? 250 : undefined);
+      try {
+        installer.start(
+          `tree-${stop}`,
+          { id: "script", label: "test", tool: "sh", command: `sh ${shellQuote(child)}; :` },
+          { PATH: "/usr/bin:/bin" },
+        );
+        for (let i = 0; i < 100 && !existsSync(started); i++) await Bun.sleep(5);
+        expect(existsSync(started)).toBe(true);
+        if (stop === "cancel") installer.cancel(`tree-${stop}`);
+        if (stop === "shutdown") installer.shutdown();
+        const job = await finished(installer, `tree-${stop}`);
+        expect(job.state).toBe(stop === "timeout" ? "error" : "cancelled");
+        if (stop === "timeout") expect(job.error).toContain("安装超时");
+        await Bun.sleep(450);
+        expect(existsSync(marker)).toBe(false);
+        expect(installer.get(`tree-${stop}`)?.state).toBe(job.state);
+        expect(finishes).toBe(1);
+      } finally {
+        installer.shutdown();
+      }
+    });
+  }
 });

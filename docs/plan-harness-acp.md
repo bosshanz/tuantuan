@@ -11,6 +11,7 @@
 6. **桌面机器人功能已移除**（2026-10-14，迁移 7 清理数据）。
 7. Harness 来源（2026-10-15）：用户自己装的优先；否则从**官方 ACP Registry** 一键装到团团自己的目录（固定版本、校验和、不用 sudo、不装全局）。Claude Code / Codex 不再默认打进桌面安装包，首次使用时下载（`TUANTUAN_BUNDLE_ADAPTERS=1` 可内置）。
 8. 不改用户配置：从不设置 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`，不写 `~/.claude` / `~/.codex`；CC Switch 只读导入；不从钥匙串抓 token 调私有接口。
+9. 接入与行为边界（2026-10-15）：继续沿用 ACP 的能力声明与会话生命周期；当前不新增原生适配或固定父子任务模型。Agent 行为由用户配置、身份指令和所选 Harness 决定，已有会话与交接规则保持；后续改动以实际需求和已确认缺陷为依据。
 
 ## 1. 目标与非目标
 
@@ -27,6 +28,8 @@
 - 不自研编码 Agent。
 
 ## 2. 调研结论（带出处）
+
+以下保留当时的调研快照，不代表本轮重新核实过的外部版本或能力。
 
 ### 2.1 ACP 协议现状
 - JSON-RPC 2.0，客户端把 Agent 作为子进程启动，stdio 上传换行分隔 JSON（[协议概览](https://agentclientprotocol.com/protocol/overview)）。协议主版本是整数，当前稳定为 **v1**；v2 是草案（SDK 需显式 `experimental/v2` 导入，[npm](https://www.npmjs.com/package/@agentclientprotocol/sdk)）。
@@ -57,6 +60,8 @@
 **共同难点：macOS GUI 应用的 PATH**。从 Dock 启动时继承的是 launchd 的精简 PATH，找不到 `npm -g`、Homebrew、nvm、`~/.opencode/bin` 下的 CLI。方案：启动时用用户登录 shell 解析一次环境（`$SHELL -ilc 'env -0'`，带超时），缓存后用于所有子进程；设置页允许为每个 Harness 填绝对路径；「检测」按钮显示解析到的路径和版本。
 
 ## 3. 架构
+
+第 3–7 节保留初版目标与方案，未标记完成的能力不能据此视为已实现。当前模块、数据与约束以 `docs/architecture.md` 为准；本轮纠正的执行边界和凭据现状见 §7 及下方修复记录。
 
 ```
 桌面壳（Electron 主进程：窗口 / 菜单 / 文件夹对话框）→ 子进程 Bun 服务端
@@ -111,14 +116,14 @@
 | `notice` | 轻提示（toast），不进历史 | 需客户端声明 |
 | `compaction_*` | 时间线里的「上下文已压缩」分隔块，可展开摘要 | OpenCode 读取该能力；其余待测 |
 | `elicitation/create` | 表单提问卡片 / 打开 URL 确认 | OpenCode（需开启问答工具）；其余待测 |
-| `authMethods` / `authenticate` / terminal-auth | Agent 设置页「登录」：API Key 输入（存钥匙串）或在内置终端运行登录命令后重连 | 全部有各自方式 |
+| `authMethods` / `authenticate` / terminal-auth | Agent 设置页「登录」：API Key 输入（原计划钥匙串，当前 SQLite 明文）或打开系统终端运行登录命令后重连 | 全部有各自方式 |
 | `fs/*`、`terminal/*`（客户端提供） | 团团实现：读写限定在 workspace；终端由团团 PTY 执行并在工具卡片里展示 | 首批均可能调用 |
 | 私有扩展（`_meta`、`x.ai/*`、Claude goal 等） | M4 之后按需支持，未知字段安全忽略 | — |
 
 ## 5. 每个 Agent 的配置
 - 名称、头像（保留）、Harness（下拉，来自 Registry，显示检测状态与版本）。
 - 工作目录（必填，绝对路径；可加 `additionalDirectories`）。
-- 环境变量（键值；密钥类存系统钥匙串，不落 SQLite 明文）。
+- 环境变量（键值）。原计划密钥类放系统钥匙串，尚未实现；当前团团专用 Key 存 SQLite 明文、专用接口打码，普通 Agent.env 仍是可读写配置。
 - 额外 MCP 服务（团团的 handoff MCP 自动注入，不可删）。
 - 默认权限策略：每次询问 / 本会话内记住 / 只读自动允许 / 全部自动（危险，需二次确认）。
 - 启动参数（高级）：如 Grok `-m`、`--agent-profile`；OpenCode `--cwd`。
@@ -130,10 +135,10 @@
 
 ## 7. 安全
 - 权限默认「每次询问」；「总是允许」按 Agent + 工具 kind + 路径前缀记忆，可在设置里撤销。
-- `fs/*` 与团团终端严格限定在 Agent 的 workspace（realpath 校验，拒绝符号链接逃逸）；workspace 外读写一律走权限确认。
+- **当前文件 / 终端边界（2026-10-15 纠正）**：ACP `fs/*` 按真实路径与最近现存父目录校验，拒绝工作目录外目标和符号链接逃逸。终端只校验启动 cwd，命令可访问其他路径；旧「文件与终端严格限定 workspace」描述过宽。没有操作系统沙箱，也不防御校验后的并发文件系统替换。目录外 ACP 文件请求直接拒绝，不通过权限弹窗放行。
 - Harness 自己的工具（不走 `fs/*`）不受团团控制：在 UI 明示「该 Harness 在本机以你的权限运行」，并展示其沙箱选项（如 Codex 沙箱、Grok sandbox profile）。
-- 密钥只放钥匙串 / 环境变量注入子进程，日志脱敏；子进程 env 白名单（PATH、HOME、LANG + 用户配置项），不把团团自身环境整个透传。
-- handoff MCP 只监听 127.0.0.1，带每会话随机 token。
+- **凭据现状（2026-10-15）**：团团的服务商 / BYOK / Harness env_var Key 当前以明文存在 SQLite，专用公开接口打码；原生登录态归 Harness。钥匙串、严格的子进程 env 白名单是早期计划，尚未实现；当前继承登录 shell 环境并叠加配置，不应将普通 Agent.env 当成打码的密钥存储。
+- 本机 Bun 服务（含 handoff MCP 与 WS）默认监听 `127.0.0.1`，HTTP / WS 共用 Host、Origin 与跨站检查；handoff MCP 另带内存 token。改变监听地址不启用远程鉴权。
 
 ## 8. 里程碑
 - **M1：ACP 客户端 + 首批 4 个 Harness 的单 Agent 会话，完整能力 UI**（仍以浏览器 + Bun 服务形态开发，桌面壳放 M3）
@@ -145,7 +150,7 @@
 - **M2：多 Agent 会话 + 交接 MCP**
   - **M2 状态（2026-10-14）**：已完成 `tuantuan` MCP 服务器（HTTP `/mcp/<token>` + stdio 中转，按 `mcpCapabilities.http` 选择）、`handoff` / `list_members`（成员校验、去重、跳数上限、打断语义、交接卡片）、会话转述（上次发言后的新消息，8000 字上限）、引导页 ACP `authenticate` + 终端命令复制 + 重新检测、session/load 回放只读显示（按用户消息去重）、建会话时选主 Agent 和工作目录、README 截图更新。实测：OpenCode 1.19.0（免费模型，无账号）在 HTTP 和 stdio 两种传输下都完成了真实交接；Claude Code 未登录时 prompt 报需要登录；Codex / Grok 未登录无法建会话。：成员 session 管理、转述上下文、@ 路由、默认回复人（按决策）、handoff MCP、跳数与打断。
 - **M3：桌面打包**：Electron 壳、登录 shell 环境解析、钥匙串、签名公证、自动更新、首次运行引导（检测并提示安装 Harness）。
-  - **M3 状态（2026-10-15）**：`desktop/` 已完成：Electron 主进程拉起随包 Bun 服务端（随机本机端口、等 `/api/health`、退出时杀整个进程组）、单实例、macOS hiddenInset 标题栏（红绿灯居中在侧栏上方）、中文菜单、可选托盘、窗口位置记忆、登录 shell 环境导入、preload 桥接原生文件夹对话框（contextIsolation + sandbox，无 nodeIntegration）、图标、electron-builder（mac dmg+zip arm64/x64、win nsis、linux AppImage）、签名公证按环境变量开启、electron-updater 仅在配置发布时启用、GitHub Actions 打包。Linux AppImage 在 Xvfb 下端到端冒烟通过（`desktop/scripts/smoke.ts`）。未实测：macOS / Windows 包、签名公证、自动更新、钥匙串。
+  - **M3 状态（2026-10-15）**：`desktop/` 已完成：Electron 主进程拉起随包 Bun 服务端（随机本机端口、等 `/api/health`、退出时杀整个进程组）、单实例、macOS hiddenInset 标题栏（红绿灯居中在侧栏上方）、中文菜单、可选托盘、窗口位置记忆、登录 shell 环境导入、preload 桥接原生文件夹对话框（contextIsolation + sandbox，无 nodeIntegration）、图标、electron-builder（mac dmg+zip arm64/x64、win nsis、linux AppImage）、签名公证按环境变量开启、electron-updater 仅在配置发布时启用、GitHub Actions 打包。Linux AppImage 在 Xvfb 下端到端冒烟通过（`desktop/scripts/smoke.ts`）。未完成：钥匙串集成。未实测：macOS / Windows 包、签名公证、自动更新。
   - **2026-10-15**：桌面版 macOS 标题栏改为全列统一 52px 标题行（红绿灯居中在图标栏顶部，全屏时让回）；首次引导简化为一页三步。
 - **Registry 接入（2026-10-15）**：官方 ACP Registry 客户端（缓存 + 随包快照 + schema 校验 + 6 小时刷新）、「更多 Agent」列表与搜索、npx / uvx / 二进制一键安装（团团目录、固定版本、sha256）、托管 Node 22 与 uv、更新与卸载、图标缓存、实验性 ZCode 桥接；Pi、GLM、MiniMax、ZCode、OpenCode、fast-agent 在 box 上真实安装并握手通过。
 - **M4：更多 Harness 与扩展**：Gemini CLI、Goose / Kimi / Qwen Code；私有扩展（Claude 子 Agent / goal、Grok `x.ai/*` 回退、OpenCode fork）；视情况评估 ACP v2。
@@ -161,3 +166,27 @@
 - 多个编码 Agent 在同一项目目录并发写文件：目前共用目录、串行执行；是否改为每 Agent 独立 git worktree 未定。
 - 团团层的附加说明（每轮 prompt 前缀、多 Agent 身份说明）是否全部交给各 Harness 的 AGENTS.md / CLAUDE.md。
   - **2026-10-15**：布局改为单侧栏 + 悬浮标题 + 气泡 + 右侧详情（成员）；头像新增小猫、小狗、兔子。
+
+## 2026-10-15 本机边界与状态恢复修复
+
+本轮保留本机单用户定位、现有 Harness / Registry 接入与存储结构，修复已复现的执行边界和状态恢复问题；不扩展成远程鉴权或操作系统沙箱。
+
+| 范围 | 实现与边界 |
+| --- | --- |
+| HTTP / WebSocket | 默认 loopback；HTTP（含 MCP）与 WS 升级共用 Host / Origin / 跨站检查，兼容本机 Vite 代理及无 Origin 的原生客户端；`TUANTUAN_HOST` 显式配置监听地址 |
+| ACP 文件 / 终端 | 文件真实路径与最近现存父目录检查，拒绝符号链接逃逸；终端仅检查 cwd，不隔离命令文件访问，也不隔离 Harness 自带工具 |
+| 取消与恢复 | 初始化期间取消不发 prompt；已运行轮次先发 cancel，默认 4 秒超时强制回收 Harness / ACP 终端进程组，关联会话随后可重建 / 恢复 |
+| 初始化失效 | opening 按配置签名与代次去重并在提交前核对；Agent 设置、项目目录或会话选择变更，以及停机后旧结果不能回写，旧请求以 409 要求重试；旧 load 失败仅清理自己仍拥有的映射 |
+| 安装 | id / 版本目录段校验、独立随机暂存、发布前检查取消信号；取消 / 超时终止整组。uvx 固定 venv 路径仍直接安装到最终目录，失败清理 |
+| 桌面退出 | 追踪独立子进程组及进程身份，服务端先退出时仍回收已记录组；POSIX ps 不可用时只有原组兜底，Windows 使用 taskkill 树 |
+| 前端 | 最新快照加实时事件重放，跨 room 旧响应忽略；授权提交失败保留、提示并可重试，pending 防重复，成功 / 404 关闭 |
+| 资料校准 | SQLite 实际迁移已至 16；专用 Key 为 SQLite 明文、专用接口打码，原生登录归 Harness；钥匙串仍未完成。早期调研、目标方案继续作为历史记录保留 |
+
+状态：本轮修复与回归已完成，独立复审按原复现脚本确认前端慢快照、授权失败、目录变更、过期 load 清理以及桌面强退均已修复，无剩余必须修正项。当前检查中的 3 项失败通过隔离测试用户 HOME / 登录环境、分开真实适配器测试并设置合理超时、显式初始化 Registry fixture 修正；真实适配器只连接本地模型接口。
+
+最终验证环境为 macOS、Bun 1.3.14（CI 仍固定 1.4.2）：
+
+- `bun run check`：类型检查、Biome、全部测试通过；34 个测试文件，236 pass、6 skip、0 fail，1584 个断言。6 项跳过的是需显式启用 `TUANTUAN_REAL_REGISTRY=1` 的真实 Registry 安装测试。
+- `bun run build`：通过；仍有既有的 Vite 原生配置加载兼容性及大于 500 kB 分包提示。
+- `CHROME_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' bun run e2e`：通过；包括慢快照期间停止按钮 / 权限弹窗保留、授权 503 重试、防重复提交、404 关闭、通知页清理、输入框布局及 Vite 代理。新增 `$` 回归覆盖超过 12 项的完整列表、末项键盘选择与滚动、名称 / 描述搜索、正文补全以及发送失败后草稿恢复；首次完整重跑曾遇到浏览器意外关闭，后续带浏览器日志的全程重跑通过，退出码为 0。
+- 桌面类型检查与编译通过；完整测试包含真实 Bun 服务进程的正常退出、冻结后强退、忽略 TERM 后代回收与无关进程组保护。这里验证的是本机进程生命周期，未据此宣称 macOS / Windows 安装包、签名或真实付费模型验收通过。
