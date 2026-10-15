@@ -260,7 +260,21 @@ try {
 
   await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
   await page.locator(".pane-head").getByRole("button", { name: "会话" }).click();
-  await page.locator('form .select[aria-label="项目"]').selectOption({ label: "冒烟项目" });
+  // 项目（可选）: defaults to 不选项目 (草稿); styled picker with folder icons.
+  const projBtn = page.getByRole("button", { name: "项目", exact: true });
+  await projBtn.filter({ hasText: "不选项目" }).waitFor();
+  await projBtn.click();
+  await page
+    .getByRole("listbox", { name: "项目" })
+    .getByRole("option", { name: /冒烟项目/ })
+    .waitFor();
+  await page.waitForTimeout(300);
+  await shot("new-conversation-project");
+  await page
+    .getByRole("listbox", { name: "项目" })
+    .getByRole("option", { name: /冒烟项目/ })
+    .click();
+  await projBtn.filter({ hasText: "冒烟项目" }).waitFor();
   await page.getByLabel("会话名称").fill("冒烟会话");
   const pick = (name: string) =>
     page.locator(".pick", { has: page.locator(".pick-name", { hasText: new RegExp(`^${name}$`) }) }).locator("input");
@@ -302,8 +316,18 @@ try {
   await shot("group");
   // Single-agent conversation in 草稿
 
+  // No project chosen → 草稿.
   await page.locator(".pane-head").getByRole("button", { name: "会话" }).click();
-  await page.locator('form .select[aria-label="项目"]').selectOption({ label: "冒烟项目" });
+  await projBtn.filter({ hasText: "不选项目" }).waitFor();
+  await page.getByLabel("会话名称").fill("草稿会话");
+  await pick("Bob").check();
+  await page.getByRole("button", { name: "创建会话" }).click();
+  await page.getByRole("heading", { name: "草稿会话" }).waitFor();
+  if (app.store.listRooms().find((r) => r.name === "草稿会话")?.projectId !== "drafts")
+    throw new Error("conversation without a project should go to 草稿");
+  // A project's "+" preselects that project.
+  await page.getByRole("button", { name: "在 冒烟项目 新建会话" }).click();
+  await projBtn.filter({ hasText: "冒烟项目" }).waitFor();
   await page.getByLabel("会话名称").fill("与 Bob");
   await pick("Bob").check();
   await shot("new-dm");

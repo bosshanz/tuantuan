@@ -1,6 +1,7 @@
-import { ChevronLeft } from "lucide-react";
-import { useState } from "react";
+import { Check, ChevronDown, ChevronLeft, Folder, FolderOpen, Inbox } from "lucide-react";
+import { useRef, useState } from "react";
 import { type Agent, api, type Project, type Room } from "./api";
+import { Popover } from "./ConfigChips";
 import { PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
@@ -58,16 +59,12 @@ export function NewRoom({
       </header>
       <form className="page" onSubmit={submit}>
         <div className="page-inner form-page" style={{ maxWidth: 600 }}>
-          <label className="field">
-            <span className="label">项目</span>
-            <select className="select" aria-label="项目" value={project} onChange={(e) => setProject(e.target.value)}>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="field">
+            <span className="label">
+              项目<span className="muted">（可选）</span>
+            </span>
+            <ProjectPicker projects={projects} value={project} onChange={setProject} />
+          </div>
           <label className="field">
             <span className="label">
               名称<span className="muted">（可选）</span>
@@ -134,6 +131,67 @@ export function NewRoom({
           </div>
         </div>
       </form>
+    </>
+  );
+}
+
+const DRAFTS = "drafts";
+
+/** 项目（可选）: "不选项目" files the conversation under 草稿; otherwise a real project. */
+function ProjectPicker(props: { projects: Project[]; value: string; onChange: (id: string) => void }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const real = props.projects.filter((p) => p.id !== DRAFTS);
+  const current = real.find((p) => p.id === props.value) ?? null;
+  const pick = (id: string) => {
+    props.onChange(id);
+    setOpen(false);
+    btn.current?.focus();
+  };
+  const row = (id: string, icon: React.ReactNode, name: string, desc: string) => (
+    <button
+      type="button"
+      key={id}
+      role="option"
+      aria-selected={(current?.id ?? DRAFTS) === id}
+      className="opt-row"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => pick(id)}
+    >
+      <span className="opt-icon proj-icon">{icon}</span>
+      <span className="opt-text">
+        <span className="opt-name">{name}</span>
+        {desc && <span className="opt-desc">{desc}</span>}
+      </span>
+      <Check size={14} className="opt-check" aria-hidden />
+    </button>
+  );
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        className="select proj-picker"
+        aria-label="项目"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {current ? <Folder size={15} className="proj-icon" /> : <Inbox size={15} className="proj-icon muted" />}
+        <span className={current ? "" : "muted"}>{current ? current.name : "不选项目"}</span>
+        {!current && <span className="proj-hint">放进「草稿」</span>}
+        <ChevronDown size={15} className="proj-caret" />
+      </button>
+      {open && (
+        <Popover anchor={btn.current} onClose={() => setOpen(false)} label="选择项目" width={btn.current?.offsetWidth}>
+          <div role="listbox" aria-label="项目" className="opt-list">
+            {row(DRAFTS, <Inbox size={14} />, "不选项目", "放进「草稿」，以后可以移到项目里")}
+            {real.map((p) =>
+              row(p.id, p.id === current?.id ? <FolderOpen size={14} /> : <Folder size={14} />, p.name, p.cwd ?? ""),
+            )}
+          </div>
+        </Popover>
+      )}
     </>
   );
 }

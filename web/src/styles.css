@@ -1172,3 +1172,9 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .prov-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
 .local-icon { width: 20px; height: 20px; font-size: 11px; background: var(--text-3); }
 fieldset.prov-pick, fieldset.preset-grid { border: 0; margin: 0; padding: 0; min-width: 0; }
+.proj-picker { display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; height: 38px; }
+.proj-picker .proj-caret { margin-left: auto; color: var(--text-3); transition: transform 0.15s; }
+.proj-picker[aria-expanded="true"] .proj-caret { transform: rotate(180deg); }
+.proj-picker .proj-icon { color: var(--text-2); flex: none; }
+.proj-hint { font-size: var(--fs-xs); color: var(--text-3); }
+.opt-row .proj-icon { display: inline-flex; color: var(--text-2); }
