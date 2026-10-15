@@ -69,10 +69,11 @@ function createWindow() {
     show: false,
     backgroundColor: "#f7f6f3",
     icon: icon(),
-    // macOS: no title bar, traffic lights inset to line up with the sidebar's top row.
-    titleBarStyle: isMac ? "hiddenInset" : "default",
-    // 3 lights ≈ 52px wide: centered in the 64px sidebar rail, above the logo (rail gets 40px top padding).
-    trafficLightPosition: isMac ? { x: 7, y: 14 } : undefined,
+    // macOS: no title bar; the web UI draws one 52px header row across all columns
+    // (html[data-desktop="darwin"]). The 3 lights (≈52×12px) are centered in the 64px rail's top cell:
+    // x = (64 − 52) / 2, y = (52 − 12) / 2.
+    titleBarStyle: isMac ? "hidden" : "default",
+    trafficLightPosition: isMac ? { x: 6, y: 20 } : undefined,
     webPreferences: {
       // (bun inlines __dirname at build time, so resolve from the app path)
       preload: join(app.getAppPath(), "dist", "preload.cjs"),
@@ -83,6 +84,11 @@ function createWindow() {
     },
   });
   win.once("ready-to-show", () => win?.show());
+  // Full screen hides the traffic lights: the UI drops the space it kept for them.
+  const sendFullscreen = () => win?.webContents.send("tuantuan:fullscreen", win.isFullScreen());
+  win.on("enter-full-screen", sendFullscreen);
+  win.on("leave-full-screen", sendFullscreen);
+  win.webContents.on("did-finish-load", sendFullscreen);
   win.on("close", (e) => {
     if (win) writeFileSync(boundsFile(), JSON.stringify(win.getNormalBounds()));
     // macOS keeps the app (and its agents) running with the window closed, like Mail.

@@ -9,3 +9,7 @@ contextBridge.exposeInMainWorld("tuantuan", {
 window.addEventListener("DOMContentLoaded", () => {
   document.documentElement.dataset.desktop = process.platform;
 });
+ipcRenderer.on("tuantuan:fullscreen", (_e, on: boolean) => {
+  if (on) document.documentElement.dataset.fullscreen = "";
+  else delete document.documentElement.dataset.fullscreen;
+});

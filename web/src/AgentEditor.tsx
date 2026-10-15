@@ -130,6 +130,7 @@ export function AgentEditor(props: {
     );
   const harness = meta.harnesses.find((h) => h.id === form.harness);
 
+  const [pendingSkills, setPendingSkills] = useState<Set<string>>(new Set());
   const save = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setSaving(true);
@@ -149,6 +150,9 @@ export function AgentEditor(props: {
       const saved = agent
         ? await api<Agent>("PUT", `/api/agents/${agent.id}`, body)
         : await api<Agent>("POST", "/api/agents", body);
+      if (!agent)
+        for (const key of pendingSkills)
+          await api("POST", `/api/agents/${saved.id}/skills`, { action: "enable", key }).catch(() => {});
       setJustSaved(true);
       props.onSaved(saved);
     } catch (err) {
@@ -363,7 +367,14 @@ export function AgentEditor(props: {
             </div>
           </section>
 
-          {agent && <SkillsCard agentId={agent.id} harness={agent.harness} />}
+          {form.harness !== "custom" && (
+            <SkillsCard
+              agentId={agent?.id ?? null}
+              harness={agent?.harness ?? form.harness}
+              pending={pendingSkills}
+              onPending={setPendingSkills}
+            />
+          )}
 
           {agent && (
             <section className="card">
@@ -652,7 +663,18 @@ function SkillText({ sk }: { sk: SkillItem }) {
   );
 }
 
-function SkillsCard({ agentId, harness }: { agentId: string; harness: string }) {
+/** agentId null = new agent: lists what is on this machine; choices are applied after the first save. */
+function SkillsCard({
+  agentId,
+  harness,
+  pending,
+  onPending,
+}: {
+  agentId: string | null;
+  harness: string;
+  pending?: Set<string>;
+  onPending?: (s: Set<string>) => void;
+}) {
   const harnessName = HARNESS_NAMES[harness] ?? "Harness";
   const [items, setItems] = useState<SkillItem[] | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -665,6 +687,7 @@ function SkillsCard({ agentId, harness }: { agentId: string; harness: string }) 
   const [busy, setBusy] = useState<"preview" | "add" | null>(null);
   const folder = useFolderPicker();
   const base = `/api/agents/${agentId}/skills`;
+  const listUrl = agentId ? base : `/api/skills?harness=${encodeURIComponent(harness)}`;
 
   useEffect(() => {
     void api<Project[]>("GET", "/api/projects").then(setProjects, () => {});
@@ -672,19 +695,26 @@ function SkillsCard({ agentId, harness }: { agentId: string; harness: string }) 
   // biome-ignore lint/correctness/useExhaustiveDependencies: tick forces a refetch
   useEffect(() => {
     let cancelled = false;
-    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-    void api<{ items: SkillItem[] }>("GET", `${base}${q}`).then(
+    const q = projectId ? `${listUrl.includes("?") ? "&" : "?"}projectId=${encodeURIComponent(projectId)}` : "";
+    void api<{ items: SkillItem[] }>("GET", `${listUrl}${q}`).then(
       (r) => !cancelled && setItems(r.items),
       (e) => !cancelled && setErr((e as Error).message),
     );
     return () => {
       cancelled = true;
     };
-  }, [base, projectId, tick]);
+  }, [listUrl, projectId, tick]);
   const refresh = () => setTick((t) => t + 1);
   const post = (b: object) => api("POST", base, b);
 
   const toggle = (sk: SkillItem) => {
+    if (!agentId) {
+      const next = new Set(pending);
+      if (next.has(sk.key)) next.delete(sk.key);
+      else next.add(sk.key);
+      onPending?.(next);
+      return;
+    }
     setItems((l) => l?.map((x) => (x.key === sk.key ? { ...x, enabled: !x.enabled } : x)) ?? l);
     void post({ action: sk.enabled ? "disable" : "enable", key: sk.key }).then(refresh, (e) => {
       setErr((e as Error).message);
@@ -765,7 +795,7 @@ function SkillsCard({ agentId, harness }: { agentId: string; harness: string }) 
                             <label className="skill-row" title={sk.key}>
                               <input
                                 type="checkbox"
-                                checked={sk.enabled}
+                                checked={agentId ? sk.enabled : !!pending?.has(sk.key)}
                                 onChange={() => toggle(sk)}
                                 aria-label={sk.name}
                               />
@@ -780,37 +810,40 @@ function SkillsCard({ agentId, harness }: { agentId: string; harness: string }) 
             )}
         </ul>
 
-        <div className="skill-add">
-          <input
-            className="input grow"
-            aria-label="Skill 链接"
-            value={url}
-            onChange={(e) => {
-              setUrl(e.target.value);
-              setPreview(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              e.preventDefault();
-              if (url.trim() && !busy) void doPreview();
-            }}
-            placeholder="GitHub / git / SKILL.md 链接"
-            spellCheck={false}
-          />
-          <button
-            type="button"
-            className="btn"
-            disabled={!url.trim() || busy !== null}
-            onClick={() => void doPreview()}
-          >
-            {busy === "preview" ? <Loader2 size={14} className="spin" /> : <Link2 size={14} />}
-            查找
-          </button>
-          <button type="button" className="btn" onClick={() => void fromFolder()} disabled={folder.busy}>
-            <FolderOpen size={14} />
-            文件夹
-          </button>
-        </div>
+        {!agentId && <div className="muted skill-hint">保存后可以从链接或文件夹添加 Skill</div>}
+        {agentId && (
+          <div className="skill-add">
+            <input
+              className="input grow"
+              aria-label="Skill 链接"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                setPreview(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                if (url.trim() && !busy) void doPreview();
+              }}
+              placeholder="GitHub / git / SKILL.md 链接"
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              className="btn"
+              disabled={!url.trim() || busy !== null}
+              onClick={() => void doPreview()}
+            >
+              {busy === "preview" ? <Loader2 size={14} className="spin" /> : <Link2 size={14} />}
+              查找
+            </button>
+            <button type="button" className="btn" onClick={() => void fromFolder()} disabled={folder.busy}>
+              <FolderOpen size={14} />
+              文件夹
+            </button>
+          </div>
+        )}
 
         {preview && (
           <div className="skill-preview">

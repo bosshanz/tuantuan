@@ -1190,9 +1190,14 @@ fieldset.prov-pick, fieldset.preset-grid { border: 0; margin: 0; padding: 0; min
 .skill-group > .skill-list { padding: 0; border: 0; border-radius: 0; max-height: none; overflow: visible; }
 .skill-lock { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none; color: var(--text-3); }
 
-/* Desktop app (Electron, macOS hiddenInset title bar): traffic lights sit centered in the rail
-   above the logo; the rail and header bars drag the window, their controls stay clickable. */
-html[data-desktop="darwin"] .rail { padding-top: 40px; }
+/* Desktop app (Electron). macOS: one 52px title bar row across every column. The traffic lights sit
+   vertically centered in the rail's top cell (trafficLightPosition in desktop/src/main.ts); the logo
+   moves below that row; every column header is exactly that tall. Full screen hides the lights, so
+   the rail's top cell goes back to holding the logo. */
+html[data-desktop="darwin"] { --head-h: 52px; }
+html[data-desktop="darwin"]:not([data-fullscreen]) .rail { padding-top: 0; }
+html[data-desktop="darwin"]:not([data-fullscreen]) .rail::before { content: ""; display: block; flex: none; width: 100%; height: var(--head-h); border-bottom: 1px solid var(--border); box-sizing: border-box; margin-bottom: var(--s3); }
+html[data-desktop="darwin"]:not([data-fullscreen]) .rail .logo { margin-top: 0; }
 html[data-desktop] .rail,
 html[data-desktop] .pane-head,
 html[data-desktop] .main-head { -webkit-app-region: drag; }
@@ -1220,3 +1225,33 @@ html[data-desktop] .main-head :is(button, a, input, select, textarea, [role]) { 
 .reg-actions .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .warn-badge { display: inline-flex; align-items: center; gap: 3px; color: #b26a00; background: color-mix(in srgb, #f5a524 16%, transparent); }
 .harness-name .reg-icon { color: var(--text); }
+
+/* Sidebar empty state (no agents yet) */
+.list-empty.first-run { margin: var(--s3); padding: var(--s5) var(--s4); border: 1px dashed var(--border); border-radius: 12px; background: var(--surface); }
+.list-empty.first-run b { color: var(--text); font-weight: 600; font-size: var(--fs-md, 14px); }
+.welcome-body { flex: 1; min-height: 0; overflow: auto; display: flex; }
+
+/* First-run onboarding: one screen, three steps */
+.onb { max-width: 640px; }
+.onb-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
+.onb-step { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: var(--s4) var(--s5); transition: opacity 0.2s var(--ease), border-color 0.2s var(--ease); }
+.onb-step[data-state="todo"] { opacity: 0.55; }
+.onb-step[data-state="active"] { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.onb-step-head { display: flex; align-items: center; gap: 10px; height: 24px; }
+.onb-step-head h3 { margin: 0; font-size: var(--fs-md, 14px); font-weight: 600; flex: 1; }
+.onb-step-head .num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); font-size: 12px; font-weight: 600; flex: none; }
+.onb-step[data-state="done"] .num { background: var(--accent); color: var(--on-accent); }
+.onb-note { font-size: var(--fs-sm); }
+.onb-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: var(--s3); }
+.onb-card { display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; align-items: center; text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background 0.15s var(--ease); }
+.onb-card > .reg-icon, .onb-card > .reg-icon-letter { grid-row: span 2; }
+.onb-card:hover { background: var(--surface-hover); }
+.onb-card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.onb-card-name { font-weight: 600; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.onb-card-state { font-size: var(--fs-xs, 11px); color: var(--text-3); }
+.onb-detail { margin-top: var(--s3); padding-left: 32px; animation: onb-in 0.2s var(--ease); }
+.onb-actions { gap: 8px; flex-wrap: wrap; align-items: center; }
+.onb-actions .input { width: 220px; }
+@keyframes onb-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (max-width: 720px) { .onb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.onb-grid { border: 0; padding: 0; min-width: 0; }

@@ -1,7 +1,7 @@
 // Browser smoke test against the built UI + real server + the mock ACP harness (server/mock-agent.ts).
 // Needs `bun run build` first and a Chrome/Chromium binary (CHROME_PATH, default /usr/bin/google-chrome).
 // SHOTS_DIR=<dir> also saves screenshots of the main screens.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { chromium } from "playwright-core";
@@ -127,16 +127,30 @@ try {
   await page.goto(`http://localhost:${server.port}/`);
   await page.locator(".rail .dot.ok").waitFor();
 
-  // Onboarding: the mock harness is detected, the handshake shows it logged out, and its own
-  // (agent-driven) login method logs in; the re-test then reports logged in.
-  // First launch opens 新手引导 by itself.
-  await page.getByRole("heading", { name: "新手引导" }).waitFor();
+  // First launch: one-screen onboarding. Pick the mock harness → it is logged out, its own login
+  // method signs in → name the first agent → it is created with a conversation in 草稿, which opens.
+  await page.getByRole("heading", { name: "开始使用团团" }).waitFor();
+  await page.getByRole("button", { name: "跳过" }).waitFor();
+  await page.getByRole("button", { name: /Mock（测试）/ }).click();
+  await page.getByRole("button", { name: "用「Mock 登录」登录" }).click();
+  await page.getByLabel("Agent 名称").waitFor();
+  await page.getByLabel("Agent 名称").fill("小助手");
+  await page.waitForTimeout(250);
+  await shot("setup");
+  await page.getByRole("button", { name: "创建并开始会话" }).click();
+  await page.waitForFunction(() => /^#\/c\/[^/]+$/.test(location.hash) && !location.hash.endsWith("/new"));
+  await page.locator(".composer-box textarea").waitFor();
+  if (!app.store.getSetting("onboarded", false)) throw new Error("onboarding not persisted");
+  if (!app.store.listAgents().some((a) => a.name === "小助手" && a.harness === "mock"))
+    throw new Error("onboarding agent missing");
+  // Finishing is remembered server-side: #/setup now lands on Harness 管理.
+  await page.goto(`http://localhost:${server.port}/#/setup`);
+  await page.locator(".rail .dot.ok").waitFor();
+  await page.waitForFunction(() => location.hash === "#/harness");
+  await page.getByRole("heading", { name: "Harness 管理" }).waitFor();
   const mockRow = page.locator(".harness-row", { hasText: "Mock（测试）" });
   await mockRow.getByRole("button", { name: "握手测试" }).click();
-  await mockRow.getByText(/ACP v1 · Mock.*未登录/).waitFor();
-  await mockRow.getByRole("button", { name: "用「Mock 登录」登录" }).click();
   await mockRow.getByText(/ACP v1 · Mock.*已登录/).waitFor();
-  await shot("setup");
 
   // Bundled adapters are used when nothing is on PATH; a missing CLI installs with one click.
   await page
@@ -171,16 +185,6 @@ try {
   await more.scrollIntoViewIfNeeded();
   await shot("harness-registry-list");
   await page.setViewportSize({ width: 1440, height: 900 });
-  // Finishing is remembered server-side: after a reload it never opens again; Harness 管理 stays in the rail.
-  await page.getByRole("button", { name: "完成", exact: true }).click();
-  await page.locator(".rail").getByRole("button", { name: "会话", exact: true }).waitFor();
-  if (!app.store.getSetting("onboarded", false)) throw new Error("onboarding not persisted");
-  await page.goto(`http://localhost:${server.port}/#/setup`);
-  await page.locator(".rail .dot.ok").waitFor();
-  await page.waitForFunction(() => location.hash === "#/harness");
-  await page.getByRole("heading", { name: "Harness 管理" }).waitFor();
-  if ((await page.getByRole("button", { name: "完成", exact: true }).count()) !== 0)
-    throw new Error("onboarding shown again");
 
   const createAgent = async (name: string, identity: string) => {
     await page.getByRole("button", { name: "Agents", exact: true }).click();
@@ -188,6 +192,8 @@ try {
     await page.getByLabel("名称").fill(name);
     await page.getByLabel("Harness", { exact: true }).selectOption({ label: "Mock（测试）" });
     await page.getByLabel("身份文档").fill(identity);
+    // Skills already on the machine are listed before the agent exists.
+    await page.locator(".skills-card .skill-row").first().waitFor();
     await page.getByRole("button", { name: "创建 Agent" }).click();
     await page.getByText("所有修改已保存").waitFor();
   };
@@ -338,7 +344,7 @@ try {
   await page.locator(".handoff-card", { hasText: "交接给 @Alice" }).waitFor();
   await page.locator(".handoff-from", { hasText: "接 @Bob 的交接：写一份需求文档" }).waitFor();
   await page.getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
-  await shot("group");
+  await shot("conversation-handoff");
   // Single-agent conversation in 草稿
 
   // No project chosen → 草稿.
@@ -355,7 +361,7 @@ try {
   await projBtn.filter({ hasText: "冒烟项目" }).waitFor();
   await page.getByLabel("会话名称").fill("与 Bob");
   await pick("Bob").check();
-  await shot("new-dm");
+  await shot("new-conversation-single");
   await page.getByRole("button", { name: "创建会话" }).click();
   await page.locator(".model-trigger").waitFor(); // composer model picker
   await page.locator(".model-trigger").click();
@@ -431,7 +437,7 @@ try {
   await input.press("Enter");
   await page.getByText("收到：「换模型了」（mock-smart）").waitFor();
   await page.locator(".ctx-usage").waitFor();
-  await shot("dm-capabilities");
+  await shot("conversation-capabilities");
 
   await input.fill("/slow");
   await input.press("Enter");
@@ -706,10 +712,16 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake + login → bundled adapters + one-click install → ACP registry install + handshake → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → providers: usage cards, add/test/balance, CC Switch import, agent switch → UI via Vite proxy)",
+    "e2e smoke: PASS (one-screen onboarding (pick, login, first agent + conversation) → harness page: bundled adapters + one-click install → ACP registry install + handshake → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → providers: usage cards, add/test/balance, CC Switch import, agent switch → UI via Vite proxy)",
   );
 } catch (e) {
   failed = true;
+  if (shotsDir)
+    await browser
+      .contexts()[0]
+      ?.pages()[0]
+      ?.screenshot({ path: join(tmpdir(), "e2e-fail.png") })
+      .catch(() => {});
   console.error("e2e smoke: FAIL", e);
 } finally {
   await browser.close();

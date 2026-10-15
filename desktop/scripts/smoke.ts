@@ -19,6 +19,14 @@ if (!existsSync(target)) throw new Error(`not built: ${target}`);
 const tmp = mkdtempSync(join(tmpdir(), "tuantuan-desk-"));
 const home = join(tmp, "home");
 mkdirSync(home);
+// Skills the user already has: the agent editor must list them (packaged server reads the real HOME).
+for (const [rel, name] of [
+  [".claude/skills/smoke-claude", "smoke-claude"],
+  [".agents/skills/smoke-shared", "smoke-shared"],
+]) {
+  mkdirSync(join(home, rel), { recursive: true });
+  writeFileSync(join(home, rel, "SKILL.md"), `---\nname: ${name}\ndescription: 冒烟用 Skill\n---\n正文\n`);
+}
 const auth = join(tmp, "mock-auth");
 writeFileSync(auth, "ok");
 const shots = process.env.SHOTS_DIR ?? join(root, "docs", "screenshots");
@@ -154,6 +162,22 @@ try {
     permissionPolicy: "allow",
   });
   if (!agent.id) throw new Error(`agent: ${JSON.stringify(agent)}`);
+  // Skills: API discovery, then the Skills card in the agent editor.
+  const sk = await api("GET", `/api/agents/${agent.id}/skills`);
+  console.log("skills", JSON.stringify(sk).slice(0, 300));
+  const names = ((sk.items ?? []) as any[]).map((x) => x.name);
+  if (!names.includes("smoke-claude") || !names.includes("smoke-shared")) throw new Error(`skills missing: ${names}`);
+  await page.reload();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.locator(".list-item", { hasText: "小团" }).first().click();
+  await page.screenshot({ path: join(tmp, "agent.png") });
+  console.log("agent page", join(tmp, "agent.png"));
+  const card = page.locator(".skills-card");
+  await card.locator(".skill-row", { hasText: "smoke-claude" }).waitFor({ timeout: 15_000 });
+  await card.locator(".skill-row", { hasText: "smoke-shared" }).waitFor();
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(tmp, "skills.png") });
+  console.log("skills card ok", join(tmp, "skills.png"));
   const room = await api("POST", "/api/rooms", { name: "桌面冒烟", agentIds: [agent.id] });
   await page.goto(`${url}/#/rooms/${room.id}`);
   await page.reload();

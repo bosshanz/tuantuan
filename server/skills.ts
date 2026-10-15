@@ -369,12 +369,12 @@ function realKey(p: string): string {
 /** Everything this agent could use: its imported skills plus what is already on the machine / in the project. */
 export function discoverSkills(
   dataDir: string,
-  agentId: string,
+  agentId: string | null,
   harness: string,
   projectDir: string | null,
 ): DiscoveredSkill[] {
   const home = userHome();
-  const linked = new Set(readLinked(dataDir, agentId));
+  const linked = new Set(agentId ? readLinked(dataDir, agentId) : []);
   const out: DiscoveredSkill[] = [];
   const seen = new Set<string>();
   const push = (s: { dir: string; name: string; description: string }, origin: SkillOrigin, label: string) => {
@@ -395,7 +395,7 @@ export function discoverSkills(
       enabled: native || linked.has(key),
     });
   };
-  for (const s of listAgentSkills(dataDir, agentId))
+  for (const s of agentId ? listAgentSkills(dataDir, agentId) : [])
     if (statSync(s.dir).isDirectory()) {
       const key = resolve(s.dir);
       seen.add(realKey(key));

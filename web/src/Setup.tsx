@@ -341,7 +341,7 @@ function ManagedActions({ h, onChanged }: { h: HarnessStatus; onChanged: () => P
   );
 }
 
-function CopyLine({ label, text }: { label: string; text: string }) {
+export function CopyLine({ label, text }: { label: string; text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="copy-line">
@@ -420,7 +420,7 @@ interface InstallJob {
 }
 
 /** One-click install: runs the harness's official installer on click, streams its log, re-detects when done. */
-function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled: () => Promise<void> }) {
+export function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled: () => Promise<void> }) {
   const [job, setJob] = useState<InstallJob | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);

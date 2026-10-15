@@ -23,6 +23,7 @@ import { CommandPalette } from "./CommandPalette";
 import { defaultsSummary } from "./config";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
+import { Onboarding } from "./Onboarding";
 import { NewProject, ProjectSettings } from "./Projects";
 import { ProvidersPage } from "./Providers";
 import { SetupPage } from "./Setup";
@@ -109,15 +110,11 @@ export function App() {
             : "rooms";
   // 新手引导 opens by itself on first launch only; once finished or skipped it is gone for good.
   const onboarded = meta?.onboarded;
+  const finishing = useRef(false);
   useEffect(() => {
-    if (onboarded === false && route[0] !== "setup") go("setup");
+    if (onboarded === false && route[0] !== "setup" && !finishing.current) go("setup");
     if (onboarded && route[0] === "setup") go("harness");
   }, [onboarded, route, go]);
-  const finishOnboarding = async () => {
-    await api("POST", "/api/onboarding");
-    await reload();
-    go("c");
-  };
   const detailId = route[1] ?? null;
   const roomId = route[0] !== "p" && section === "rooms" && detailId && detailId !== "new" ? detailId : null;
   const projectPage = route[0] === "p" ? detailId : null;
@@ -205,14 +202,15 @@ export function App() {
           onSearch={() => setPaletteOpen(true)}
         >
           {loaded && agents.length === 0 && (
-            <div className="list-empty">
-              先创建一个 Agent。
+            <div className="list-empty first-run">
+              <b>还没有 Agent</b>
+              <span>创建一个，就能开始会话。</span>
               <button type="button" className="btn primary sm" onClick={() => go("a/new")}>
-                创建第一个 Agent
+                创建 Agent
               </button>
             </div>
           )}
-          {projects.map((p) => {
+          {(agents.length > 0 || rooms.length > 0 ? projects : []).map((p) => {
             const list = rooms.filter((r) => r.projectId === p.id);
             const open = !collapsed.includes(p.id);
             return (
@@ -387,7 +385,16 @@ export function App() {
           />
         )}
         {section === "setup" && meta && !meta.onboarded && (
-          <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} onFinish={finishOnboarding} />
+          <Onboarding
+            agents={agents}
+            onDone={async (roomId) => {
+              finishing.current = true;
+              await api("POST", "/api/onboarding");
+              // leave #/setup first, or the "already onboarded" redirect sends us to Harness 管理
+              go(roomId ? `c/${roomId}` : "c");
+              await reload();
+            }}
+          />
         )}
         {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
         {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
@@ -553,30 +560,39 @@ function Welcome({
     },
   ];
   return (
-    <div className="empty" style={{ maxWidth: 560 }}>
-      <div className="empty-icon">
-        <Sparkles size={24} />
+    <>
+      <header className="main-head">
+        <div className="title">
+          <h2>{agents.length === 0 ? "开始" : "会话"}</h2>
+        </div>
+      </header>
+      <div className="welcome-body">
+        <div className="empty" style={{ maxWidth: 560 }}>
+          <div className="empty-icon">
+            <Sparkles size={24} />
+          </div>
+          <h2>{agents.length === 0 ? "欢迎使用团团" : "选择一个会话"}</h2>
+          <ol className="steps">
+            {steps.map((s, i) => (
+              <li key={s.title} className={`step ${s.done ? "done" : ""}`}>
+                <span className="num">{s.done ? "✓" : i + 1}</span>
+                <span className="step-body">
+                  <div className="step-title">{s.title}</div>
+                </span>
+                <button
+                  type="button"
+                  className={`btn sm ${!s.done && s.needs !== false ? "primary" : ""}`}
+                  disabled={s.needs === false}
+                  onClick={() => go(s.path)}
+                >
+                  {s.cta}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
-      <h2>{agents.length === 0 ? "欢迎使用团团" : "选择一个会话"}</h2>
-      <ol className="steps">
-        {steps.map((s, i) => (
-          <li key={s.title} className={`step ${s.done ? "done" : ""}`}>
-            <span className="num">{s.done ? "✓" : i + 1}</span>
-            <span className="step-body">
-              <div className="step-title">{s.title}</div>
-            </span>
-            <button
-              type="button"
-              className={`btn sm ${!s.done && s.needs !== false ? "primary" : ""}`}
-              disabled={s.needs === false}
-              onClick={() => go(s.path)}
-            >
-              {s.cta}
-            </button>
-          </li>
-        ))}
-      </ol>
-    </div>
+    </>
   );
 }
 

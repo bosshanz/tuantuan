@@ -803,6 +803,13 @@ export function createApp(deps: AppDeps) {
       return host.answer(id, optionId) ? json({ ok: true }) : json({ error: "授权请求已失效" }, 404);
     }
 
+    // Skills on this machine for an agent that is not saved yet (new-agent form).
+    if (resource === "skills" && !id && method === "GET") {
+      const pid = url.searchParams.get("projectId");
+      const project = pid ? store.getProject(pid) : null;
+      const harness = url.searchParams.get("harness") ?? "";
+      return json({ items: skills.discoverSkills(dataDir, null, harness, project?.cwd ?? null) });
+    }
     if (resource === "agents") {
       if (!id && method === "GET") return json(store.listAgents());
       if (!id && method === "POST") return json(store.createAgent(validateAgent(await body())), 201);

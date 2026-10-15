@@ -9,11 +9,18 @@
 
 > 仓库已从 `bosshanz/agent-hub` 更名为 `bosshanz/tuantuan`（旧地址自动跳转）。为兼容，环境变量继续使用 `AGENT_HUB_*` 前缀，默认数据库路径仍是 `data/agent-hub.db`。
 
-团团不自带模型：每个 Agent 绑定一个本机的编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode），团团通过 [ACP（Agent Client Protocol）](https://agentclientprotocol.com) 驱动它。按 **项目**（名称 + 目录）组织 **会话**（1+ Agent）；多 Agent 时可 @、设主 Agent、交接。完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。
+团团不自带模型：每个 Agent 绑定一个编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode、Pi、MiniMax Code，以及 [ACP Registry](https://agentclientprotocol.com) 里的其他 Agent），团团通过 ACP（Agent Client Protocol）驱动它。按 **项目**（名称 + 目录）组织 **会话**（1 个或多个 Agent）；多个 Agent 时可 @、设主 Agent、交接。完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。
 
-![会话：主 Agent 用 handoff 把任务交给 Alice](docs/screenshots/group-chat.png)
+![会话：主 Agent 用 handoff 把任务交给 Alice](docs/screenshots/conversation-handoff.png)
 
-- 模型、Key 和登录全部由 Harness 自己管理，团团不保存任何凭据。
+功能一览：
+
+- **桌面版**（macOS / Windows / Linux，Electron）或浏览器 + 本机服务。
+- **Harness**：自动发现你自己装的版本；没有时一键装到团团自己的目录（官方 ACP Registry，固定版本、校验和、不用 sudo）；握手测试与登录引导。
+- **会话**：按项目分组；单 Agent 直接对话，多 Agent 支持 @、@所有人、主 Agent、`handoff` 交接。
+- **服务商与用量**：给 Claude Code / Codex / 自定义 API 配置服务商（Key 只在服务端、打码显示），只读导入 CC Switch，查看本机用量和余额。
+- **Skills**：自动发现 `~/.agents`、`~/.claude`、`~/.codex`、插件和项目里的 Skills，按 Agent 勾选；可从链接或文件夹导入。
+- 模型、登录由 Harness 自己管理；团团从不改 `~/.claude` / `~/.codex`。
 - 不装任何 CLI 也能体验：`TUANTUAN_MOCK_HARNESS=1` 启用内置 mock ACP agent。
 
 ## 快速开始
@@ -31,7 +38,10 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 打开 http://localhost:5173 ：
 
-1. 首次启动自动打开「新手引导」（只出现一次，完成或跳过后记在数据库里）；之后在左侧「Harness」（`#/harness`）管理：检测本机已安装的 Harness，显示版本、安装命令和登录方式，可以填绝对路径覆盖、点「测试」做 ACP 握手。
+1. 首次启动是一页三步的引导（随时可「跳过」，只出现一次）：选一个 Harness（没装就一键安装）→ 需要时登录（Harness 自带登录按钮，或复制终端命令，回到窗口自动重新检测）→ 给第一个 Agent 起名，创建后直接在「草稿」里打开会话。之后在左侧「Harness」（`#/harness`）管理全部 Harness。
+
+   ![首次引导](docs/screenshots/setup.png)
+
 2. 「Agents → + 新建」创建 Agent：选 Harness、权限策略、身份文档、MCP 服务器和环境变量。
 3. 「会话」侧栏按**项目**分组。先建项目（新建目录，或选择已有文件夹；根目录默认 `~/Tuantuan`，可用 `TUANTUAN_WORKSPACES` 改），再在项目下建会话。未选项目时进默认项目「草稿」（`~/Tuantuan/drafts`）。会话共用项目目录；2+ Agent 时可设**主 Agent**。更换项目目录会重置该项目下会话的 Harness 上下文。
 
@@ -42,6 +52,10 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 下载 Releases 里的安装包（macOS `.dmg`、Windows `.exe`、Linux `.AppImage`），打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包（AppImage 约 157 MB），第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置（约 +300 MB）。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](docs/screenshots/desktop-linux.png)
+
+macOS 上窗口没有系统标题栏：所有列顶部是同一条 52px 的标题行（可拖动窗口），红绿灯垂直居中放在最左侧图标栏的顶部，Logo 在它下面；全屏时红绿灯隐藏，这一格让回给 Logo。
+
+![macOS 标题栏（浏览器模拟）](docs/screenshots/mac-conversation.png)
 
 自己打包：
 
@@ -57,7 +71,7 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 
 ## 安装和登录 Harness
 
-团团优先用你自己装的版本（登录 shell 的 PATH，或在「Harness」页填的绝对路径），这样会沿用你的版本和配置；找不到时才用团团内置的。「Harness」页会标出当前用的是「本机」「自定义路径」还是「内置」。
+团团优先用你自己装的版本（登录 shell 的 PATH，或在「Harness」页填的绝对路径），这样会沿用你的版本和配置；找不到时用团团内置的（源码运行时）或团团从 ACP Registry 装的。「Harness」页会标出当前用的是「本机」「自定义路径」「内置」还是「团团安装」。桌面包默认不内置 Claude Code / Codex，下表「内置」一列指源码运行。
 
 | Harness | 团团怎么提供 | 还需要什么 | 登录 |
 | --- | --- | --- | --- |
@@ -121,7 +135,7 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 
 ## 环境变量
 
-见 `.env.example`：`PORT`、`DB_PATH`（默认 `data/agent-hub.db`）、`TUANTUAN_MOCK_HARNESS`。旧版的 `AGENT_HUB_MODELS`、`DECISION_*` 和各 provider Key 已不再使用（模型由 Harness 管理）。
+见 `.env.example`：`PORT`、`DB_PATH`（默认 `data/agent-hub.db`）、`TUANTUAN_MOCK_HARNESS`。其他常用：`TUANTUAN_WORKSPACES`（项目根目录）、`TUANTUAN_HARNESS_DIR`（团团安装的 Harness）、`TUANTUAN_REGISTRY_URL` / `TUANTUAN_REGISTRY_OFFLINE`、`TUANTUAN_PREFER_MANAGED`、`TUANTUAN_NATIVE_PICKER=0`。
 
 ## 界面
 
@@ -202,8 +216,6 @@ Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的
 
 Claude Code 用服务商时：Claude Code 会让 `~/.claude/settings.json` 里的 `env` 盖过进程环境变量，所以团团把服务商的地址、Key 和 `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` 通过会话的 `_meta.claudeCode.options.settings`（比用户设置优先级更高的程序设置层）传入，不写任何用户文件。Agent 的「默认设置」按 Harness + 服务商分别读取，模型列表是服务商的模型，可填自定义模型 ID；切换服务商会清掉旧的默认模型。
 
-![服务商的模型](docs/screenshots/agent-provider-models.png)
-
 ![从 CC Switch 导入](docs/screenshots/ccswitch-import.png)
 
 ![Agent 的服务商](docs/screenshots/agent-provider.png)
@@ -218,7 +230,7 @@ Claude Code 用服务商时：Claude Code 会让 `~/.claude/settings.json` 里�
 
 每个 Agent 有自己的 Skills，按通用约定存放：`skills/<name>/SKILL.md`（frontmatter `name` / `description`，可带附属文件），兼容旧的 `commands/*.md`。
 
-Agent 页「Skills」是一张勾选清单，自动列出：
+Agent 页「Skills」是一张勾选清单（新建 Agent 时就能勾选，保存后生效），自动列出：
 
 - 用户级：`~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`，以及 `~/.claude/plugins/**/skills`（插件名取自 `.claude-plugin/plugin.json`）；
 - 项目级：右上角选中项目的 `.agents/skills`、`.claude/skills`；
@@ -273,6 +285,7 @@ Agent 页「Skills」是一张勾选清单，自动列出：
 
 - [docs/product.md](docs/product.md)：产品规则与验收条件
 - [docs/architecture.md](docs/architecture.md)：模块、状态归属、路由机制与取舍
+- [docs/plan-harness-acp.md](docs/plan-harness-acp.md)：ACP 改造计划、里程碑状态与决策记录
 
 
 ## License

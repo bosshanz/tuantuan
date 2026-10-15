@@ -1,28 +1,30 @@
-# 团团：桌面客户端 + 独立 Harness（ACP）改造计划（待 Andy 评审）
+# 团团：桌面客户端 + 独立 Harness（ACP）计划
 
-> 状态：已评审（2026-10-14）。**2026-10-14 Andy 决定移除桌面机器人功能**：下文涉及机器人的条目（决策 4、§3.3、机器人 MCP 工具）已作废，仅保留作历史记录。M1 已完成主体（见 §8 M1 状态）。凡标「未核实」的条目需要实测。
+> 状态（2026-10-15）：M1、M2 完成；M3（桌面）在 Linux 上端到端验证，macOS / Windows 包由 Andy 本机构建验证中；Harness 改从官方 ACP Registry 接入。本文档记录目标、决策和里程碑；当前行为以 `README.md`、`docs/product.md`、`docs/architecture.md` 为准。
 
-## 0. Andy 的决定（2026-10-14）
-1. 桌面框架：~~Electrobun~~ → **Electron**（2026-10-15 Andy 改定，见 §2.3 末尾）。
-2. 群聊不 @ 时：每个群指定一个**主 Agent**，由它回复。
-3. 工作目录**属于会话**（群聊或私聊），不属于 Agent；群内所有 Agent 共用它。
-4. 机器人房间绑定一个**编码 Harness** Agent。
-5. **不做内置简易 Harness**；改为「新手引导」：检测 / 安装 / 登录各 Harness，并绑定到 Agent 与机器人。测试与 e2e 用 mock ACP Agent。
-6. 团团维护每个 Agent 独立的**身份文档**（类似 AGENTS.md / CLAUDE.md，在团团里编辑），以不侵入用户仓库的方式交给 Harness（见 §3.4），兜底为会话首条 prompt 前置。
+## 0. 决定记录
+1. 桌面框架：**Electron**（2026-10-15）。Electron 主进程只管窗口，服务端原样跑在随包的 Bun 子进程上（见 §2.3）。
+2. 多 Agent 会话不 @ 时由**主 Agent**回复。
+3. 工作目录属于**项目**（名称 + 目录），项目下的会话共用；默认项目「草稿」。
+4. 不做模型路由：模型、Key、登录归 Harness；团团不调模型。例外：用户要求后加入的「自定义 API（BYOK）」轻量 harness，只做对话。
+5. 每个 Agent 有团团里编辑的**身份文档**，不写进用户仓库（见 §3.4）。
+6. **桌面机器人功能已移除**（2026-10-14，迁移 7 清理数据）。
+7. Harness 来源（2026-10-15）：用户自己装的优先；否则从**官方 ACP Registry** 一键装到团团自己的目录（固定版本、校验和、不用 sudo、不装全局）。Claude Code / Codex 不再默认打进桌面安装包，首次使用时下载（`TUANTUAN_BUNDLE_ADAPTERS=1` 可内置）。
+8. 不改用户配置：从不设置 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`，不写 `~/.claude` / `~/.codex`；CC Switch 只读导入；不从钥匙串抓 token 调私有接口。
 
 ## 1. 目标与非目标
 
 **目标**
 - 团团变成桌面客户端：每个 Agent 背后是一个独立的 Harness 进程（Claude Code、Codex、Grok Build、OpenCode 首批），通过 ACP（Agent Client Protocol）接入。
-- Agent 的 Skills、指令、工具、模型都归各自 Harness 管；团团只负责会话、群聊编排、展示和权限。
+- Agent 的 Skills、指令、工具、模型都归各自 Harness 管；团团只负责会话、多 Agent 编排、展示和权限。
 - UI 完整支持 ACP 能力：流式文本、思考、工具卡片（diff / 终端输出）、计划、权限确认、模式 / 模型 / 推理档位切换、斜杠命令、附件、取消、会话列表与恢复、用量。
-- 保留群聊、交接（handoff）、Bot 头像与表情、机器人房间。
+- 保留多 Agent 会话、交接（handoff）、Bot 头像与表情。
 
 **非目标（本轮不做）**
-- 不再自己调模型：删除 Auto 路由、决策模型分类器、`AGENT_HUB_MODELS` 选模型、providers 配置、内置 mock 以外的 LLM 客户端。
+- 不自己调模型、不做模型路由（BYOK 例外见 §0）。
 - 不做多用户 / 远程部署 / 账号体系。
 - 不追 ACP v2 草案（只做 v1，见风险）。
-- 不自研编码 Agent；「内置简易 Harness」作为可选（见决策 5）。
+- 不自研编码 Agent。
 
 ## 2. 调研结论（带出处）
 
@@ -48,13 +50,9 @@
 | 其他 | Goose、Kimi CLI、Qwen Code、Cline、Cursor、GitHub Copilot、Junie 等均在官方列表 | — | — | — | 见 [ACP Agents 列表](https://agentclientprotocol.com/overview/agents) |
 
 ### 2.3 桌面打包
-| 方案 | 适配度 | 优点 | 代价 |
-| --- | --- | --- | --- |
-| **Electrobun v1**（推荐） | 主进程就是 Bun，现有 Bun 服务端几乎原样搬进去 | 不用 sidecar；`Bun.spawn` 直接拉起各 Harness；自带签名 + 公证 + 差分更新（静态 HTTPS 托管）；包体小（系统 WebView）（[v1 博客](https://blackboard.sh/blog/electrobun-v1/)、[签名](https://framework.blackboard.sh/electrobun/guides/code-signing/)、[更新](https://framework.blackboard.sh/electrobun/guides/updates/)） | 生态新、坑少有人踩；Windows / Linux 成熟度未核实；系统 WebView 差异（Safari 内核）需测 |
-| Tauri v2 + Bun sidecar（`bun build --compile`） | 成熟，签名公证流程清楚（[sidecar 文档](https://v2.tauri.app/develop/sidecar/)） | 包小、更新器成熟 | 两套运行时（Rust 壳 + Bun sidecar）；sidecar 嵌套签名在 macOS 公证上有已知坑（[issue #11992](https://github.com/tauri-apps/tauri/issues/11992)）；进程管理多一层 |
-| Electron | 最稳 | 生态最大、Chromium 一致性 | 包体 100MB+；Node 而非 Bun（服务端要改或再嵌 Bun） |
+备选过 Electrobun（主进程是 Bun）和 Tauri v2 + Bun sidecar；最终选 Electron。
 
-**2026-10-15 决定改用 Electron**：Chromium 渲染与开发时一致、electron-builder 的 dmg / nsis / AppImage、签名公证、electron-updater 都成熟，Windows / Linux 不用赌。代价用「Bun 子进程」消化：Electron 主进程只管窗口，服务端原样跑在随包附带的 Bun 上（`resources/bin/bun` + `resources/server`，不进 asar），所以服务端代码零改动。实测 Linux AppImage 431 MB（Codex 引擎 427 MB 解压后、Claude 引擎 273 MB、Bun 76 MB 占大头）。
+**2026-10-15 决定改用 Electron**：Chromium 渲染与开发时一致、electron-builder 的 dmg / nsis / AppImage、签名公证、electron-updater 都成熟，Windows / Linux 不用赌。代价用「Bun 子进程」消化：Electron 主进程只管窗口，服务端原样跑在随包附带的 Bun 上（`resources/bin/bun` + `resources/server`，不进 asar），所以服务端代码零改动。Linux AppImage 最初 431 MB（Codex / Claude 引擎占大头）；改成首次使用时从 Registry 下载后为 165 MB。
 
 **共同难点：macOS GUI 应用的 PATH**。从 Dock 启动时继承的是 launchd 的精简 PATH，找不到 `npm -g`、Homebrew、nvm、`~/.opencode/bin` 下的 CLI。方案：启动时用用户登录 shell 解析一次环境（`$SHELL -ilc 'env -0'`，带超时），缓存后用于所有子进程；设置页允许为每个 Harness 填绝对路径；「检测」按钮显示解析到的路径和版本。
 
@@ -68,17 +66,17 @@
 │   ├─ ClientServices   fs/*（限定在 workspace 内）、terminal/*（受控 PTY）、request_permission → UI、elicitation → UI
 │   └─ Lifecycle        启动、崩溃重启（退避）、空闲回收、stderr 日志
 ├─ SessionStore(SQLite) 会话 ↔ ACP sessionId 映射、消息/事件时间线（含 tool_call、plan、thought）、权限记忆
-├─ Orchestrator         私聊直接转发；群聊：@ 路由、交接链、跳数上限、打断
+├─ Orchestrator         单 Agent 会话直接转发；多 Agent 会话：@ 路由、交接链、跳数上限、打断
 ├─ HandoffMCP           团团自己暴露的 MCP 服务（本地 HTTP 或 stdio），在 session/new 时通过 mcpServers 注入：handoff / list_members / post_to_room
 └─ WebView (React)      现有界面 + 新的能力组件
 ```
 
 ### 3.1 会话映射
-- 私聊：1 个团团会话 = 1 个 Agent 的 1 个 ACP session。优先 `session/resume`/`session/load`（看能力）恢复；不支持时，团团保存本地时间线用于展示，并在新 session 首条 prompt 里注入简短历史摘要（标注为降级）。
-- 群聊：1 个群 × 每个成员 Agent 各 1 个 ACP session（成员各自的上下文）。人类消息和其他成员的发言以「群聊转述」形式作为 prompt 的一部分（`[群聊] Alice: …`），只发给被路由到的成员；未被路由的成员不消耗 token，下次轮到时补上他错过的消息（截断 + 摘要）。
+- 单 Agent 会话：1 个团团会话 = 1 个 Agent 的 1 个 ACP session。优先 `session/resume`/`session/load`（看能力）恢复；不支持时，团团保存本地时间线用于展示，并在新 session 首条 prompt 里注入简短历史摘要（标注为降级）。
+- 多 Agent 会话：1 个群 × 每个成员 Agent 各 1 个 ACP session（成员各自的上下文）。人类消息和其他成员的发言以「会话转述」形式作为 prompt 的一部分（`[多 Agent 会话] Alice: …`），只发给被路由到的成员；未被路由的成员不消耗 token，下次轮到时补上他错过的消息（截断 + 摘要）。
 - 团团自己的消息 id ↔ ACP `messageId` / `toolCallId` 对应存表，界面刷新后可完全重建。
 
-### 3.2 群聊编排（去掉 Auto 之后）
+### 3.2 多 Agent 编排（去掉 Auto 之后）
 - `@名字` / `@所有人`：保留，纯规则，无需分类器。
 - **不 @ 时谁回复**：群设置里的**主 Agent**回复（已决定）。
 - **交接**：团团注入 `tuantuan-handoff` MCP 工具，Agent 调 `handoff(to, task)` → 团团把任务作为新 prompt 发给目标 Agent 的 session；保留跳数上限、打断、交接卡片。所有首批 Harness 都支持客户端传入 MCP 服务（Claude / Codex 文档明确；Grok / OpenCode 需实测 `mcpServers` 注入是否生效）。
@@ -92,13 +90,7 @@
 | OpenCode | **兜底：会话首条 prompt 前置**（`<tuantuan-identity>` 包裹）。可选的 `OPENCODE_CONFIG_CONTENT` 自定义 agent 的 `prompt` 会替换 OpenCode 默认 agent 的系统提示，`instructions` 字段在 V2 不生效 | [Config](https://opencode.ai/docs/config/)、[Instructions](https://opencode.ai/v2/docs/instructions/) | 前置会占一次上下文且对模型优先级较低；会话恢复后不重复发送 |
 | 其他 / 未知 | 首条 prompt 前置 | — | 同上 |
 
-群聊上下文（「你在群 X 里，成员有…，主 Agent 是…，要交接请调用 handoff」）与身份文档拼在一起，按同样的通道传递。
-
-### 3.3 机器人房间
-- 机器人绑定一个 Agent，走同一套 ACP 会话；语音转文字后作为 prompt，回复的 `agent_message_chunk` 送 TTS。
-- 编码类 Harness 回复里常有代码、工具卡片、权限请求，不适合语音：机器人房间默认把该 Agent 的 session 切到只读/问答模式（如有 `mode` config），工具卡片和权限请求在屏幕上显示、语音只念摘要。
-- `robot_express` / `robot_action` 改为同样经注入的 MCP 工具提供。
-- 待决策：机器人房间是否需要一个「轻量对话型」Harness（见决策 5）。
+多 Agent 上下文（「你在群 X 里，成员有…，主 Agent 是…，要交接请调用 handoff」）与身份文档拼在一起，按同样的通道传递。
 
 ## 4. UI 能力映射
 
@@ -134,7 +126,7 @@
 
 ## 6. 删除与保留
 **删除**：`server/router.ts`、`decision.ts`、`classify.ts`、`picker.ts`（话题选人）、`llm.ts`、`tool-loop.ts`、`tools.ts` 中的内置工具、`skills.ts` 与 `skills/` 目录、`config.ts` 的模型/provider/路由表部分、`config/providers*.json`、`.env.example` 里 `AGENT_HUB_MODELS*` / `DECISION_*` / provider Key、路由详情面板（「回复详情」里的分类、候选、回退）、相关测试与文档章节。`mock.ts` 改造成一个「mock ACP Agent」（用 SDK 的 agent 端写），供 e2e 和无 Harness 演示用。
-**保留**：群聊 / @ / @所有人 / 交接 / 跳数上限 / 打断、Bot 头像与表情（表情改由 ACP 状态驱动：thought=思考、message chunk=说话、tool_call=专注、permission=等待、错误=难过）、机器人房间与 `/device` 协议、对齐与动效体系、SQLite（迁移重做：agents 表加 harness/cwd/env 引用，新增 acp_sessions、timeline_events、permission_rules）。
+**保留**：多 Agent 会话 / @ / @所有人 / 交接 / 跳数上限 / 打断、Bot 头像与表情（表情改由 ACP 状态驱动：thought=思考、message chunk=说话、tool_call=专注、permission=等待、错误=难过）、对齐与动效体系、SQLite（迁移重做：agents 表加 harness/cwd/env 引用，新增 acp_sessions、timeline_events、permission_rules）。
 
 ## 7. 安全
 - 权限默认「每次询问」；「总是允许」按 Agent + 工具 kind + 路径前缀记忆，可在设置里撤销。
@@ -144,16 +136,18 @@
 - handoff MCP 只监听 127.0.0.1，带每会话随机 token。
 
 ## 8. 里程碑
-- **M1：ACP 客户端 + 首批 4 个 Harness 的私聊，完整能力 UI**（仍以浏览器 + Bun 服务形态开发，桌面壳放 M3）
+- **M1：ACP 客户端 + 首批 4 个 Harness 的单 Agent 会话，完整能力 UI**（仍以浏览器 + Bun 服务形态开发，桌面壳放 M3）
   - SDK 在 Bun 下冒烟；HarnessRegistry（检测/路径/版本/认证提示），PATH 解析。
-  - Claude Code、Codex、Grok Build、OpenCode 私聊：流式、思考、工具卡片（diff + 终端）、plan、权限、configOptions（模式/模型/档位）、斜杠命令、图片与 @文件、取消、会话恢复（按能力降级）、usage。
+  - Claude Code、Codex、Grok Build、OpenCode 单 Agent 会话：流式、思考、工具卡片（diff + 终端）、plan、权限、configOptions（模式/模型/档位）、斜杠命令、图片与 @文件、取消、会话恢复（按能力降级）、usage。
   - mock ACP Agent + e2e：覆盖每种 update 的渲染、权限流程、取消、恢复；每个真实 Harness 一个手动验收清单（需要 Andy 的账号）。
   - 删除 Auto 路由及相关配置、文档。
-  - **M1 状态（2026-10-14）**：已完成 SDK 在 Bun 下验证、注册表与检测、每 Agent 进程、会话映射与恢复、cwd 限制、权限弹窗、私聊完整能力 UI、Agent 编辑字段、基础新手引导、删除 Auto 路由、mock ACP agent + e2e、迁移 6。握手实测：Claude Code（claude-agent-acp 0.90.0）与 OpenCode 1.19.0 无账号可建会话；Codex（codex-acp 2.2.2）与 Grok 1.0.52 初始化成功、建会话需登录。未完成：ACP `authenticate` 流程（目前只显示登录提示）、session/load 回放显示、机器人 Agent 按 Harness 过滤、新建群时直接设主 Agent / cwd。
-- **M2：群聊 + 交接 MCP**
-  - **M2 状态（2026-10-14）**：已完成 `tuantuan` MCP 服务器（HTTP `/mcp/<token>` + stdio 中转，按 `mcpCapabilities.http` 选择）、`handoff` / `list_members`（成员校验、去重、跳数上限、打断语义、交接卡片）、群聊转述（上次发言后的新消息，8000 字上限）、机器人 MCP 工具（已随机器人功能移除）、引导页 ACP `authenticate` + 终端命令复制 + 重新检测、session/load 回放只读显示（按用户消息去重）、建群时选主 Agent 和工作目录、机器人只列 Harness 已安装的 Agent、README 截图更新。实测：OpenCode 1.19.0（免费模型，无账号）在 HTTP 和 stdio 两种传输下都完成了真实交接；Claude Code 未登录时 prompt 报需要登录；Codex / Grok 未登录无法建会话。：成员 session 管理、转述上下文、@ 路由、默认回复人（按决策）、handoff MCP、跳数与打断、机器人房间改走 ACP。
+  - **M1 状态（2026-10-14）**：已完成 SDK 在 Bun 下验证、注册表与检测、每 Agent 进程、会话映射与恢复、cwd 限制、权限弹窗、单 Agent 会话完整能力 UI、Agent 编辑字段、基础新手引导、删除 Auto 路由、mock ACP agent + e2e、迁移 6。握手实测：Claude Code（claude-agent-acp 0.90.0）与 OpenCode 1.19.0 无账号可建会话；Codex（codex-acp 2.2.2）与 Grok 1.0.52 初始化成功、建会话需登录。未完成：ACP `authenticate` 流程（目前只显示登录提示）、session/load 回放显示、新建会话时直接设主 Agent / cwd。
+- **M2：多 Agent 会话 + 交接 MCP**
+  - **M2 状态（2026-10-14）**：已完成 `tuantuan` MCP 服务器（HTTP `/mcp/<token>` + stdio 中转，按 `mcpCapabilities.http` 选择）、`handoff` / `list_members`（成员校验、去重、跳数上限、打断语义、交接卡片）、会话转述（上次发言后的新消息，8000 字上限）、引导页 ACP `authenticate` + 终端命令复制 + 重新检测、session/load 回放只读显示（按用户消息去重）、建会话时选主 Agent 和工作目录、README 截图更新。实测：OpenCode 1.19.0（免费模型，无账号）在 HTTP 和 stdio 两种传输下都完成了真实交接；Claude Code 未登录时 prompt 报需要登录；Codex / Grok 未登录无法建会话。：成员 session 管理、转述上下文、@ 路由、默认回复人（按决策）、handoff MCP、跳数与打断。
 - **M3：桌面打包**：Electron 壳、登录 shell 环境解析、钥匙串、签名公证、自动更新、首次运行引导（检测并提示安装 Harness）。
   - **M3 状态（2026-10-15）**：`desktop/` 已完成：Electron 主进程拉起随包 Bun 服务端（随机本机端口、等 `/api/health`、退出时杀整个进程组）、单实例、macOS hiddenInset 标题栏（红绿灯居中在侧栏上方）、中文菜单、可选托盘、窗口位置记忆、登录 shell 环境导入、preload 桥接原生文件夹对话框（contextIsolation + sandbox，无 nodeIntegration）、图标、electron-builder（mac dmg+zip arm64/x64、win nsis、linux AppImage）、签名公证按环境变量开启、electron-updater 仅在配置发布时启用、GitHub Actions 打包。Linux AppImage 在 Xvfb 下端到端冒烟通过（`desktop/scripts/smoke.ts`）。未实测：macOS / Windows 包、签名公证、自动更新、钥匙串。
+  - **2026-10-15**：桌面版 macOS 标题栏改为全列统一 52px 标题行（红绿灯居中在图标栏顶部，全屏时让回）；首次引导简化为一页三步。
+- **Registry 接入（2026-10-15）**：官方 ACP Registry 客户端（缓存 + 随包快照 + schema 校验 + 6 小时刷新）、「更多 Agent」列表与搜索、npx / uvx / 二进制一键安装（团团目录、固定版本、sha256）、托管 Node 22 与 uv、更新与卸载、图标缓存、实验性 ZCode 桥接；Pi、GLM、MiniMax、ZCode、OpenCode、fast-agent 在 box 上真实安装并握手通过。
 - **M4：更多 Harness 与扩展**：Gemini CLI、Goose / Kimi / Qwen Code；私有扩展（Claude 子 Agent / goal、Grok `x.ai/*` 回退、OpenCode fork）；视情况评估 ACP v2。
 
 ## 9. 风险
@@ -161,13 +155,8 @@
 - 各 Harness 对 configOptions、plan、slash 命令、session list 的支持不齐，UI 必须完全按能力显示/隐藏。
 - 账号与费用：Claude/Codex/Grok 需各自订阅或 Key；Grok Build 需付费档；e2e 不能依赖真实账号。
 - 适配器版本变化快（Claude 适配器一年内两次改名迁仓），需锁版本 + 设置页显示版本。
-- 群聊里多个编码 Agent 同一 workspace 并发写文件会冲突：默认同一 workspace 同时只允许一个 Agent 执行写操作（或每 Agent 独立 worktree，见决策）。
-- 机器人语音与编码 Harness 的输出形态不匹配。
+- 多 Agent 会话里多个编码 Agent 同一 workspace 并发写文件会冲突：默认同一 workspace 同时只允许一个 Agent 执行写操作（或每 Agent 独立 worktree，见决策）。
 
-## 10. 需要 Andy 决定（已在 §0 决定，保留原问题供追溯）
-1. **桌面框架**：Electrobun（推荐，主进程就是 Bun）还是 Tauri + Bun sidecar？（最终：Electron + Bun 子进程）
-2. **群聊不 @ 时谁回复**：默认回复人 / 上一位继续 / 无人回复。
-3. **群里多个 Agent 共用一个工作目录，还是每个 Agent 自动建 git worktree**？
-4. **机器人房间**：继续绑定编码 Harness（只读模式 + 语音念摘要），还是加一个轻量对话型 Harness 专门给机器人？
-5. **内置简易 Harness** 要不要做（用于无账号演示 / 机器人），还是只保留 mock ACP Agent 给测试？
-6. **团团层的附加说明**（每轮 prompt 前缀、群聊身份说明）是否保留，还是完全交给各 Harness 的 AGENTS.md / CLAUDE.md？
+## 10. 待定
+- 多个编码 Agent 在同一项目目录并发写文件：目前共用目录、串行执行；是否改为每 Agent 独立 git worktree 未定。
+- 团团层的附加说明（每轮 prompt 前缀、多 Agent 身份说明）是否全部交给各 Harness 的 AGENTS.md / CLAUDE.md。
