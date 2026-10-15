@@ -5,6 +5,7 @@ import { CUSTOM_HARNESS } from "./custom";
 import { harnessSpec } from "./harness";
 import type { HarnessHost, PermissionAsk, SessionView } from "./host";
 import { mentionsEveryone, parseMentions } from "./mentions";
+import { profileInstructions, readProfile } from "./profile";
 import type { Agent, Message, Room, Store } from "./store";
 import { ValidationError } from "./store";
 import type { ToolCtx, ToolDef, ToolProvider } from "./tuantuan-mcp";
@@ -140,7 +141,8 @@ export class Orchestrator implements ToolProvider {
             .filter(Boolean)
             .join("")
         : `你在团团里和用户对话，你的名字是「${agent.name}」。`;
-    return [context, agent.identity.trim()].filter(Boolean).join("\n\n");
+    const about = agent.useProfile ? profileInstructions(readProfile(this.store.getSetting("profile", {}))) : "";
+    return [context, agent.identity.trim(), about].filter(Boolean).join("\n\n");
   }
 
   private runtime(roomId: string): RoomRuntime {

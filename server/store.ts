@@ -194,6 +194,8 @@ export const MIGRATIONS: string[] = [
    ALTER TABLE usage_log ADD COLUMN cost REAL;
    ALTER TABLE usage_log ADD COLUMN cost_currency TEXT;
    UPDATE usage_log SET cache_read_tokens = cached_tokens;`,
+  // 个人资料: an agent can opt out of the user's 「关于我」 text.
+  `ALTER TABLE agents ADD COLUMN use_profile INTEGER NOT NULL DEFAULT 1;`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -218,6 +220,8 @@ export interface Agent {
   providerId: string | null;
   /** Default session config for new conversations (configId → value, e.g. model / effort / mode). */
   configDefaults: Record<string, string>;
+  /** Add the user's 「关于我」 (个人资料) to this agent's instructions. */
+  useProfile: boolean;
   /** BYOK settings when harness is "custom"; the API key is only ever exposed masked. */
   custom: CustomPublic | null;
   createdAt: number;
@@ -242,8 +246,9 @@ export interface CustomInput {
 
 export type AgentInput = Omit<
   Agent,
-  "id" | "createdAt" | "updatedAt" | "avatarShape" | "color" | "custom" | "configDefaults" | "providerId"
+  "id" | "createdAt" | "updatedAt" | "avatarShape" | "color" | "custom" | "configDefaults" | "providerId" | "useProfile"
 > & {
+  useProfile?: boolean;
   providerId?: string | null;
   configDefaults?: Record<string, string>;
   custom?: CustomInput | null;
@@ -424,6 +429,7 @@ export class Store {
       permission_policy: a.permissionPolicy,
       mcp_server_ids: JSON.stringify(a.mcpServerIds),
       config_defaults: JSON.stringify(a.configDefaults ?? {}),
+      use_profile: a.useProfile === false ? 0 : 1,
       provider_id: a.providerId || null,
       tools: "[]",
       skills: "[]",
@@ -433,10 +439,10 @@ export class Store {
     };
     const sql =
       op === "insert"
-        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,config_defaults,provider_id,tools,skills,model_mode,created_at,updated_at,custom)
-             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$config_defaults,$provider_id,$tools,$skills,$model_mode,$created_at,$updated_at,$custom)`
+        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,config_defaults,use_profile,provider_id,tools,skills,model_mode,created_at,updated_at,custom)
+             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$config_defaults,$use_profile,$provider_id,$tools,$skills,$model_mode,$created_at,$updated_at,$custom)`
         : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,identity=$identity,harness=$harness,env=$env,
-             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,config_defaults=$config_defaults,provider_id=$provider_id,custom=$custom,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
+             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,config_defaults=$config_defaults,use_profile=$use_profile,provider_id=$provider_id,custom=$custom,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
     try {
       this.db.query(sql).run(params);
     } catch (e) {
@@ -957,6 +963,7 @@ function toAgent(r: Row): Agent {
     env: JSON.parse(r.env as string),
     mcpServerIds: JSON.parse(r.mcp_server_ids as string),
     configDefaults: JSON.parse((r.config_defaults as string) || "{}"),
+    useProfile: r.use_profile !== 0,
     providerId: (r.provider_id as string | null) ?? null,
     permissionPolicy: r.permission_policy as PermissionPolicy,
     custom: r.custom ? publicCustom(JSON.parse(r.custom as string)) : null,

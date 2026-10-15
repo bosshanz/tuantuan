@@ -30,6 +30,7 @@ import * as library from "./library";
 import { installManaged, readManifest, setManagedRoot, uninstallManaged } from "./managed";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
+import { ProfileSchema, readProfile } from "./profile";
 import {
   codexProviderSet,
   PRESETS,
@@ -101,6 +102,7 @@ const AgentInputSchema = z.object({
   mcpServerIds: z.array(z.string()).max(32).default([]),
   permissionPolicy: z.enum(PERMISSION_POLICIES).default("ask"),
   configDefaults: z.record(z.string().max(64), z.string().max(200)).default({}),
+  useProfile: z.boolean().optional(),
   providerId: z.string().max(64).nullable().optional(),
   custom: CustomSchema.nullable().optional(),
 });
@@ -680,6 +682,16 @@ export function createApp(deps: AppDeps) {
     if (resource === "onboarding" && method === "POST") {
       store.setSetting("onboarded", true);
       return json({ onboarded: true });
+    }
+
+    // 个人资料: name, avatar, 「关于我」, appearance, timezone, language.
+    if (resource === "profile" && !id) {
+      if (method === "GET") return json(readProfile(store.getSetting("profile", {})));
+      if (method === "PUT") {
+        const p = ProfileSchema.parse(await body());
+        store.setSetting("profile", p);
+        return json(p);
+      }
     }
 
     if (resource === "health" && method === "GET") return json({ ok: true, pid: process.pid });

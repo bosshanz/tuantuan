@@ -54,6 +54,7 @@ function emptyAgent(seed: string): Form {
     mcpServerIds: [],
     permissionPolicy: "ask",
     configDefaults: {},
+    useProfile: true,
     providerId: null,
     custom: null,
   };
@@ -88,6 +89,7 @@ const comparable = (a: Form) =>
     [...a.mcpServerIds].sort(),
     a.permissionPolicy,
     a.configDefaults ?? {},
+    a.useProfile !== false,
     a.providerId ?? null,
     a.providerId && a.harness === "custom" ? null : a.custom,
   ]);
@@ -341,6 +343,21 @@ export function AgentEditor(props: {
                 aria-label="身份文档"
                 placeholder={"# 角色\n你是团队里的前端工程师……\n\n# 约定\n- 改动前先说明计划"}
               />
+              <label className="profile-optin">
+                <input
+                  type="checkbox"
+                  className="tg"
+                  aria-label="附上我的「关于我」"
+                  checked={form.useProfile !== false}
+                  onChange={(e) => set("useProfile", e.target.checked)}
+                />
+                <span>
+                  附上我的「关于我」
+                  <span className="muted">
+                    来自<a href="#/profile">个人资料</a>，新会话生效
+                  </span>
+                </span>
+              </label>
             </div>
           </section>
 

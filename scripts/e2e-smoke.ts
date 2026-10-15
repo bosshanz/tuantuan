@@ -1015,10 +1015,12 @@ try {
     await page.locator(".messages-wrap").waitFor();
     const fades = await page.$$eval(".msg-fade", (els) => els.map((e) => getComputedStyle(e).pointerEvents));
     if (fades.length !== 2 || fades.some((p) => p !== "none")) throw new Error(`fade overlays: ${fades}`);
+    await page.locator(".messages").evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
     await page.locator(".messages").evaluate((el) => el.scrollTo({ top: 0 }));
+    await page.locator(".messages-wrap[data-more-below]").waitFor();
+    await page.locator(".messages").evaluate((el) => el.scrollTo({ top: el.scrollHeight / 2 }));
+    await page.locator(".messages-wrap[data-scrolled][data-more-below]").waitFor();
     await page.waitForTimeout(200);
-    if ((await page.locator(".messages-wrap[data-more-below] .msg-fade-bottom").count()) !== 1)
-      throw new Error("bottom fade should show when scrolled up");
     await shot("chat-fade");
 
     // Notifications: settings page, test notification, and a real reply in another conversation.
@@ -1066,6 +1068,69 @@ try {
     await page.waitForTimeout(1500);
     if ((await notes()).length !== before) throw new Error("reply notification should be off");
     await page.evaluate(() => localStorage.removeItem("tuantuan:notify"));
+  }
+
+  // @mentions share the baseline with the text around them.
+  {
+    const group = app.store.listRooms().find((r) => r.name === "冒烟会话");
+    await page.goto(`http://localhost:${server.port}/#/c/${group?.id}`);
+    await page.locator(".msg .mention").first().waitFor();
+    const off = await page.evaluate(() => {
+      const m = [...document.querySelectorAll(".msg .mention")].find(
+        (el) => el.nextSibling?.nodeType === Node.TEXT_NODE,
+      );
+      if (!m?.nextSibling) return null;
+      const r = document.createRange();
+      r.setStart(m.nextSibling, 0);
+      r.setEnd(m.nextSibling, 1);
+      const a = m.getBoundingClientRect();
+      const b = r.getBoundingClientRect();
+      return { bottom: Math.abs(a.bottom - b.bottom), height: Math.abs(a.height - b.height) };
+    });
+    if (!off) throw new Error("no mention followed by text");
+    if (off.bottom > 1 || off.height > 1) throw new Error(`mention off baseline: ${JSON.stringify(off)}`);
+  }
+
+  // 个人资料: name / avatar / 关于我 / appearance persist server-side; the bottom-left avatar opens it.
+  {
+    await page.locator(".side-me").click();
+    await page.waitForFunction(() => location.hash === "#/profile");
+    await page.getByLabel("显示名").fill("Andy");
+    await page.getByLabel("关于我").fill("我是前端工程师，回答先给结论。");
+    await page.getByRole("button", { name: "深色", exact: true }).click();
+    await page.getByRole("button", { name: "#2f6fed", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "已保存" }).waitFor();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    await page
+      .locator(".page")
+      .first()
+      .evaluate((el) => el.scrollTo({ top: 0 }));
+    await page.waitForTimeout(250);
+    await shot("profile");
+    const saved = app.store.getSetting<{ name: string; about: string; theme: string; accent: string }>("profile", {
+      name: "",
+      about: "",
+      theme: "",
+      accent: "",
+    });
+    if (saved.name !== "Andy" || !saved.about.includes("前端") || saved.theme !== "dark" || saved.accent !== "#2f6fed")
+      throw new Error(`profile not saved: ${JSON.stringify(saved)}`);
+    await page.reload();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    if ((await page.locator(".side-me").getAttribute("title"))?.startsWith("Andy") !== true)
+      throw new Error("bottom-left avatar should show the profile name");
+    // Per-agent opt-out on the agent page.
+    await page.goto(`http://localhost:${server.port}/#/a/${ccAgent.id}`);
+    const optin = page.getByRole("checkbox", { name: "附上我的「关于我」" });
+    if (!(await optin.isChecked())) throw new Error("profile opt-in should default on");
+    await optin.uncheck();
+    await page.getByRole("button", { name: "保存修改" }).click();
+    for (let i = 0; i < 50 && app.store.getAgent(ccAgent.id)?.useProfile !== false; i++) await page.waitForTimeout(100);
+    if (app.store.getAgent(ccAgent.id)?.useProfile !== false) throw new Error("useProfile not saved");
+    await page.locator(".side-me").click();
+    await page.getByRole("button", { name: "跟随系统", exact: true }).click();
+    await page.getByRole("button", { name: "默认", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "已保存" }).waitFor();
   }
 
   // Avatar states (thinking / working / done / idle) on every shape.

@@ -82,6 +82,21 @@ export function ChatView(props: {
   const [panel, setPanel] = useState(false);
   const panelPresence = usePresence(panel, 180);
   const listRef = useRef<HTMLDivElement>(null);
+  // Content or size changes move the edges without a scroll event.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => syncFades(el));
+    ro.observe(el);
+    for (const c of el.children) ro.observe(c);
+    const mo = new MutationObserver(() => syncFades(el));
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    syncFades(el);
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, []);
   const members = useMemo(
     () => room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a),
     [room.agentIds, agents],
@@ -498,6 +513,14 @@ function groupMessages(messages: Message[]): Group[] {
     else out.push({ kind: m.senderKind, senderId: m.senderId, senderName: m.senderName, messages: [m] });
   }
   return out;
+}
+
+/** Fade edges show only when there is content hidden above / below. */
+function syncFades(el: HTMLElement | null) {
+  const wrap = el?.parentElement;
+  if (!el || !wrap) return;
+  wrap.toggleAttribute("data-scrolled", el.scrollTop > 4);
+  wrap.toggleAttribute("data-more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
 }
 
 function MessageItem(props: {

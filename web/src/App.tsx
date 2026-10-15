@@ -29,6 +29,7 @@ import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
 import { NotificationsPage, useNotifications } from "./NotifyCenter";
 import { Onboarding } from "./Onboarding";
+import { applyAppearance, EMPTY_PROFILE, type Profile, ProfilePage, UserAvatar } from "./Profile";
 import { NewProject, ProjectSettings } from "./Projects";
 import { ProvidersPage } from "./Providers";
 import { SetupPage } from "./Setup";
@@ -53,7 +54,19 @@ export function App() {
   const [connected, setConnected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const palette = usePresence(paletteOpen, 140);
-  const [userName, setUserName] = useState(() => localStorage.getItem("agent-hub:user") || "我");
+  const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  // Display name: 个人资料 (server-side); the old per-browser name is the fallback until one is set.
+  const userName = profile.name.trim() || localStorage.getItem("agent-hub:user") || "我";
+  useEffect(() => {
+    void api<Profile>("GET", "/api/profile")
+      .then((p) => {
+        setProfile(p);
+        applyAppearance(p);
+      })
+      .catch(() => {})
+      .finally(() => setProfileLoaded(true));
+  }, []);
   const [route, go] = useHashRoute();
   const listeners = useRef(new Set<(e: WsEvent) => void>());
   const ws = useRef<ReturnType<typeof connectWs> | null>(null);
@@ -89,10 +102,6 @@ export function App() {
   }, [reload]);
 
   useEffect(() => {
-    localStorage.setItem("agent-hub:user", userName);
-  }, [userName]);
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -114,9 +123,11 @@ export function App() {
             ? "providers"
             : route[0] === "library"
               ? "library"
-              : route[0] === "notify"
-                ? "notify"
-                : "rooms";
+              : route[0] === "profile"
+                ? "profile"
+                : route[0] === "notify"
+                  ? "notify"
+                  : "rooms";
   // 新手引导 opens by itself on first launch only; once finished or skipped it is gone for good.
   const onboarded = meta?.onboarded;
   const finishing = useRef(false);
@@ -290,6 +301,12 @@ export function App() {
                 会话
               </button>
               <div className="side-section-title">设置</div>
+              <SideNav
+                icon={<UserRound size={17} />}
+                label="个人资料"
+                current={section === "profile"}
+                onClick={() => go("profile")}
+              />
               <SideNav icon={<Bot size={17} />} label="Agents" current={section === "agents"} onClick={() => go("a")} />
               <div
                 className="side-collapse"
@@ -367,7 +384,15 @@ export function App() {
           )}
         </div>
         <div className="side-foot">
-          <UserButton name={userName} onChange={setUserName} />
+          <button
+            type="button"
+            className="side-me"
+            title={`${userName} · 个人资料`}
+            aria-label="个人资料"
+            onClick={() => go("profile")}
+          >
+            <UserAvatar profile={{ ...profile, name: userName }} size={28} />
+          </button>
           <button
             type="button"
             className="side-settings"
@@ -469,6 +494,7 @@ export function App() {
           {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
           {section === "library" && meta && <LibraryPage meta={meta} />}
           {section === "notify" && <NotificationsPage />}
+          {section === "profile" && profileLoaded && <ProfilePage profile={profile} onChange={setProfile} />}
           {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
           {section === "agents" && !detailId && loaded && (
             <div className="empty">
@@ -582,41 +608,6 @@ function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; unread: nu
         </span>
       )}
     </button>
-  );
-}
-
-function UserButton({ name, onChange }: { name: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="rail-user">
-      <button
-        type="button"
-        className="rail-btn"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        title="我的显示名"
-      >
-        <UserRound size={18} />
-        {name.slice(0, 4) || "我"}
-      </button>
-      {open && (
-        <div className="popover" style={{ left: 56, bottom: 0, width: 220 }}>
-          <label className="field" style={{ padding: 8 }}>
-            <span className="label">我的显示名</span>
-            <input
-              className="input"
-              ref={(el) => el?.focus()}
-              value={name}
-              maxLength={32}
-              onChange={(e) => onChange(e.target.value)}
-              onKeyDown={(e) => (e.key === "Enter" || e.key === "Escape") && setOpen(false)}
-              onBlur={() => setOpen(false)}
-            />
-            <span className="help">Agent 看到的名字</span>
-          </label>
-        </div>
-      )}
-    </div>
   );
 }
 

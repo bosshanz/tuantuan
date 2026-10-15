@@ -54,3 +54,13 @@ test("avatar shows working while a tool call runs", () => {
   expect(agentActivity("a", [m])).toBe("working");
   expect(messageExpression({ ...m, timeline: undefined }).expression).toBe("thinking");
 });
+
+test("profile: 关于我 block for agents; empty profile adds nothing", async () => {
+  const { profileInstructions, readProfile } = await import("../server/profile");
+  expect(profileInstructions(readProfile({}))).toBe("");
+  const t = profileInstructions(readProfile({ name: "Andy", about: "先给结论", timezone: "Asia/Shanghai" }));
+  expect(t).toContain("称呼：Andy");
+  expect(t).toContain("先给结论");
+  expect(t).toContain("Asia/Shanghai");
+  expect(readProfile({ theme: "neon" }).theme).toBe("system");
+});
