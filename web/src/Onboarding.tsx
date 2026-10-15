@@ -1,6 +1,7 @@
 import { Check, Loader2, LogIn, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Agent, api, type HarnessStatus, type Room } from "./api";
+import { type AuthMethodView, HarnessAuth } from "./HarnessAuth";
 import { RegistryIcon } from "./Registry";
 import { CopyLine, InstallPanel } from "./Setup";
 
@@ -8,13 +9,9 @@ interface Probe {
   ok: boolean;
   error?: string;
   loggedIn?: boolean | null;
-  authMethods?: {
-    id: string;
-    name: string;
-    type: "agent" | "terminal" | "env";
-    command: string | null;
-    vars?: string[] | null;
-  }[];
+  needsKey?: boolean;
+  secretEnv?: Record<string, string>;
+  authMethods?: AuthMethodView[];
 }
 
 /** The six first-class harnesses (+ the test harness when TUANTUAN_MOCK_HARNESS=1). */
@@ -72,7 +69,7 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
     if (h && !named) setName(SHORT[h.id] ?? h.name.split(/[\s（(]/)[0] ?? h.name);
   }, [h, named]);
   // Signed in from a terminal? Re-check when the window gets focus again.
-  const waiting = !!probe && probe !== "running" && probe.ok && probe.loggedIn === false;
+  const waiting = !!probe && probe !== "running" && probe.ok && (probe.loggedIn === false || !!probe.needsKey);
   useEffect(() => {
     if (!waiting || !pick) return;
     const f = () => void check(pick);
@@ -80,7 +77,7 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
     return () => window.removeEventListener("focus", f);
   }, [waiting, pick, check]);
 
-  const signedIn = !!probe && probe !== "running" && probe.ok && probe.loggedIn !== false;
+  const signedIn = !!probe && probe !== "running" && probe.ok && probe.loggedIn !== false && !probe.needsKey;
   const step = !installed ? 1 : signedIn ? 3 : 2;
 
   const create = async () => {
@@ -159,7 +156,7 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
               {step === 2 && probe && probe !== "running" && (
                 <div className="onb-detail">
                   {!probe.ok && <div className="error-text">连不上：{probe.error}</div>}
-                  {probe.ok && probe.loggedIn === false && (
+                  {probe.ok && (probe.loggedIn === false || probe.needsKey) && (
                     <>
                       <div className="row onb-actions">
                         {probe.authMethods
@@ -180,7 +177,17 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                           重新检测
                         </button>
                       </div>
-                      {login && <CopyLine label="或在终端运行" text={login} />}
+                      <HarnessAuth
+                        harnessId={pick ?? ""}
+                        methods={probe.authMethods}
+                        secretEnv={probe.secretEnv}
+                        onChanged={async () => {
+                          if (pick) await check(pick);
+                        }}
+                      />
+                      {login && !probe.authMethods?.some((m) => m.type !== "agent") && (
+                        <CopyLine label="或在终端运行" text={login} />
+                      )}
                     </>
                   )}
                   {probe.ok === false && (

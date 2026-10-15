@@ -186,6 +186,58 @@ try {
   await shot("harness-registry-list");
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // An agent that needs an API key (env_var login, like glm-acp-agent) and has a terminal `--setup`:
+  // the reply fails → the conversation asks for the key in place → saved masked → it answers.
+  await more.getByLabel("搜索 Agent").fill("Mock 密钥");
+  const keyItem = more.getByRole("article", { name: "Mock 密钥" });
+  await keyItem.getByRole("button", { name: "安装", exact: true }).click();
+  await keyItem.getByText(/已安装 1\.0\.0/).waitFor({ timeout: 60_000 });
+  await keyItem.getByRole("button", { name: "握手" }).click();
+  await keyItem
+    .getByRole("status")
+    .getByText(/需要 API Key/)
+    .waitFor();
+  await keyItem.getByLabel("MOCK_API_KEY").waitFor();
+  await keyItem.getByRole("button", { name: /在终端中打开「Mock 设置」/ }).waitFor();
+  const setupCmd =
+    (await keyItem.locator(".copy-line code").filter({ hasText: "--setup" }).first().textContent()) ?? "";
+  if (!/^env MOCK_AGENT_KEY_VAR=MOCK_API_KEY \/.+\/bin\/mock-acp --setup$/.test(setupCmd.trim()))
+    throw new Error(`terminal command: ${setupCmd}`);
+  await keyItem.scrollIntoViewIfNeeded();
+  await shot("harness-api-key");
+  const keyAgent = await (
+    await fetch(`http://localhost:${server.port}/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "KeyBot", harness: "reg:mock-key" }),
+    })
+  ).json();
+  const keyRoom = await (
+    await fetch(`http://localhost:${server.port}/api/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "KeyBot", agentIds: [keyAgent.id] }),
+    })
+  ).json();
+  await page.goto(`http://localhost:${server.port}/#/c/${keyRoom.id}`);
+  await page.reload();
+  const keyBox = page.locator(".composer-box textarea");
+  await keyBox.fill("你好");
+  await keyBox.press("Enter");
+  const needKey = page.locator(".need-key");
+  await needKey.getByText("需要 API Key").waitFor();
+  await needKey.getByLabel("MOCK_API_KEY").fill("sk-e2e-key-123456");
+  await shot("conversation-need-key");
+  await needKey.getByRole("button", { name: "保存" }).click();
+  await needKey.getByText("已保存，重新发送消息即可").waitFor();
+  if (JSON.stringify(app.store.getSetting("harnessEnv", {})).indexOf("sk-e2e-key-123456") < 0)
+    throw new Error("key not stored");
+  await keyBox.fill("再试一次");
+  await keyBox.press("Enter");
+  await page.getByText("收到：「再试一次」").waitFor();
+  await page.getByRole("button", { name: "Harness", exact: true }).click();
+  await page.getByRole("heading", { name: "Harness 管理" }).waitFor();
+
   const createAgent = async (name: string, identity: string) => {
     await page.getByRole("button", { name: "Agents", exact: true }).click();
     await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();

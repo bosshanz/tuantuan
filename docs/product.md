@@ -25,6 +25,7 @@
   6. 新消息打断当前回复链，未执行的触发（含交接）列在系统消息里后丢弃。
 - 单 Agent 会话：每条消息都由该 Agent 回复；新消息排队；不注入 `tuantuan` 工具。
 - Skills：自动发现用户级、插件和项目里的 Skills，按 Agent 勾选（新建 Agent 时就能勾选）；Harness 原生会读的显示为锁定；可从链接 / 文件夹导入到 Agent。启用的 Skills 以符号链接放进会话目录（不覆盖已有的）。
+- API Key：`env_var` 登录方式的 Key 可在 Harness 页、首次引导、会话的「需要 API Key」提示里填写；服务端保存、打码显示、只注入该 Harness 的进程（Agent 环境变量优先），保存后重新握手。终端登录用团团安装的绝对命令在终端打开，并可复制。
 - 登录：握手后报告是否已登录；Harness 声明了 agent 类型的登录方式时可一键调用 ACP `authenticate`，否则复制终端登录命令；环境变量类登录显示需要的变量名。
 - 切换到 Harness 的历史会话时 `session/load`，回放中团团没有的轮次（按用户消息文本去重）只读显示在顶部。
 - 取消：向 Harness 发送 `session/cancel`，保留已生成内容并标记「已取消」。

@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 import { methods as acpMethods } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
@@ -22,6 +22,7 @@ import {
   specForRegistryAgent,
   visibleHarnesses,
 } from "./harness";
+import { ENV_NAME, harnessSecretEnv, openTerminal, publicHarnessEnv, setHarnessEnv } from "./harness-secrets";
 import { HarnessHost, withProviderMeta } from "./host";
 import { Installer } from "./installer";
 import { installManaged, readManifest, setManagedRoot, uninstallManaged } from "./managed";
@@ -253,8 +254,16 @@ export function createApp(deps: AppDeps) {
 
   async function harnessStatuses() {
     const overrides = store.getSetting<Record<string, string>>("harnessPaths", {});
-    return Promise.all(visibleHarnesses().map((h) => detectHarness(h, overrides[h.id] ?? null)));
+    return Promise.all(
+      visibleHarnesses().map(async (h) => ({
+        ...(await detectHarness(h, overrides[h.id] ?? null)),
+        /** API keys saved for this harness in 团团 (masked). */
+        secretEnv: publicHarnessEnv(store, h.id),
+      })),
+    );
   }
+  /** Terminal login commands seen in the last handshake, per harness: only these can be opened. */
+  const terminalCommands = new Map<string, Record<string, string>>();
 
   /**
    * Spawns the harness once and runs the ACP handshake, optionally `authenticate` with one of its
@@ -448,7 +457,8 @@ export function createApp(deps: AppDeps) {
     const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
     const command = status.command;
     if (!command) return { ok: false, error: status.error, install: spec.install, login: status.login };
-    const env = { ...(await loginShellEnv()), ...status.env };
+    const secrets = harnessSecretEnv(store, id);
+    const env = { ...(await loginShellEnv()), ...status.env, ...secrets };
     // With a 服务商, probe exactly as the agent will run: same env, routing and settings tier.
     const prov = providerId ? store.getProvider(providerId) : null;
     const useProv = prov && providerSupports(prov, id) ? prov : null;
@@ -477,14 +487,79 @@ export function createApp(deps: AppDeps) {
               : raw.type === "env_var"
                 ? ("env" as const)
                 : ("agent" as const),
-          /** env_var methods: which variables to set (in the agent's 环境变量). */
+          /** env_var methods: which variables to set (saved here, or in the agent's 环境变量). */
           vars: raw.type === "env_var" && Array.isArray(raw.vars) ? raw.vars.map((v) => v.name) : null,
+          /** …and which of them are not set anywhere yet. */
+          missing:
+            raw.type === "env_var" && Array.isArray(raw.vars)
+              ? raw.vars.map((v) => v.name).filter((n) => !env[n])
+              : null,
+          // Absolute command (managed runtime + script), with the env the registry asks for.
           command:
             "type" in m && m.type === "terminal"
-              ? [command, ...status.args, ...(m.args ?? [])].map(shellQuote).join(" ")
+              ? [
+                  ...(Object.keys({ ...status.env, ...(m.env ?? {}) }).length
+                    ? ["env", ...Object.entries({ ...status.env, ...(m.env ?? {}) }).map(([k, v]) => `${k}=${v}`)]
+                    : []),
+                  command,
+                  ...status.args,
+                  ...(m.args ?? []),
+                ]
+                  .map(shellQuote)
+                  .join(" ")
               : null,
         };
       });
+      // A method whose description says "run `glm-acp-agent --setup`" gets a terminal login too,
+      // with the real (managed, absolute) command instead of a name that is not on PATH.
+      const bins = new Set(
+        [command, ...status.args].map((x) => basename(x).replace(/\.(c|m)?js$/, "")).filter(Boolean),
+      );
+      for (const m of [...authMethods]) {
+        const hit = (m.description ?? "").match(/`([\w.@/-]+)((?:\s+--?[\w-]+)+)`/);
+        const name = basename(hit?.[1] ?? "");
+        const ours =
+          bins.has(name) ||
+          name === spec.registry ||
+          [command, ...status.args].some((x) => x.split(/[\\/]/).includes(name));
+        if (!hit || !ours || m.type === "terminal") continue;
+        const flags = (hit[2] as string).trim().split(/\s+/);
+        authMethods.push({
+          id: `${m.id}:terminal`,
+          name: `${hit[1]} ${flags.join(" ")}`,
+          description: m.description,
+          type: "terminal" as const,
+          vars: null,
+          missing: null,
+          command: [
+            ...(Object.keys(status.env).length
+              ? ["env", ...Object.entries(status.env).map(([k, v]) => `${k}=${v}`)]
+              : []),
+            command,
+            ...status.args,
+            ...flags,
+          ]
+            .map(shellQuote)
+            .join(" "),
+        });
+      }
+      terminalCommands.set(
+        id,
+        Object.fromEntries(authMethods.filter((m) => m.command).map((m) => [m.id, m.command as string])),
+      );
+      // API-key login offered, no key set anywhere, and no agent-driven login: the first prompt will
+      // likely fail (glm-acp-agent opens sessions fine and fails on the prompt). With a terminal
+      // method too (e.g. `--setup` storing the key in its own file) we can't tell, so only hint.
+      const envMethods = authMethods.filter((m) => m.type === "env");
+      const keyVars = envMethods.flatMap((m) => m.vars ?? []);
+      // An "agent" method that is really the same key (its description names the variable, like
+      // glm-acp-agent's) is not a separate way to sign in.
+      const realAgentLogin = authMethods.some(
+        (m) => m.type === "agent" && !keyVars.some((v) => (m.description ?? "").includes(v)),
+      );
+      const needsKey =
+        envMethods.length > 0 && envMethods.every((m) => (m.missing?.length ?? 0) > 0) && !realAgentLogin;
+      const keyOnly = needsKey && !authMethods.some((m) => m.type === "terminal") && !realAgentLogin;
       let authError: string | null = null;
       if (methodId) {
         const m = authMethods.find((x) => x.id === methodId);
@@ -533,6 +608,7 @@ export function createApp(deps: AppDeps) {
         if (/auth/i.test(msg)) loggedIn = false;
         else sessionError = msg;
       }
+      if (keyOnly) loggedIn = false;
       return {
         ok: true,
         protocolVersion: init.protocolVersion,
@@ -542,6 +618,8 @@ export function createApp(deps: AppDeps) {
         auth: spec.auth,
         login: spec.login,
         loggedIn,
+        needsKey,
+        secretEnv: publicHarnessEnv(store, id),
         sessionError,
         authError,
         configOptions,
@@ -764,6 +842,27 @@ export function createApp(deps: AppDeps) {
         return json(await harnessStatuses());
       }
       if (id && sub === "test" && method === "POST") return json(await probeHarness(id));
+      // API keys for this harness (env_var auth): saved masked, injected into its processes only.
+      if (id && sub === "env") {
+        if (!harnessSpec(id)) throw new ValidationError(`未知 Harness：${id}`, 404);
+        if (method === "GET") return json({ secretEnv: publicHarnessEnv(store, id) });
+        if (method === "PUT") {
+          const { values } = z
+            .object({ values: z.record(z.string().regex(ENV_NAME), z.string().max(4096).nullable()) })
+            .parse(await body());
+          setHarnessEnv(store, id, values);
+          host.dropHarness(id); // running processes restart with the new env on next use
+          return json({ secretEnv: publicHarnessEnv(store, id) });
+        }
+      }
+      // Open a terminal running one of the harness's own terminal-login commands (from its handshake).
+      if (id && sub === "terminal" && method === "POST") {
+        const { methodId } = z.object({ methodId: z.string().min(1) }).parse(await body());
+        const cmd = terminalCommands.get(id)?.[methodId];
+        if (!cmd) throw new ValidationError("先做一次握手测试，再打开终端");
+        const ok = openTerminal(cmd, await loginShellEnv());
+        return json({ ok, command: cmd, error: ok ? null : "这台电脑上找不到终端程序，请复制命令到终端运行" });
+      }
       if (id && sub === "options" && method === "GET") {
         if (id === "custom") return json({ configOptions: [], modes: null, error: null });
         const r = await harnessOptionsFor(

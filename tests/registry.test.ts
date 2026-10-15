@@ -178,6 +178,72 @@ describe("install from the registry (API)", () => {
     expect(probe.ok).toBe(true);
   }, 60_000);
 
+  test("API-key login (env_var): missing → saved masked in 团团 → injected → answers; terminal login is absolute", async () => {
+    await api("POST", "/api/registry/install/mock-key");
+    expect((await waitJob("reg:mock-key")).state).toBe("done");
+    type Probe = {
+      ok: boolean;
+      loggedIn: boolean | null;
+      needsKey: boolean;
+      secretEnv: Record<string, string>;
+      authMethods: {
+        id: string;
+        type: string;
+        vars: string[] | null;
+        missing: string[] | null;
+        command: string | null;
+      }[];
+    };
+    const p1 = (await api<Probe>("POST", "/api/harnesses/reg:mock-key/test")).data;
+    // session/new works without the key (like glm-acp-agent), so only needsKey says so
+    expect(p1).toMatchObject({ ok: true, needsKey: true });
+    const envM = p1.authMethods.find((m) => m.type === "env");
+    expect(envM).toMatchObject({ vars: ["MOCK_API_KEY"], missing: ["MOCK_API_KEY"] });
+    // terminal login: the managed binary by absolute path, with the registry env, plus its args
+    const term = p1.authMethods.find((m) => m.type === "terminal")?.command ?? "";
+    expect(term).toMatch(
+      /^env MOCK_AGENT_KEY_VAR=MOCK_API_KEY \/.+\/agents\/mock-key\/1\.\d\.0\/bin\/mock-acp --setup$/,
+    );
+    const run = Bun.spawnSync(["bash", "-c", term]);
+    expect(run.stdout.toString()).toContain("mock setup");
+
+    // without a key the first prompt fails with the agent's own message
+    const a = (await api<{ id: string }>("POST", "/api/agents", agentInput("KeyBot", { harness: "reg:mock-key" })))
+      .data;
+    const room = (await api<{ id: string }>("POST", "/api/rooms", { name: "key", agentIds: [a.id] })).data;
+    const say = async (content: string) => {
+      await api("POST", `/api/rooms/${room.id}/messages`, { senderName: "Andy", content });
+      await app.orchestrator.idle(room.id);
+      return (
+        await api<{ messages: { status: string; error?: string | null }[] }>("GET", `/api/rooms/${room.id}/messages`)
+      ).data.messages.at(-1);
+    };
+    const bad = await say("hi");
+    expect(bad?.status).toBe("error");
+    expect(bad?.error).toMatch(/No API key found.*MOCK_API_KEY/);
+
+    // save it: masked everywhere, never echoed back
+    const saved = (
+      await api<{ secretEnv: Record<string, string> }>("PUT", "/api/harnesses/reg:mock-key/env", {
+        values: { MOCK_API_KEY: "sk-mock-1234567890" },
+      })
+    ).data;
+    expect(saved.secretEnv).toEqual({ MOCK_API_KEY: "sk-••••7890" });
+    const list = await (await fetch(`http://localhost:${server.port}/api/harnesses`)).text();
+    expect(list).not.toContain("sk-mock-1234567890");
+    expect((await api<Probe>("POST", "/api/harnesses/reg:mock-key/test")).data).toMatchObject({
+      loggedIn: true,
+      needsKey: false,
+    });
+    expect((await say("hi again"))?.status).toBe("done");
+    // bad names are refused; clearing works
+    expect((await api("PUT", "/api/harnesses/reg:mock-key/env", { values: { "A B": "x" } })).status).toBe(400);
+    await api("PUT", "/api/harnesses/reg:mock-key/env", { values: { MOCK_API_KEY: null } });
+    expect((await api<Probe>("POST", "/api/harnesses/reg:mock-key/test")).data.needsKey).toBe(true);
+    // a terminal can only be opened for a command from the handshake
+    expect((await api("POST", "/api/harnesses/reg:mock-key/terminal", { methodId: "nope" })).status).toBe(400);
+  });
+
   test("unknown / unsupported entries are refused", async () => {
     expect((await api("POST", "/api/registry/install/nope")).status).toBe(404);
   });

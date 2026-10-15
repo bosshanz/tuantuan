@@ -344,6 +344,8 @@ export interface HarnessStatus {
   installers: InstallerStatus[];
   /** Extra env the registry entry asks for (managed installs). */
   env: Record<string, string>;
+  /** API keys saved for this harness in 团团, masked (filled in by the API, not by detection). */
+  secretEnv?: Record<string, string>;
   /** ACP registry: entry id, the version Tuantuan installed, the registry's current version. */
   registryId: string | null;
   managedVersion: string | null;

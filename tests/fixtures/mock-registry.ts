@@ -72,6 +72,25 @@ export function mockRegistry(opts: { version?: string; badSha?: boolean } = {}) 
               },
             },
             {
+              id: "mock-key",
+              name: "Mock 密钥",
+              version: v,
+              description: "needs an API key (test)",
+              authors: ["Tuantuan"],
+              license: "MIT",
+              distribution: {
+                binary: {
+                  [platformKey()]: {
+                    archive: `${base}/dl/mock-acp-${v}.tar.gz`,
+                    cmd: "./bin/mock-acp",
+                    args: [],
+                    env: { MOCK_AGENT_KEY_VAR: "MOCK_API_KEY" },
+                    sha256: sha(f.tgz),
+                  },
+                },
+              },
+            },
+            {
               id: "mock-npx",
               name: "Mock npx",
               version: v,

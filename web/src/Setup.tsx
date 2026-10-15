@@ -1,6 +1,7 @@
 import { Check, Copy, Download, ExternalLink, Loader2, PlugZap, RefreshCw, Square, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Agent, api, type HarnessStatus, type Meta } from "./api";
+import { HarnessAuth } from "./HarnessAuth";
 import { RegistryIcon, RegistrySection } from "./Registry";
 import { AgentAvatar } from "./ui";
 
@@ -16,7 +17,10 @@ interface TestResult {
     type: "agent" | "terminal" | "env";
     command: string | null;
     vars?: string[] | null;
+    missing?: string[] | null;
   }[];
+  needsKey?: boolean;
+  secretEnv?: Record<string, string>;
   /** null: couldn't tell (session/new failed for another reason, see sessionError). */
   loggedIn?: boolean | null;
   sessionError?: string | null;
@@ -168,20 +172,15 @@ export function SetupPage(props: {
                       {(h.updateAvailable || h.source === "managed") && <ManagedActions h={h} onChanged={changed} />}
                       <div className="harness-sub">登录：{h.auth}</div>
                       {h.path && h.login && <CopyLine label="登录" text={h.login} />}
-                      {t &&
-                        t !== "running" &&
-                        t.authMethods
-                          ?.filter((m) => m.type === "terminal" && m.command)
-                          .map((m) => <CopyLine key={m.id} label={m.name} text={m.command as string} />)}
-                      {t &&
-                        t !== "running" &&
-                        t.authMethods
-                          ?.filter((m) => m.type === "env" && m.vars?.length)
-                          .map((m) => (
-                            <div key={m.id} className="harness-sub">
-                              {m.name}：在 Agent 的「环境变量」里填 <code>{m.vars?.join("、")}</code>
-                            </div>
-                          ))}
+                      <HarnessAuth
+                        harnessId={h.id}
+                        methods={t && t !== "running" ? t.authMethods : undefined}
+                        secretEnv={t && t !== "running" ? (t.secretEnv ?? h.secretEnv) : h.secretEnv}
+                        onChanged={async () => {
+                          await refresh();
+                          await test(h.id);
+                        }}
+                      />
                       <PathOverride h={h} onSaved={setList} />
                     </div>
                     <div className="harness-side">
@@ -203,7 +202,13 @@ export function SetupPage(props: {
                         <div className={t.ok ? "ok-text harness-test" : "error-text harness-test"} role="status">
                           {t.ok
                             ? `ACP v${t.protocolVersion} · ${t.agentInfo?.title ?? t.agentInfo?.name ?? "已连接"} · ${
-                                t.loggedIn === true ? "已登录" : t.loggedIn === false ? "未登录" : "登录状态未知"
+                                t.needsKey
+                                  ? "需要 API Key"
+                                  : t.loggedIn === true
+                                    ? "已登录"
+                                    : t.loggedIn === false
+                                      ? "未登录"
+                                      : "登录状态未知"
                               }`
                             : t.error}
                         </div>

@@ -1255,3 +1255,13 @@ html[data-desktop] .main-head :is(button, a, input, select, textarea, [role]) { 
 @keyframes onb-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @media (max-width: 720px) { .onb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .onb-grid { border: 0; padding: 0; min-width: 0; }
+
+/* Harness sign-in: API keys + terminal logins */
+.hauth { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.hauth-key { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hauth-key .input { width: 220px; height: 28px; }
+.hauth-var { font-size: var(--fs-xs); }
+.hauth-term { display: flex; flex-direction: column; gap: 6px; }
+.hauth-msg { font-size: var(--fs-xs); }
+.msg-error .btn { margin-left: auto; }
+.need-key { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 10px; background: var(--surface); font-size: var(--fs-sm); max-width: 560px; }

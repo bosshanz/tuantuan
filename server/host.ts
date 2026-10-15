@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import type * as acp from "@agentclientprotocol/sdk";
 import { methods } from "@agentclientprotocol/sdk";
 import { AcpProcess, type TerminalSnapshot, withTimeout } from "./acp";
+import { harnessSecretEnv } from "./harness-secrets";
 import { claudeSettingsOverride, codexProviderSet, providerAsCustom, providerEnv, providerSupports } from "./providers";
 
 const CANCEL_GRACE_MS = Number(process.env.TUANTUAN_CANCEL_GRACE_MS) || 4000;
@@ -145,6 +146,8 @@ export class HarnessHost {
     const env = harnessProcessEnv(base, mat.env, agent.env, spec, identity);
     // Registry entries may ask for env (e.g. a default model); the agent's own env still wins.
     for (const [k, v] of Object.entries(status.env)) if (!(k in agent.env)) env[k] = v;
+    // API keys saved for this harness in 团团 (Harness 页); the agent's own env still wins.
+    for (const [k, v] of Object.entries(harnessSecretEnv(this.store, spec.id))) if (!(k in agent.env)) env[k] = v;
     // 服务商: only this child process's env changes; ~/.claude / ~/.codex are never touched.
     const prov = agent.providerId ? this.store.getProvider(agent.providerId) : null;
     if (prov && providerSupports(prov, agent.harness)) {
@@ -467,6 +470,7 @@ export class HarnessHost {
       else signal.addEventListener("abort", go, { once: true });
     });
     abandoned.catch(() => {});
+    const stderrBefore = proc.acp.stderr;
     try {
       const res = await Promise.race([
         abandoned,
@@ -493,7 +497,7 @@ export class HarnessHost {
       return { stopReason: res.stopReason };
     } catch (e) {
       if (signal.aborted) throw signal.reason ?? e;
-      throw harnessError(proc, e);
+      throw harnessError(proc, e, stderrBefore);
     } finally {
       clearTimeout(graceTimer);
       signal.removeEventListener("abort", onAbort);
@@ -709,10 +713,24 @@ function identityMeta(spec: HarnessSpec, identity: string): Record<string, unkno
   return undefined;
 }
 
-function harnessError(proc: Proc, e: unknown): Error {
-  const msg = (e as { message?: string }).message ?? JSON.stringify(e);
+function harnessError(proc: Proc, e: unknown, stderrBefore = ""): Error {
+  let msg = (e as { message?: string }).message ?? JSON.stringify(e);
+  // JSON-RPC errors often say just "Internal error": add the details and what the harness printed
+  // on stderr during this turn (e.g. glm-acp-agent's "No API key found. Set the Z_AI_API_KEY …").
+  const data = (e as { data?: unknown }).data;
+  const detail =
+    typeof data === "string" ? data : (data as { details?: string; message?: string } | undefined)?.details;
+  if (detail && !msg.includes(detail)) msg = `${msg}：${detail}`;
+  const now = proc.acp.stderr;
+  const fresh = (now.startsWith(stderrBefore) ? now.slice(stderrBefore.length) : now).trim();
+  const errLines = fresh
+    .split("\n")
+    .filter((l) => /error|api[ _-]?key|denied|unauthori[sz]ed|forbidden|invalid/i.test(l))
+    .slice(-3)
+    .join("\n");
+  if (!detail && errLines && !msg.includes(errLines)) msg = `${msg}\n${errLines.slice(-600)}`;
   if (/auth/i.test(msg)) return new ValidationError(`${proc.spec.name} 需要登录：${proc.spec.auth}`, 401);
-  return e instanceof Error ? e : new Error(msg);
+  return e instanceof Error && e.message === msg ? e : new Error(msg);
 }
 
 /** Codex advertises skills as available_commands whose names start with "$". */

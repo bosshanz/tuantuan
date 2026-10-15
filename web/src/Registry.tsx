@@ -1,6 +1,7 @@
 import { Check, Download, ExternalLink, FlaskConical, Loader2, PlugZap, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
+import { type AuthMethodView, HarnessAuth } from "./HarnessAuth";
 
 export interface RegistryItem {
   id: string;
@@ -184,7 +185,11 @@ function RegistryCard({
   onChanged: () => Promise<void>;
 }) {
   const [job, setJob] = useState<Job | null>(null);
-  const [test, setTest] = useState<{ ok: boolean; text: string } | "running" | null>(null);
+  const [test, setTest] = useState<
+    | { ok: boolean; text: string; methods?: AuthMethodView[]; secretEnv?: Record<string, string>; needsKey?: boolean }
+    | "running"
+    | null
+  >(null);
   const [err, setErr] = useState<string | null>(null);
   const hid = encodeURIComponent(a.harnessId);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -225,8 +230,10 @@ function RegistryCard({
       error?: string;
       protocolVersion?: number;
       agentInfo?: { name: string; title?: string; version: string };
-      authMethods?: { name: string; type: string; vars?: string[] | null }[];
+      authMethods?: AuthMethodView[];
       loggedIn?: boolean | null;
+      needsKey?: boolean;
+      secretEnv?: Record<string, string>;
     };
     const r = await api<Probe>("POST", `/api/harnesses/${hid}/test`).catch(
       (e): Probe => ({ ok: false, error: (e as Error).message }),
@@ -239,8 +246,11 @@ function RegistryCard({
         ? {
             ok: true,
             text: `ACP v${r.protocolVersion} · ${r.agentInfo?.title ?? r.agentInfo?.name ?? "已连接"} · ${
-              r.loggedIn ? "可以用了" : r.loggedIn === false ? "需要登录" : "已连接"
+              r.needsKey ? "需要 API Key" : r.loggedIn ? "可以用了" : r.loggedIn === false ? "需要登录" : "已连接"
             }${auth}`,
+            methods: r.authMethods,
+            secretEnv: r.secretEnv,
+            needsKey: r.needsKey,
           }
         : { ok: false, text: r.error ?? "握手失败" },
     );
@@ -339,9 +349,12 @@ function RegistryCard({
       {job?.state === "error" && <div className="error-text harness-sub">安装失败：{job.error}</div>}
       {err && <div className="error-text harness-sub">{err}</div>}
       {test && test !== "running" && (
-        <div className={test.ok ? "ok-text harness-sub" : "error-text harness-sub"} role="status">
+        <div className={test.ok && !test.needsKey ? "ok-text harness-sub" : "error-text harness-sub"} role="status">
           {test.text}
         </div>
+      )}
+      {test && test !== "running" && test.ok && hid && (
+        <HarnessAuth harnessId={a.harnessId} methods={test.methods} secretEnv={test.secretEnv} onChanged={probe} />
       )}
     </article>
   );

@@ -33,6 +33,7 @@ import { agentActivity, messageExpression } from "./avatarState";
 import { SessionChips } from "./ConfigChips";
 import type { Opt } from "./config";
 import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
+import { MissingKey } from "./HarnessAuth";
 import { mergeMessages, upsertMessage } from "./messageMerge";
 import { usePresence } from "./motion";
 import { PickList } from "./PickList";
@@ -343,6 +344,7 @@ export function ChatView(props: {
                     mentionNames={mentionNames}
                     selected={selected === m.id && panel}
                     onDetails={() => openDetails(m.id)}
+                    harnessId={agentById.get(m.senderId ?? "")?.harness}
                   />
                 ))}
               </div>
@@ -501,6 +503,7 @@ function MessageItem(props: {
   mentionNames: string[];
   selected: boolean;
   onDetails: () => void;
+  harnessId?: string;
 }) {
   const { m } = props;
   const streaming = m.status === "streaming";
@@ -553,6 +556,7 @@ function MessageItem(props: {
           <span>{m.error ?? "回复失败"}</span>
         </div>
       )}
+      {m.status === "error" && m.error && <MissingKey harnessId={props.harnessId} error={m.error} />}
       {m.status === "interrupted" && (
         <div className="msg-error">
           <AlertTriangle size={14} />

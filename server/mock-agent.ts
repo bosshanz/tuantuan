@@ -197,6 +197,13 @@ async function callTool(s: Sess, name: string, args: Record<string, unknown>): P
 
 const authFile = process.env.MOCK_AGENT_AUTH_FILE;
 const needsAuth = () => !!authFile && !existsSync(authFile);
+// MOCK_AGENT_KEY_VAR=NAME: like glm-acp-agent — an API-key (env_var) login plus a terminal
+// `--setup`; sessions open without it, prompts fail with "No API key found".
+const keyVar = process.env.MOCK_AGENT_KEY_VAR;
+if (keyVar && process.argv.includes("--setup")) {
+  console.log("mock setup: 在这里输入 Key（测试）");
+  process.exit(0);
+}
 
 const input = new WritableStream<Uint8Array>({
   write(chunk) {
@@ -221,7 +228,14 @@ acp
       mcpCapabilities: { http: process.env.MOCK_AGENT_MCP_HTTP === "1" },
       sessionCapabilities: { list: {}, resume: {} },
     },
-    authMethods: authFile ? [{ id: "mock-login", name: "Mock 登录", description: "立即登录（测试用）" }] : [],
+    authMethods: keyVar
+      ? ([
+          { id: "mock-key", name: "Mock API Key", type: "env_var", vars: [{ name: keyVar }] },
+          { id: "mock-setup", name: "Mock 设置", type: "terminal", args: ["--setup"] },
+        ] as unknown as acp.AuthMethod[])
+      : authFile
+        ? [{ id: "mock-login", name: "Mock 登录", description: "立即登录（测试用）" }]
+        : [],
   }))
   .onRequest(acp.methods.agent.authenticate, async (ctx) => {
     if (ctx.params.methodId !== "mock-login") throw acp.RequestError.invalidParams(ctx.params.methodId);
@@ -269,6 +283,12 @@ acp
     sessions.get(ctx.params.sessionId)?.abort?.abort();
   })
   .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
+    if (keyVar && !process.env[keyVar]) {
+      console.error(
+        `[error] No API key found. Set the ${keyVar} environment variable, or run mock-acp --setup to store one.`,
+      );
+      throw acp.RequestError.internalError(undefined, `No API key found. Set the ${keyVar} environment variable.`);
+    }
     const { sessionId } = ctx.params;
     const s = sessions.get(sessionId);
     if (!s) throw acp.RequestError.resourceNotFound(sessionId);

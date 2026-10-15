@@ -92,6 +92,8 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 - 一键安装只在点按钮后执行，装到团团自己的目录（`<数据目录>/harnesses/agents/<id>/<版本>`，可用 `TUANTUAN_HARNESS_DIR` 改），固定版本，不用 sudo，不装全局：npx 包用团团自带的 Bun 安装运行；需要 Node ≥ 22 的（如 MiniMax Code）自动下载团团专用的 Node 22（校验 SHASUMS256）；uvx 包用你的 uv，没有就下载一份；二进制包按平台下载，带 sha256 时校验。
 - Registry 版本变了显示「更新到 x」；可卸载团团装的版本。你自己装的版本始终优先（`TUANTUAN_PREFER_MANAGED=1` 反过来）。
 - 装好的 Agent 可在新建 Agent 时选择；「握手」会显示它支持的登录方式（Harness 自带登录、终端命令、环境变量）。
+- **API Key 登录**：Agent 通过 ACP 声明 `env_var` 登录方式（如 glm-acp-agent 的 `Z_AI_API_KEY`）时，握手结果里直接出现输入框：Key 保存在团团的数据库里（和服务商 Key 一样只在服务端、打码显示），只注入这个 Harness 的进程环境（Agent 自己的环境变量优先），保存后自动重新握手，可修改、清除。回复因为缺 Key 失败时，会话里显示「需要 API Key」并可当场填写。
+- **终端登录**：终端类登录方式（ACP `terminal`，或说明里写着 `xxx --setup` 的）提供「在终端中打开」：用团团安装的绝对路径和运行时（如 `…/bun …/dist/index.js --setup`）打开 macOS「终端」（osascript）或 Linux 的终端程序；同时总有一行可复制的完整命令。团团不把它装进 PATH。
 - 实验性：ZCode（社区桥接 `zcode-acp-server`，不在官方 Registry 里）。
 - `TUANTUAN_REGISTRY_URL` 换 Registry 地址，`TUANTUAN_REGISTRY_OFFLINE=1` 不联网。
 
