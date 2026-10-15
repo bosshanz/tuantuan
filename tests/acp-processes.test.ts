@@ -71,6 +71,24 @@ test.skipIf(process.platform === "win32")("ACP kill also stops descendants that 
 });
 
 test.skipIf(process.platform === "win32")(
+  "ACP kill is idempotent and still allows explicit KILL escalation",
+  async () => {
+    const ready = join(root, "idempotent-ready");
+    const marker = join(root, "idempotent-marker");
+    const p = launch([script, "child", ready, marker]);
+    await childReady(ready);
+    p.kill();
+    expect(() => p.kill()).not.toThrow();
+    await Bun.sleep(50);
+    expect(alive(p.proc.pid)).toBe(true);
+    p.kill("SIGKILL");
+    await p.exited;
+    expect(p.proc.signalCode).toBe("SIGKILL");
+    expect(() => p.kill("SIGKILL")).not.toThrow();
+  },
+);
+
+test.skipIf(process.platform === "win32")(
   "terminal release and ACP shutdown reclaim terminal descendants",
   async () => {
     type Terminals = {

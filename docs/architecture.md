@@ -10,7 +10,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `server/main.ts` | 打开数据库，按本机监听地址启动服务；退出时关闭 Harness、安装任务与项目终端，桌面父进程看门狗 |
+| `server/main.ts` | 打开数据库，按本机监听地址启动服务；退出时先停止调度，再关闭 Harness、安装任务与项目终端，桌面父进程看门狗 |
 | `server/project-terminal.ts` / `shared/project-terminal.ts` | 项目交互式终端：Bun PTY、每项目一个 shell、输入 / 尺寸校验、有界输出重放、退出与进程清理；独立于 ACP 工具终端 |
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件；HTTP / WS 共用 Host、Origin 与跨站请求检查 |
 | `server/harness.ts` | Harness 定义（常用 6 个 + mock，及 `reg:<id>` 形式的任意 Registry Agent）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖、来源判定 |
@@ -28,10 +28,10 @@
 | `web/src/brands.ts` | 模型 id → 厂商（含 `openrouter/…`、`anthropic/…` 前缀），未知一律中性图标；Logo 来自 @lobehub/icons（MIT） |
 | `server/usage.ts` | 用量：读 `~/.claude/projects` / `~/.codex/sessions` 的 JSONL，解析 Claude Code `/usage`、Codex `/status`、Grok CLI 会话用量及 ACP billing 额度；未知值保留为空 |
 | `server/dirpicker.ts` | 选择文件夹：系统对话框（osascript / zenity / kdialog，可由桌面壳替换）+ 应用内浏览器的目录列表与常用位置 |
-| `server/host.ts` | `HarnessHost`：按「Agent + 会话工作目录」复用进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；权限请求挂起直到用户回答 |
+| `server/host.ts` | `HarnessHost`：按「房间 + Agent + 工作目录」隔离进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；同房间同 Agent 防重入，权限请求挂起直到用户回答 |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
 | `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
-| `server/orchestrator.ts` | 房间队列、触发（单 Agent / @ / @所有人 / 主 Agent）、单个 Agent 回合（拼 prompt + 身份文档 → host.prompt → 推送 update → 持久化时间线）、取消 |
+| `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；触发（单 Agent / @ / @所有人 / 主 Agent）、单个 Agent 回合（拼 prompt + 身份文档 → host.prompt → 推送 update → 持久化时间线）、交接预算与定向取消 |
 | `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
 | `server/store.ts` | SQLite 迁移与读写 |
 | `web/src/Harness.tsx` | 时间线渲染（工具卡片、diff、终端、计划）、权限弹窗、会话栏 |
@@ -42,7 +42,7 @@
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
 | `shared/roomPreview.ts` / `web/src/roomListState.ts` | 列表快照和全局 `room.preview` 共用摘要规则；按消息 seq 与状态防回退，列表加载期间重放全局事件，重连刷新 |
-| `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，刷新重连同一项目 shell，浅深色和窄屏停靠布局 |
+| `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，刷新重连同一项目 shell；只在显式打开且用户尚未选择其他焦点时聚焦，正常退出状态不被迟到的 PTY 错误覆盖 |
 | `web/src/messageMerge.ts` | 历史快照与实时消息按 id 合并，保留完成态 / 较长流式文本；发送接口返回的消息立即插入 |
 | `web/src/motion.ts` | `usePresence`（退场动画期间保持挂载）、`withViewTransition`（路由切换） |
 | `web/src/BrandMark.tsx` | 团团 Logo（导航栏，眨眼 + 悬停互看）；favicon 在 `web/public/` |
@@ -55,11 +55,14 @@
 | --- | --- | --- |
 | Agent（Harness、env、权限策略、身份文档、MCP 服务器）、项目（名称、目录）、房间/会话（所属项目、主 Agent）、消息（含时间线 JSON）、ACP 会话映射、会话配置偏好（`room_config`，含模型）、设置（Harness 路径覆盖、`onboarded`） | SQLite（`Store`） | 唯一权威来源 |
 | Harness 进程、挂起的权限请求、终端输出 | `HarnessHost` 内存 | 进程退出即丢失；重启后用 `acp_sessions` 里的 sessionId resume / load |
+| 待执行 / 活动任务、交接父子关系、每条人类消息的交接预算 | `Orchestrator` 内存 | taskId 标识单个任务，runId 关联原始人类消息，parentTaskId 只表示实际交接依赖；房间下每个 Agent 一个 FIFO。整轮无剩余任务后清理；服务重启不重放队列，无数据库迁移 |
 | ACP session 自身的对话历史 | Harness；当前 slot 暂存 load 回放 | `/replay` 按用户消息文本去掉本房间已有轮次，前端只读显示其余回放 |
 | 团团配置的 API / 管理 Key | SQLite（`providers.api_key` / `mgmt_key`、`agents.custom`、`settings.harnessEnv`） | 当前明文存储；服务商、BYOK 与 Harness env_var 专用公开接口返回掩码，不是磁盘加密。普通 `agents.env` 是可读写配置，不具备这些专用接口的打码契约 |
 | 原生登录凭据、模型配置 | Harness | 沿用用户 Harness 的配置与登录态；系统钥匙串集成仍未实现 |
 | 前端消息、运行状态、会话视图、权限与终端投影 | `ChatView` 的 `chatReducer` | roomId 隔离；App 按 room.id 重挂载；非权威副本，最新快照与请求期间实时事件合并，旧响应忽略 |
 | 权限提交中的状态 / 错误 | `ChatView` | 按 askId 防重复；成功或 404 关闭，其余错误保留 ask 并显示可重试错误，WS 解决事件同样可关闭 |
+| 停止任务请求中的状态 / 错误 | `ChatView` | 按 taskId 防重复、失败可重试；任务列表只由服务端 RoomState 更新，HTTP 确认不会覆盖实时任务状态 |
+| 终端面板开合、高度与焦点意图 | `ChatView` | 外层网格裁切连续改变占位，内部 xterm 保持实际尺寸，避免动效逐帧触发 PTY resize；首次加载与结束共用外层，隐藏立即 inert，结束后在退场完成时卸载。减少动态效果直接切换，拖动高度立即响应 |
 
 迁移按 `PRAGMA user_version` 顺序执行，只追加：
 
@@ -91,18 +94,24 @@ Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建�
 
 群聊引用由 `POST messages` 的 `replyToId` 指定；`Store.insertMessage` 在写入事务中校验同房间及完成态，再生成最多 400 字符的快照。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
 
-1. 人类消息写库并入房间队列，每个房间同时只执行一条链，不同房间并行。
-2. 触发：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 主 Agent。串行执行。
-3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session；多 Agent prompt = 该 Agent 上次发言之后的会话记录（带发言者），单 Agent = 用户消息（含图片）。身份文档按 Harness 传递（见 README）；不支持的 Harness 附加在会话第一条 prompt 前的 `<tuantuan-identity>` 中。
-4. `session/update` 实时以 `update` 事件推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。
-5. 取消：prompt 先检查 AbortSignal；会话初始化等待可被取消，取消后不发送 prompt，共享预热可继续供后续请求复用。已发出的 prompt 先发 `session/cancel`、解决挂起权限；默认 4 秒仍未返回则销毁对应 Harness 与 ACP 终端进程组，移除关联内存 slot，保留已生成部分并标为 `cancelled`。共用进程的其他会话同样受影响，下次按持久化映射与 Harness 能力重建 / 恢复。
-6. 交接：回合进行时，Agent 调用 `handoff` 把目标记到本回合（校验是会话成员、不是自己）；回合正常结束后按顺序入队（去重、`@所有人` 轮次不重复），`hop + 1`，接手方 prompt 末尾附 `<tuantuan-handoff from="…">task</tuantuan-handoff>`。时间线记录 `handoffs` / `handoffFrom`，界面显示交接卡片。超过 5 次交接停止。会话新消息打断当前链。
-7. 初始化去重与失效：同一房间 / Agent 的 opening 按配置签名复用并记录代次；发布 session 前再次核对签名与代次。Agent 设置、项目目录或会话选择变更，以及停机时使旧 opening 失效，旧结果不能回写映射或 slot；相关旧请求返回 409，下一次请求按当前配置重试。失败清理只移除该请求仍拥有的 slot，不删除后来加载同一 ACP sessionId 的新映射。
-8. session/load 回放：`switchSession` 指定历史会话时优先 load，回放的 update 存在 slot 里，`/replay` 接口按用户消息文本去掉本房间已有的轮次后返回，前端只读显示。
+1. 人类消息写库后立即路由成独立的根任务：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 主 Agent。同一房间不同 Agent 并行，同一 Agent 按入队顺序执行；新消息不取消旧任务，不同房间互不阻塞。
+2. `RoomState.tasks` 提供 taskId、runId、parentTaskId、agentId、messageId、请求文本与 queued / running / cancelling / waiting 状态。已完成但仍有活动后代的任务显示为 waiting，保留停止剩余交接的入口。`activeRunId` 仅保留为兼容的忙碌标志，`queued` 计数任务；界面不从单个 runId 推断全部运行状态。`idle(roomId)` 等到队列及衍生交接全部结束。
+3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session。群聊转述只取原始请求之前、该 Agent 上次发言之后的记录；交接额外带上同一人类请求中已完成的回复。prompt 末尾的 `<tuantuan-task>` 明确原始消息与引用，避免新消息或后续发言替换排队任务。单 Agent 直接收到用户消息（含图片）。身份文档按 Harness 传递（见 README）；不支持的 Harness 附加在会话第一条 prompt 前的 `<tuantuan-identity>` 中。
+4. `session/update` 按 messageId 实时推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。取消或删除后的迟到更新不能继续写入回复。
+5. `POST /api/rooms/:id/cancel {taskId}` 只取消该任务及 parentTaskId 可追溯的后代，保留独立根任务和兄弟任务。排队任务直接移除；运行任务变为 cancelling，待 Harness 结束才放行同一 Agent 下一项。群聊缺 taskId 返回 400；DM 空请求兼容为停止当前任务，保留后续队列。删除房间、修改项目目录 / 归属或停机使用 `cancelAll`；移除 Agent 使用 `cancelAgent`，只传播到其交接后代。
+6. Host 取消：prompt 先检查 AbortSignal；初始化等待可被取消，取消后不发送 prompt，同一 slot 的预热可供后续请求复用。已发出的 prompt 先发 `session/cancel`、解决挂起权限；默认 4 秒仍未返回则销毁该「房间 + Agent」的 Harness 与 ACP 终端进程组，保留部分回复并标为 cancelled，其他房间和 Agent 继续执行。同一 room / Agent 的重入 prompt 与活动期间切换历史会话返回 409。
+7. 交接：运行中的 Agent 调用 `handoff`，校验其他成员，并同步预占该人类消息共享的最多 5 次交接预算；来源正常结束后才创建子任务。相同轮次已有排队 / 运行任务或预占的目标去重，`@所有人` 每成员只触发一次；不跨独立人类消息去重。失败或取消释放未派发预算，不产生后代。接手方按自己的 FIFO 排队，prompt 附 `<tuantuan-handoff from="…">task</tuantuan-handoff>`；时间线保留 `handoffs` / `handoffFrom`。这定义任务依赖，不规定 Agent 的角色或固定上下级。
+8. 初始化去重与失效：同一房间 / Agent 的 opening 按配置签名复用并记录代次；发布 session 前再次核对签名与代次。Agent 设置、项目目录或会话选择变更，以及停机时使旧 opening 失效，旧结果不能回写映射或 slot；相关旧请求返回 409，下一次请求按当前配置重试。失败或切换清理只移除该请求仍拥有的 slot，不删除其他房间相同 ACP sessionId 的映射。
+9. session/load 回放：`switchSession` 指定历史会话时优先 load，回放的 update 存在 slot 里，`/replay` 接口按用户消息文本去掉本房间已有的轮次后返回，前端只读显示。刷新读取当前任务快照并重放期间的 WS 事件；服务重启不重放未开始的任务，已开始但未完成的回复沿用 interrupted 恢复规则。
+
+交接请求的归属在 MCP HTTP 入口读取正文之前绑定到 taskId，整个 batch 使用同一上下文；BYOK 工具回调在 prompt 开始时捕获。真正执行交接时核对仍是同一个未取消任务，避免旧请求延迟解析后归到下一轮。MCP endpoint 仍按房间 / Agent 注入并供 session 复用；完全在旧 prompt 结束后才新发起、且不携带轮次标识的外部调用无法区分来源，依赖 Harness 遵守 prompt 生命周期。
+
+资源随归属释放：删除会话 / 项目 / Agent、移除成员或变更项目目录 / 归属时，先取消对应任务，再由 `HarnessHost.releaseRoom` 清理对应 opening、slot、权限、BYOK 历史及进程；旧初始化结果不能重新挂回。普通任务停止保留可复用会话，进程仅在取消超时才强制回收。
 
 ## 取舍
 
-- **每个 Agent 一个进程**：会话隔离清楚、可分别设置 env 和 cwd；代价是内存。同一 Agent 在不同会话（不同工作目录）会各开一个进程。
+- **每个房间的每个 Agent 一个进程**：即使工作目录相同也不跨房间共享，避免取消超时强杀误伤；代价是更多进程与内存，原有持久化会话恢复保持。
+- **并行不隔离项目文件**：Agent 仍使用该项目目录，未自动分配 worktree 或给文件写入加全局锁；用户按任务需要划分文件职责。调度只定义排队与停止范围，不限制自定义 Agent 行为。
 - **身份文档不落盘**：不改用户仓库；拒绝了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 方案，因为它们会把登录态也换掉，每个 Agent 要各自登录。
 - **文件路径校验不等于沙箱**：ACP 文件接口将目标及现存父目录解析为真实路径，拒绝目录外目标和符号链接逃逸。终端仅校验初始 cwd；命令可使用绝对路径或自行切换目录，Harness 内置工具也按自身沙箱与权限运行。旧文档将这些都称为「限制在 cwd」过宽；当前不提供操作系统隔离，也不防御路径校验后发生的并发文件系统替换。
 - **未做鉴权 / 多用户**：仅适合本机。

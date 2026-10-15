@@ -56,6 +56,8 @@ export interface HostEvents {
 
 interface Proc {
   key: string;
+  roomId: string;
+  agentId: string;
   signature: string;
   acp: AcpProcess;
   spec: HarnessSpec;
@@ -83,7 +85,7 @@ interface SessionSlot {
 }
 
 /**
- * Owns harness processes (one per agent + working directory) and the ACP sessions inside them.
+ * Owns harness processes (one per room + agent + working directory) and their ACP sessions.
  * Rooms map to sessions through the acp_sessions table so conversations survive restarts when the
  * harness can resume or load them.
  */
@@ -103,6 +105,8 @@ export class HarnessHost {
   private wantLoad = new Set<string>();
   /** In-process BYOK chat history per (room, agent). */
   private customHistory = new Map<string, Item[]>();
+  /** Includes session warm-up: concurrent callers must never replace another turn's callback. */
+  private activeTurns = new Set<string>();
 
   constructor(
     private store: Store,
@@ -142,8 +146,14 @@ export class HarnessHost {
     return true;
   }
 
-  /** Starts (or reuses) the harness process for this agent and working directory. */
-  private async proc(agent: Agent, cwd: string, identity: string, assertCurrent: () => void): Promise<Proc> {
+  /** A cancellation escalation can only terminate the process owned by this room and agent. */
+  private async proc(
+    roomId: string,
+    agent: Agent,
+    cwd: string,
+    identity: string,
+    assertCurrent: () => void,
+  ): Promise<Proc> {
     const spec = harnessSpec(agent.harness);
     if (!spec) throw new ValidationError(`「${agent.name}」还没有绑定 Harness，请在 Agent 设置或新手引导里选择`);
     const overrides = this.store.getSetting<Record<string, string>>("harnessPaths", {});
@@ -172,7 +182,7 @@ export class HarnessHost {
       for (const k of pe.unset) delete env[k];
       Object.assign(env, pe.set);
     }
-    const key = `${agent.id}|${cwd}`;
+    const key = `${roomId}|${agent.id}|${cwd}`;
     const signature = JSON.stringify([
       status.command,
       status.args,
@@ -187,6 +197,8 @@ export class HarnessHost {
 
     const proc: Proc = {
       key,
+      roomId,
+      agentId: agent.id,
       signature,
       spec,
       sessions: new Map(),
@@ -328,6 +340,9 @@ export class HarnessHost {
     this.opening.set(key, { signature, generation, harness: agent.harness, pending });
     try {
       return await pending;
+    } catch (error) {
+      assertCurrent();
+      throw error;
     } finally {
       if (this.opening.get(key)?.generation === generation) this.opening.delete(key);
     }
@@ -340,7 +355,7 @@ export class HarnessHost {
     assertCurrent: () => void,
   ): Promise<{ proc: Proc; slot: SessionSlot }> {
     const cwd = this.cwdFor(room, agent);
-    const proc = await this.proc(agent, cwd, identity, assertCurrent);
+    const proc = await this.proc(room.id, agent, cwd, identity, assertCurrent);
     const init = await proc.ready;
     assertCurrent();
     const slotKey = `${room.id}|${agent.id}`;
@@ -524,7 +539,27 @@ export class HarnessHost {
     signal: AbortSignal,
   ): Promise<{ stopReason: acp.StopReason }> {
     signal.throwIfAborted();
-    if (agent.harness === CUSTOM_HARNESS) return this.promptCustom(room, agent, identity, blocks, onUpdate, signal);
+    const key = `${room.id}|${agent.id}`;
+    if (this.activeTurns.has(key))
+      throw new ValidationError("这个 Agent 在当前会话中仍有任务正在运行，请稍后重试", 409);
+    this.activeTurns.add(key);
+    try {
+      return agent.harness === CUSTOM_HARNESS
+        ? await this.promptCustom(room, agent, identity, blocks, onUpdate, signal)
+        : await this.promptAcp(room, agent, identity, blocks, onUpdate, signal);
+    } finally {
+      this.activeTurns.delete(key);
+    }
+  }
+
+  private async promptAcp(
+    room: Room,
+    agent: Agent,
+    identity: string,
+    blocks: acp.ContentBlock[],
+    onUpdate: (u: acp.SessionUpdate) => void,
+    signal: AbortSignal,
+  ): Promise<{ stopReason: acp.StopReason }> {
     const { proc, slot } = await waitForSession(this.session(room, agent, identity), signal);
     signal.throwIfAborted();
     const sessionId = slot.view.sessionId as string;
@@ -547,7 +582,7 @@ export class HarnessHost {
       for (const [id, a] of this.asks)
         if (a.ask.roomId === room.id && a.ask.agentId === agent.id) this.answer(id, null);
       // An unresponsive harness must not keep executing or send old updates into the next turn.
-      // Other sessions sharing this process also stop and will resume on their next use.
+      // The process belongs to this room and agent, so other conversations keep running.
       graceTimer = setTimeout(() => {
         this.dropProc(proc, "SIGKILL");
         abandon(signal.reason ?? new DOMException("用户取消", "AbortError"));
@@ -673,6 +708,9 @@ export class HarnessHost {
     if (!saved) throw new ValidationError("请先在 Agent 设置里填写自定义 API 或选择服务商");
     const cfg = { ...saved, model: this.store.getRoomModel(room.id, agent.id) || saved.model };
     if (!cfg.apiKey) throw new ValidationError("请填写 API Key");
+    const provider = this.mcp?.provider;
+    const context = { roomId: room.id, agentId: agent.id };
+    const toolContext = provider?.captureContext(context) ?? context;
     this.ensureCustom(room, agent);
     const key = `${room.id}|${agent.id}`;
     let history = this.customHistory.get(key);
@@ -705,7 +743,7 @@ export class HarnessHost {
           },
         ]
       : [];
-    const tools = [...(this.mcp?.provider?.tools({ roomId: room.id, agentId: agent.id }) ?? []), ...skillTools];
+    const tools = [...(provider?.tools(toolContext) ?? []), ...skillTools];
     const skillIndex = mat.skills.map((s) => `- ${s.name}: ${s.description}`).join("\n");
     const system = identity + (skillIndex ? `\n\n可用 Skills（用 load_skill 加载正文）：\n${skillIndex}` : "");
     return runTurn({
@@ -715,6 +753,7 @@ export class HarnessHost {
       userText,
       tools,
       callTool: async (name, args) => {
+        signal.throwIfAborted();
         if (name === "load_skill")
           return loadSkillBody(
             this.dataDir,
@@ -723,8 +762,8 @@ export class HarnessHost {
             String(args.name ?? ""),
             pluginOverlay(this.dataDir, agent.id, CUSTOM_HARNESS).skills,
           );
-        if (!this.mcp?.provider) throw new Error("工具不可用");
-        return this.mcp.provider.call({ roomId: room.id, agentId: agent.id }, name, args);
+        if (!provider) throw new Error("工具不可用");
+        return provider.call(toolContext, name, args);
       },
       onUpdate,
       signal,
@@ -783,23 +822,42 @@ export class HarnessHost {
 
   /** Points this room at another harness session (from listSessions), or at a fresh one when null. */
   async switchSession(room: Room, agent: Agent, identity: string, sessionId: string | null) {
+    const slotKey = `${room.id}|${agent.id}`;
+    if (this.activeTurns.has(slotKey))
+      throw new ValidationError("这个 Agent 在当前会话中仍有任务正在运行，暂时不能切换会话", 409);
     if (agent.harness === CUSTOM_HARNESS) {
       if (sessionId) throw new ValidationError("自定义 API 没有会话列表");
       this.customHistory.delete(`${room.id}|${agent.id}`); // 新会话：忘掉之前的对话
       return this.ensureCustom(room, agent).view;
     }
-    const slotKey = `${room.id}|${agent.id}`;
     this.opening.delete(slotKey);
     const old = this.slots.get(slotKey);
     if (old) {
       this.slots.delete(slotKey);
-      for (const p of this.procs.values()) if (old.view.sessionId) p.sessions.delete(old.view.sessionId);
+      for (const p of this.procs.values())
+        if (old.view.sessionId && p.sessions.get(old.view.sessionId) === old) p.sessions.delete(old.view.sessionId);
     }
     if (sessionId) {
       this.store.setAcpSession(room.id, agent.id, agent.harness, sessionId);
       this.wantLoad.add(slotKey);
     } else this.store.clearAcpSession(room.id, agent.id);
     return (await this.session(room, agent, identity)).slot.view;
+  }
+
+  /** Release a room's harness resources, optionally only for a removed Agent. */
+  releaseRoom(roomId: string, agentId?: string) {
+    const matches = (owner: { roomId: string; agentId: string }) =>
+      owner.roomId === roomId && (agentId === undefined || owner.agentId === agentId);
+    const matchesKey = (key: string) =>
+      agentId === undefined ? key.startsWith(`${roomId}|`) : key === `${roomId}|${agentId}`;
+    // Invalidate warm-ups before killing their processes; late completions must not reattach.
+    for (const key of this.opening.keys()) if (matchesKey(key)) this.opening.delete(key);
+    for (const key of this.wantLoad) if (matchesKey(key)) this.wantLoad.delete(key);
+    for (const key of this.customHistory.keys()) if (matchesKey(key)) this.customHistory.delete(key);
+    for (const [key, slot] of this.slots) if (matches(slot)) this.slots.delete(key);
+    for (const [id, pending] of this.asks) if (matches(pending.ask)) this.answer(id, null);
+    for (const proc of [...this.procs.values()]) if (matches(proc)) this.dropProc(proc);
+    // Active prompt guards are released by their own finally blocks after cancellation settles.
   }
 
   /** Stop every process of one harness (before uninstalling it). */

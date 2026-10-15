@@ -22,6 +22,7 @@ let stopping = false;
 const stop = async () => {
   if (stopping) return;
   stopping = true;
+  app.orchestrator.shutdown();
   app.host.shutdown();
   app.installer.shutdown();
   await app.projectTerminals.shutdown();

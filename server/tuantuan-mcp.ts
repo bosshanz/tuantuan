@@ -13,6 +13,8 @@ import type * as acp from "@agentclientprotocol/sdk";
 export interface ToolCtx {
   roomId: string;
   agentId: string;
+  /** Bound at request entry; null records that no task owned the request. */
+  taskId?: string | null;
 }
 
 export interface ToolDef {
@@ -22,6 +24,7 @@ export interface ToolDef {
 }
 
 export interface ToolProvider {
+  captureContext(ctx: ToolCtx): ToolCtx;
   tools(ctx: ToolCtx): ToolDef[];
   call(ctx: ToolCtx, name: string, args: Record<string, unknown>): Promise<string>;
 }
@@ -67,6 +70,9 @@ export class TuantuanMcp {
     if (!ctx) return new Response("unknown MCP endpoint", { status: 404 });
     if (req.method === "DELETE") return new Response(null, { status: 204 });
     if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { Allow: "POST" } });
+    // The body can arrive after cancellation and another turn has started on the same session.
+    // Capture before the first await; every item in a JSON-RPC batch keeps this owner.
+    const capturedCtx = this.provider?.captureContext(ctx) ?? { ...ctx, taskId: null };
     let body: Rpc | Rpc[];
     try {
       body = await req.json();
@@ -76,7 +82,7 @@ export class TuantuanMcp {
     const batch = Array.isArray(body) ? body : [body];
     const out: unknown[] = [];
     for (const m of batch) {
-      const r = await this.rpc(ctx, m);
+      const r = await this.rpc(capturedCtx, m);
       if (r) out.push(r);
     }
     if (out.length === 0) return new Response(null, { status: 202 });

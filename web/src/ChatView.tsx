@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleSlash,
-  CircleStop,
   History,
   PanelRight,
   Plus,
@@ -18,6 +17,7 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import { canQuoteMessage, type MessageQuote, messageQuote } from "../../shared/messageQuote";
 import "./messageQuote.css";
+import "./chatTasks.css";
 import type { ReplayTurn, Timeline } from "../../shared/timeline";
 import {
   type Agent,
@@ -26,6 +26,7 @@ import {
   type Message,
   type Project,
   type Room,
+  type RoomState,
   type SessionView,
   type TerminalSnapshot,
   type WsEvent,
@@ -36,8 +37,9 @@ import { type ChatSnapshot, chatReducer, emptyChat } from "./chatState";
 import type { Opt } from "./config";
 import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
 import { MissingKey } from "./HarnessAuth";
-import { usePresence } from "./motion";
+import { reducedMotion, usePresence } from "./motion";
 import { PickList } from "./PickList";
+import type { TerminalFocusRequest } from "./ProjectTerminal";
 import { insertSkill, matchingSkills, skillTokenAt } from "./skillCompletion";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
 
@@ -82,6 +84,8 @@ export function ChatView(props: {
   const [{ messages, state, sessions, asks, terminals }, dispatch] = useReducer(chatReducer, room.id, emptyChat);
   const [answers, setAnswers] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingAnswers = useRef(new Set<string>());
+  const [cancellations, setCancellations] = useState<Record<string, { pending: boolean; error: string | null }>>({});
+  const pendingCancellations = useRef(new Set<string>());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [replay, setReplay] = useState<ReplayTurn[]>([]);
   const [draft, setDraft] = useState("");
@@ -95,17 +99,31 @@ export function ChatView(props: {
   const [panel, setPanel] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(() => terminalWasOpen(room.projectId));
   const [terminalMounted, setTerminalMounted] = useState(terminalOpen);
+  const [terminalHeight, setTerminalHeight] = useState(280);
+  const [terminalEpoch, setTerminalEpoch] = useState(0);
+  const [terminalFocusRequest, setTerminalFocusRequest] = useState<TerminalFocusRequest | null>(null);
+  const terminalEnding = useRef(false);
+  const terminalSlot = useRef<HTMLDivElement>(null);
   const terminalButton = useRef<HTMLButtonElement>(null);
   const showTerminal = useCallback(
     (open: boolean) => {
+      const list = listRef.current;
+      if (list) followBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 24;
       setTerminalOpen(open);
-      if (open) setTerminalMounted(true);
+      if (open) {
+        if (terminalEnding.current) {
+          terminalEnding.current = false;
+          setTerminalEpoch((value) => value + 1);
+        }
+        setTerminalMounted(true);
+        setTerminalFocusRequest({ origin: document.activeElement });
+      } else setTerminalFocusRequest(null);
       try {
         sessionStorage.setItem(`tuantuan.terminal.${room.projectId}`, open ? "open" : "closed");
       } catch {
         /* Private browsing may disable session storage. */
       }
-      if (!open) terminalButton.current?.focus();
+      if (!open && terminalSlot.current?.contains(document.activeElement)) terminalButton.current?.focus();
     },
     [room.projectId],
   );
@@ -122,11 +140,17 @@ export function ChatView(props: {
   }, [terminalOpen, props.project, showTerminal]);
   const panelPresence = usePresence(panel, 180);
   const listRef = useRef<HTMLDivElement>(null);
+  const opened = useRef(false);
+  const followBottom = useRef(true);
   // Content or size changes move the edges without a scroll event.
   useEffect(() => {
     const el = listRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => syncFades(el));
+    const ro = new ResizeObserver(() => {
+      // Resizing the terminal changes only the viewport. Keep a reader's scroll position, or follow the bottom.
+      if (opened.current && followBottom.current) el.scrollTop = el.scrollHeight;
+      syncFades(el);
+    });
     ro.observe(el);
     for (const c of el.children) ro.observe(c);
     const mo = new MutationObserver(() => syncFades(el));
@@ -210,7 +234,6 @@ export function ChatView(props: {
   }, [room.id, primaryId, primarySession]);
 
   // Open at the latest message; afterwards stick to the bottom only when the reader is already there.
-  const opened = useRef(false);
   useEffect(() => {
     const el = listRef.current;
     if (!el || messages.length === 0) return;
@@ -249,11 +272,25 @@ export function ChatView(props: {
     }
   };
 
-  const cancel = async () => {
+  const cancel = async (taskId: string) => {
+    if (pendingCancellations.current.has(taskId)) return;
+    pendingCancellations.current.add(taskId);
+    setCancellations((current) => ({ ...current, [taskId]: { pending: true, error: null } }));
     try {
-      await api("POST", `/api/rooms/${room.id}/cancel`);
+      await api<{ cancelled: boolean }>("POST", `/api/rooms/${room.id}/cancel`, { taskId });
+      // Task ownership stays with the room.state stream. A late HTTP acknowledgement must not restore old tasks.
+      setCancellations((current) => {
+        const next = { ...current };
+        delete next[taskId];
+        return next;
+      });
     } catch (e) {
-      setSendError(`取消失败：${(e as Error).message}`);
+      setCancellations((current) => ({
+        ...current,
+        [taskId]: { pending: false, error: `停止失败：${(e as Error).message}。请重试。` },
+      }));
+    } finally {
+      pendingCancellations.current.delete(taskId);
     }
   };
 
@@ -304,8 +341,8 @@ export function ChatView(props: {
   };
 
   const groups = groupMessages(messages);
-  const running = state.activeRunId !== null;
-  const replying = messages.findLast((m) => m.status === "streaming");
+  const tasks = state.tasks;
+  const stopTask = tasks.length === 1 ? tasks[0] : undefined;
   const selectedMsg = messages.find((m) => m.id === selected);
   const ask = asks[0];
 
@@ -374,8 +411,21 @@ export function ChatView(props: {
             <div
               className="messages"
               ref={listRef}
+              onWheel={() => {
+                followBottom.current = false;
+              }}
+              onTouchMove={() => {
+                followBottom.current = false;
+              }}
               onScroll={(e) => {
                 const el = e.currentTarget;
+                // Layout-driven scroll events may arrive a frame after the dock has resized again.
+                // Preserve the pre-toggle follow intent through the transition, unless the reader scrolls.
+                const movingDock = terminalSlot.current
+                  ?.getAnimations()
+                  .some((animation) => animation.playState === "running");
+                if (!followBottom.current || !movingDock)
+                  followBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
                 const wrap = el.parentElement;
                 if (!wrap) return;
                 wrap.toggleAttribute("data-scrolled", el.scrollTop > 4);
@@ -459,6 +509,7 @@ export function ChatView(props: {
           </div>
 
           <footer className="composer">
+            <TaskList tasks={tasks} cancellations={cancellations} onCancel={(id) => void cancel(id)} />
             {sendError && (
               <div className="error-text" role="alert" style={{ marginBottom: 6 }}>
                 {sendError}
@@ -472,7 +523,6 @@ export function ChatView(props: {
               onChange={setDraft}
               onSubmit={() => void send()}
               members={members.length > 1 ? members : []}
-              interrupts={members.length > 1 && running}
               placeholder={
                 primaryView?.commands.length || primaryView?.skills.length ? "发消息，/ 命令 · $ Skills…" : "发消息…"
               }
@@ -481,10 +531,10 @@ export function ChatView(props: {
               images={images}
               onImages={setImages}
               imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
-              running={running}
+              stopTask={stopTask}
+              stopPending={!!stopTask && (cancellations[stopTask.id]?.pending || stopTask.status === "cancelling")}
               queued={state.queued}
-              replyingName={replying?.senderName}
-              onStop={() => void cancel()}
+              onStop={() => stopTask && void cancel(stopTask.id)}
               modelPicker={<SessionChips members={members} sessions={sessions} onPick={pickOption} />}
               usage={primaryView && members.length === 1 ? <CtxUsage view={primaryView} /> : null}
             />
@@ -563,26 +613,59 @@ export function ChatView(props: {
           </>
         )}
       </div>
-      {terminalMounted && props.project && (
-        <Suspense
-          fallback={
-            terminalOpen ? (
-              <div className="terminal-loading" role="status">
-                正在打开终端…
-              </div>
-            ) : null
-          }
-        >
-          <ProjectTerminal
-            project={props.project}
-            visible={terminalOpen}
-            onHide={() => showTerminal(false)}
-            onEnded={() => {
-              showTerminal(false);
+      {props.project && (
+        <div
+          ref={terminalSlot}
+          className="terminal-slot"
+          data-open={terminalOpen || undefined}
+          inert={!terminalOpen}
+          aria-hidden={!terminalOpen}
+          onTransitionCancel={() => {
+            if (!terminalOpen && terminalEnding.current && (terminalSlot.current?.clientHeight ?? 0) === 0) {
+              terminalEnding.current = false;
               setTerminalMounted(false);
-            }}
-          />
-        </Suspense>
+            }
+          }}
+          onTransitionEnd={(event) => {
+            if (event.target !== event.currentTarget || event.propertyName !== "grid-template-rows") return;
+            if (!terminalOpen && terminalEnding.current) {
+              terminalEnding.current = false;
+              setTerminalMounted(false);
+            }
+          }}
+        >
+          <div className="terminal-clip">
+            <div className="terminal-slot-content" style={{ height: terminalHeight }}>
+              {terminalMounted && (
+                <Suspense
+                  fallback={
+                    <div className="terminal-loading" role="status">
+                      正在打开终端…
+                    </div>
+                  }
+                >
+                  <ProjectTerminal
+                    key={terminalEpoch}
+                    project={props.project}
+                    visible={terminalOpen}
+                    height={terminalHeight}
+                    onHeightChange={setTerminalHeight}
+                    focusRequest={terminalFocusRequest}
+                    onHide={() => showTerminal(false)}
+                    onEnded={() => {
+                      terminalEnding.current = true;
+                      showTerminal(false);
+                      if (reducedMotion() || (terminalSlot.current?.clientHeight ?? 0) === 0) {
+                        terminalEnding.current = false;
+                        setTerminalMounted(false);
+                      }
+                    }}
+                  />
+                </Suspense>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -723,6 +806,72 @@ function MessageItem(props: {
         </div>
       )}
     </div>
+  );
+}
+
+/** Room task state is shared by the list and the single-task composer shortcut. */
+function TaskList(props: {
+  tasks: RoomState["tasks"];
+  cancellations: Record<string, { pending: boolean; error: string | null }>;
+  onCancel: (id: string) => void;
+}) {
+  if (!props.tasks.length) return null;
+  const queued = props.tasks.filter((task) => task.status === "queued").length;
+  const active = props.tasks.filter((task) => task.status === "running" || task.status === "cancelling").length;
+  return (
+    <section className="chat-tasks" aria-label="会话任务">
+      <div className="chat-tasks-heading" aria-live="polite">
+        {active > 0 && `${active} 个处理中`}
+        {active > 0 && queued > 0 && " · "}
+        {queued > 0 && `${queued} 个排队中`}
+        {!active && !queued && "交接中"}
+      </div>
+      <ul className="chat-task-list">
+        {props.tasks.map((task) => {
+          const cancellation = props.cancellations[task.id];
+          const status =
+            task.status === "queued"
+              ? "排队中"
+              : task.status === "cancelling"
+                ? "停止中"
+                : task.status === "waiting"
+                  ? "交接中"
+                  : task.messageId
+                    ? "回复中"
+                    : "准备中";
+          return (
+            <li className="chat-task" key={task.id} data-task-id={task.id} data-task-status={task.status}>
+              <div className="chat-task-content" id={`task-summary-${task.id}`}>
+                <div className="chat-task-title">
+                  <span>{task.agentName}</span>
+                  <span className="chat-task-state">{status}</span>
+                </div>
+                <div className="chat-task-summary">{task.text || "正在准备回复…"}</div>
+                {cancellation?.error && (
+                  <div className="chat-task-error" role="alert">
+                    {cancellation.error}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn ghost sm chat-task-stop"
+                aria-label={task.status === "queued" ? "取消排队" : "停止任务"}
+                aria-describedby={`task-summary-${task.id}`}
+                disabled={cancellation?.pending || task.status === "cancelling"}
+                onClick={() => props.onCancel(task.id)}
+              >
+                {cancellation?.pending || task.status === "cancelling"
+                  ? "停止中…"
+                  : task.status === "queued"
+                    ? "取消排队"
+                    : "停止"}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -1111,8 +1260,6 @@ function Composer(props: {
   onChange: (v: string) => void;
   onSubmit: () => void;
   members: Agent[];
-  /** Group chain running: sending will interrupt it. */
-  interrupts: boolean;
   placeholder: string;
   commands: { name: string; description: string }[];
   skills: { name: string; description: string }[];
@@ -1122,10 +1269,10 @@ function Composer(props: {
   imageNote: string | null;
   modelPicker?: React.ReactNode;
   usage?: React.ReactNode;
-  /** A reply is in flight: the send button becomes 停止 while the draft is empty. */
-  running?: boolean;
+  /** A shortcut is safe only when there is exactly one task to cancel. */
+  stopTask?: RoomState["tasks"][number];
+  stopPending?: boolean;
   queued?: number;
-  replyingName?: string;
   onStop?: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1371,7 +1518,7 @@ function Composer(props: {
       />
       {props.members.length > 0 && props.value.trim() && (
         <div className="composer-recipients">
-          <Recipients text={props.value} members={props.members} interrupts={props.interrupts} />
+          <Recipients text={props.value} members={props.members} />
         </div>
       )}
       <div className="composer-foot">
@@ -1406,19 +1553,21 @@ function Composer(props: {
         <div className="composer-status">
           {props.usage}
           {(() => {
-            const stop = !!props.running && (props.sending || (!props.value.trim() && props.images.length === 0));
-            const label = stop ? "停止" : "发送";
+            const stop = !!props.stopTask && !props.sending && !props.value.trim() && props.images.length === 0;
+            const label = stop ? (props.stopTask?.status === "queued" ? "取消排队" : "停止") : "发送";
             return (
               <button
                 type="button"
                 className="send-btn"
                 data-mode={stop ? "stop" : "send"}
                 onClick={stop ? props.onStop : props.onSubmit}
-                disabled={!stop && (props.sending || (!props.value.trim() && props.images.length === 0))}
+                disabled={
+                  stop ? props.stopPending : props.sending || (!props.value.trim() && props.images.length === 0)
+                }
                 aria-label={label}
                 title={
                   stop
-                    ? `停止${props.replyingName ? ` · ${props.replyingName} 正在回复` : ""}${props.queued ? ` · ${props.queued} 条排队中` : ""}`
+                    ? `${label} · ${props.stopTask?.agentName} · ${props.stopTask?.text || "正在准备回复"}`
                     : props.queued
                       ? `发送 · ${props.queued} 条排队中`
                       : "发送"
@@ -1442,7 +1591,7 @@ function Composer(props: {
 const EVERYONE_RE = /(^|[^\w.])@(所有人|all|everyone)(?![\w\u4e00-\u9fff])/i;
 
 /** Live preview of who will answer the draft, mirroring the server's group rules. */
-function Recipients(props: { text: string; members: Agent[]; interrupts: boolean }) {
+function Recipients(props: { text: string; members: Agent[] }) {
   const lower = props.text.toLowerCase();
   const named = props.members.filter((a) => lower.includes(`@${a.name.toLowerCase()}`));
   const everyone = EVERYONE_RE.test(props.text);
@@ -1460,11 +1609,6 @@ function Recipients(props: { text: string; members: Agent[]; interrupts: boolean
             {a.name}
           </span>
         ))
-      )}
-      {props.interrupts && (
-        <span className="interrupt-note" title="发送会打断当前回复" role="img" aria-label="发送会打断当前回复">
-          <CircleStop size={13} />
-        </span>
       )}
     </span>
   );

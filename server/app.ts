@@ -1034,8 +1034,15 @@ export function createApp(deps: AppDeps) {
       if (!id && method === "GET") return json(store.listAgents());
       if (!id && method === "POST") return json(store.createAgent(validateAgent(await body())), 201);
       if (id && method === "PUT") return json(store.updateAgent(id, validateAgent(await body())));
-      if (id && method === "DELETE")
-        return store.deleteAgent(id) ? json({ ok: true }) : json({ error: "Agent 不存在" }, 404);
+      if (id && method === "DELETE") {
+        if (!store.getAgent(id)) return json({ error: "Agent 不存在" }, 404);
+        for (const room of store.listRooms()) {
+          orchestrator.cancelAgent(room.id, id);
+          host.releaseRoom(room.id, id);
+        }
+        store.deleteAgent(id);
+        return json({ ok: true });
+      }
       if (id && sub === "skills" && method === "GET") {
         const agent = store.getAgent(id);
         if (!agent) throw new ValidationError("Agent 不存在", 404);
@@ -1150,7 +1157,11 @@ export function createApp(deps: AppDeps) {
         try {
           if (cwd !== undefined && cwd !== current.cwd) {
             await projectTerminals.remove(project.id);
-            for (const r of store.listRooms()) if (r.projectId === project.id) orchestrator.cancel(r.id);
+            for (const r of store.listRooms())
+              if (r.projectId === project.id) {
+                orchestrator.cancelAll(r.id);
+                host.releaseRoom(r.id);
+              }
           }
           return json(store.updateProject(project.id, { name: p.name, cwd }));
         } finally {
@@ -1163,7 +1174,11 @@ export function createApp(deps: AppDeps) {
         changingProjects.add(project.id);
         try {
           await projectTerminals.remove(project.id);
-          for (const r of store.listRooms()) if (r.projectId === project.id) orchestrator.cancel(r.id);
+          for (const r of store.listRooms())
+            if (r.projectId === project.id) {
+              orchestrator.cancelAll(r.id);
+              host.releaseRoom(r.id);
+            }
           store.deleteProject(project.id);
           return json({ ok: true });
         } finally {
@@ -1184,7 +1199,8 @@ export function createApp(deps: AppDeps) {
       const room = id ? store.getRoom(id) : null;
       if (id && !room) return json({ error: "房间不存在" }, 404);
       if (room && !sub && method === "DELETE") {
-        orchestrator.cancel(room.id);
+        orchestrator.cancelAll(room.id);
+        host.releaseRoom(room.id);
         store.deleteRoom(room.id);
         return json({ ok: true });
       }
@@ -1197,13 +1213,22 @@ export function createApp(deps: AppDeps) {
           })
           .parse(await body());
         if (g.projectId && !store.getProject(g.projectId)) throw new ValidationError("项目不存在", 404);
-        if (g.projectId && g.projectId !== room.projectId) orchestrator.cancel(room.id);
+        if (g.projectId && g.projectId !== room.projectId) {
+          orchestrator.cancelAll(room.id);
+          host.releaseRoom(room.id);
+        }
         return json(store.updateRoom(room.id, g));
       }
       if (room && sub === "agents" && !subId && method === "PUT") {
         const { agentIds } = z.object({ agentIds: z.array(z.string()) }).parse(await body());
         if (agentIds.length === 0) throw new ValidationError("至少保留 1 个 Agent");
-        return json(store.setRoomAgents(room.id, agentIds));
+        const updated = store.setRoomAgents(room.id, agentIds);
+        for (const agentId of room.agentIds)
+          if (!agentIds.includes(agentId)) {
+            orchestrator.cancelAgent(room.id, agentId);
+            host.releaseRoom(room.id, agentId);
+          }
+        return json(updated);
       }
       // Per-agent harness session controls: /api/rooms/:id/agents/:agentId/<action>
       if (room && sub === "agents" && subId) {
@@ -1255,7 +1280,18 @@ export function createApp(deps: AppDeps) {
           .parse(await body());
         return json(orchestrator.postHumanMessage(room.id, m.senderName, m.content, m.images, m.replyToId), 201);
       }
-      if (room && sub === "cancel" && method === "POST") return json({ cancelled: orchestrator.cancel(room.id) });
+      if (room && sub === "cancel" && method === "POST") {
+        const text = await req.text();
+        let input: unknown = {};
+        try {
+          if (text) input = JSON.parse(text);
+        } catch {
+          throw new ValidationError("无效的取消请求");
+        }
+        const { taskId } = z.object({ taskId: z.string().min(1).max(200).optional() }).parse(input);
+        if (!taskId && room.kind === "group") throw new ValidationError("请选择要停止的任务");
+        return json({ cancelled: orchestrator.cancel(room.id, taskId) });
+      }
     }
     return json({ error: "Not found" }, 404);
   }

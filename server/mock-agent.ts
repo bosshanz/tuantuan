@@ -10,8 +10,10 @@
  * An identity doc containing [[handoff:Name task]] makes it hand off on every turn (loop tests).
  * Env: MOCK_AGENT_MCP_HTTP=1 advertises HTTP MCP support (default: stdio only, the ACP baseline);
  *      MOCK_AGENT_AUTH_FILE=path requires `authenticate` (method mock-login) before session/new works.
+ *      MOCK_AGENT_SESSION_DIR=path opts tests into session persistence across isolated processes.
  */
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 
 if (process.argv.includes("--version")) {
@@ -32,7 +34,32 @@ interface Sess {
   title: string | null;
 }
 const sessions = new Map<string, Sess>();
+const sessionDir = process.env.MOCK_AGENT_SESSION_DIR;
 let loads = 0;
+
+function storedSession(id: string): Sess | undefined {
+  if (!sessionDir || !/^mock-[\da-f]{8}$/.test(id)) return;
+  const file = join(sessionDir, `${id}.json`);
+  if (!existsSync(file)) return;
+  const saved = JSON.parse(readFileSync(file, "utf8"));
+  return { ...saved, mcpServers: [], mcp: new Map(), abort: null };
+}
+
+function saveSession(id: string, s: Sess) {
+  if (!sessionDir) return;
+  mkdirSync(sessionDir, { recursive: true });
+  const file = join(sessionDir, `${id}.json`);
+  const temporary = `${file}.${process.pid}.tmp`;
+  const { cwd, identity, cost, history, config, title } = s;
+  writeFileSync(temporary, JSON.stringify({ cwd, identity, cost, history, config, title }));
+  renameSync(temporary, file);
+}
+
+function restoredSession(id: string): Sess | undefined {
+  const saved = storedSession(id);
+  if (saved) sessions.set(id, saved);
+  return saved ?? sessions.get(id);
+}
 
 const COMMANDS: acp.AvailableCommand[] = [
   { name: "plan", description: "演示计划清单" },
@@ -113,6 +140,7 @@ function newSess(cwd: string, mcpServers: acp.McpServer[]): [string, Sess] {
   const id = `mock-${crypto.randomUUID().slice(0, 8)}`;
   const s: Sess = { cwd, mcpServers, mcp: new Map(), identity: "", history: [], config: {}, abort: null, title: null };
   sessions.set(id, s);
+  saveSession(id, s);
   return [id, s];
 }
 
@@ -272,9 +300,16 @@ acp
     }, 0);
     return { sessionId, configOptions: configOptions(s) };
   })
-  .onRequest(acp.methods.agent.session.list, () => ({
-    sessions: [...sessions.entries()].map(([sessionId, s]) => ({ sessionId, cwd: s.cwd, title: s.title })),
-  }))
+  .onRequest(acp.methods.agent.session.list, () => {
+    const known = new Map(sessions);
+    if (sessionDir && existsSync(sessionDir))
+      for (const file of readdirSync(sessionDir)) {
+        const id = file.replace(/\.json$/, "");
+        const saved = storedSession(id);
+        if (saved && !known.has(id)) known.set(id, saved);
+      }
+    return { sessions: [...known.entries()].map(([sessionId, s]) => ({ sessionId, cwd: s.cwd, title: s.title })) };
+  })
   .onRequest(acp.methods.agent.session.load, async (ctx) => {
     const failureGate = process.env.MOCK_AGENT_FIRST_LOAD_FAILURE_GATE;
     if (++loads === 1 && failureGate) {
@@ -282,7 +317,7 @@ acp
       while (!existsSync(failureGate)) await Bun.sleep(10);
       throw new Error("mock delayed load failure");
     }
-    const s = sessions.get(ctx.params.sessionId);
+    const s = restoredSession(ctx.params.sessionId);
     if (!s) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
     s.mcpServers = ctx.params.mcpServers;
     s.mcp.clear();
@@ -291,7 +326,7 @@ acp
     return { configOptions: configOptions(s) };
   })
   .onRequest(acp.methods.agent.session.resume, (ctx) => {
-    const s = sessions.get(ctx.params.sessionId);
+    const s = restoredSession(ctx.params.sessionId);
     if (!s) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
     s.mcpServers = ctx.params.mcpServers ?? [];
     s.mcp.clear();
@@ -302,6 +337,7 @@ acp
     if (!s) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
     if (ctx.params.value === "mock-broken") throw new acp.RequestError(-32602, "Invalid model: mock-broken");
     s.config[ctx.params.configId] = String(ctx.params.value);
+    saveSession(ctx.params.sessionId, s);
     return { configOptions: configOptions(s) };
   })
   .onNotification(acp.methods.agent.session.cancel, (ctx) => {
@@ -331,8 +367,12 @@ acp
     if (identity) s.identity = identity;
     const handoffTask = fullText.match(/<tuantuan-handoff from="([^"]*)">\n?([\s\S]*?)\n?<\/tuantuan-handoff>/);
     const text = fullText.replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "").trim();
-    // In a group the prompt is a relay of several messages; commands come from the latest one.
-    const latest = handoffTask ? "" : (text.split(/\n\n/).at(-1) ?? "").replace(/^\[[^\]]+\]: /, "").trim();
+    // A queued group turn carries its own request, even after newer messages have arrived.
+    const taskBlock = text.match(/<tuantuan-task>\n([\s\S]*?)\n<\/tuantuan-task>/)?.[1];
+    const taskText = taskBlock?.match(/(?:^|\n)\[[^\]\n]+\]: ([\s\S]*)$/)?.[1];
+    const latest = handoffTask
+      ? ""
+      : (taskText ?? (text.split(/\n\n/).at(-1) ?? "").replace(/^\[[^\]]+\]: /, "")).trim();
     const images = blocks.filter((b) => b.type === "image").length;
     for (const b of blocks) s.history.push({ sessionUpdate: "user_message_chunk", content: b });
     s.title ??= text.slice(0, 30);
@@ -485,6 +525,7 @@ acp
       throw e;
     } finally {
       s.abort = null;
+      saveSession(sessionId, s);
     }
   })
   .connect(acp.ndJsonStream(input, output));

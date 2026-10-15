@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { serve } from "../server/app";
 import { MAX_AGENT_HOPS, RELAY_MAX_CHARS } from "../server/orchestrator";
 import type { Agent, Message, Room } from "../server/store";
@@ -96,8 +98,7 @@ describe("handoff through Tuantuan's MCP server", () => {
     const replies = ms.filter((m) => m.senderKind === "agent");
     expect(replies).toHaveLength(1 + MAX_AGENT_HOPS);
     expect(replies.map((r) => r.senderName).slice(0, 3)).toEqual(["Ping", "Pong", "Ping"]);
-    expect(ms.at(-1)).toMatchObject({ senderKind: "system" });
-    expect(ms.at(-1)?.content).toContain(`最多 ${MAX_AGENT_HOPS} 次`);
+    expect(ms.some((m) => m.senderKind === "system" && m.content.includes(`最多 ${MAX_AGENT_HOPS} 次`))).toBe(true);
   });
 
   test("@所有人 round: a hand-off to someone who already answered does not trigger them again", async () => {
@@ -108,7 +109,7 @@ describe("handoff through Tuantuan's MCP server", () => {
     expect(ms.filter((m) => m.senderKind === "agent").map((m) => m.senderName)).toEqual(["First", "Second"]);
   });
 
-  test("a new message interrupts the chain and drops pending hand-offs", async () => {
+  test("a new message queues behind the same agent without interrupting", async () => {
     const a = await agent("Slowpoke");
     const b = await agent("Waiter");
     const g = await room("int", [a.id, b.id], { mainAgentId: a.id });
@@ -117,9 +118,33 @@ describe("handoff through Tuantuan's MCP server", () => {
     await Bun.sleep(300);
     const ms = await say(g.id, "算了");
     const first = ms.find((m) => m.senderKind === "agent");
-    expect(first).toMatchObject({ status: "cancelled", error: "被新消息打断" });
+    expect(first).toMatchObject({ status: "done", error: null });
     expect(ms.at(-1)?.content).toBe("收到：「算了」（mock-fast）");
-  });
+  }, 12_000);
+
+  test("real mock ACP streams two members concurrently and targeted stop preserves the sibling", async () => {
+    const a = await agent("ParallelA");
+    const b = await agent("ParallelB");
+    const g = await room("parallel ACP", [a.id, b.id]);
+    await api("POST", `/api/rooms/${g.id}/messages`, { senderName: "Andy", content: "/slow @所有人" });
+    await until(
+      () =>
+        app.store.recentMessages(g.id, 10).filter((m) => m.status === "streaming" && m.content.length > 0).length === 2,
+    );
+    const tasks = app.orchestrator.state(g.id).tasks;
+    expect(tasks).toHaveLength(2);
+    const stopping = tasks.find((t) => t.agentId === a.id);
+    const sibling = tasks.find((t) => t.agentId === b.id);
+    expect(stopping?.messageId).toBeDefined();
+    expect(sibling?.messageId).toBeDefined();
+    expect((await api("POST", `/api/rooms/${g.id}/cancel`, {})).status).toBe(400);
+    expect(
+      (await api<{ cancelled: boolean }>("POST", `/api/rooms/${g.id}/cancel`, { taskId: stopping?.id })).data.cancelled,
+    ).toBe(true);
+    await app.orchestrator.idle(g.id);
+    expect(app.store.getMessage(stopping?.messageId as string)?.status).toBe("cancelled");
+    expect(app.store.getMessage(sibling?.messageId as string)?.status).toBe("done");
+  }, 12_000);
 
   test("DMs get no Tuantuan tools", async () => {
     const a = await agent("Lonely");
@@ -183,20 +208,25 @@ describe("onboarding auth", () => {
 
 describe("session/load replay", () => {
   test("history the harness replays shows up, minus turns the room already has", async () => {
-    const a = await agent("Historian");
-    const r1 = await room("r1", [a.id]);
-    await say(r1.id, "外部历史");
-    const s1 = (await api<{ sessionId: string }>("GET", `/api/rooms/${r1.id}/agents/${a.id}/session`)).data.sessionId;
-    const r2 = await room("r2", [a.id], { projectId: r1.projectId }); // same project folder → the harness lists r1's session
-    await say(r2.id, "本地消息");
-    const list = (await api<{ sessionId: string }[]>("GET", `/api/rooms/${r2.id}/agents/${a.id}/history`)).data;
-    expect(list.map((x) => x.sessionId)).toContain(s1);
-    await api("POST", `/api/rooms/${r2.id}/agents/${a.id}/session`, { sessionId: s1 });
-    const replay = (await api<ReplayTurn[]>("GET", `/api/rooms/${r2.id}/agents/${a.id}/replay`)).data;
-    expect(replay.map((t) => t.user)).toEqual(["外部历史"]);
-    expect(replay[0]?.reply.parts.some((p) => p.kind === "text")).toBe(true);
-    // Back in r1 the same session's turns are already in the transcript: nothing extra.
-    await api("POST", `/api/rooms/${r1.id}/agents/${a.id}/session`, { sessionId: s1 });
-    expect((await api<ReplayTurn[]>("GET", `/api/rooms/${r1.id}/agents/${a.id}/replay`)).data).toEqual([]);
+    const sessionDir = mkdtempSync(join(tmpdir(), "tuantuan-collab-sessions-"));
+    try {
+      const a = await agent("Historian", { env: { MOCK_AGENT_SESSION_DIR: sessionDir } });
+      const r1 = await room("r1", [a.id]);
+      await say(r1.id, "外部历史");
+      const s1 = (await api<{ sessionId: string }>("GET", `/api/rooms/${r1.id}/agents/${a.id}/session`)).data.sessionId;
+      const r2 = await room("r2", [a.id], { projectId: r1.projectId }); // same project folder → the harness lists r1's session
+      await say(r2.id, "本地消息");
+      const list = (await api<{ sessionId: string }[]>("GET", `/api/rooms/${r2.id}/agents/${a.id}/history`)).data;
+      expect(list.map((x) => x.sessionId)).toContain(s1);
+      await api("POST", `/api/rooms/${r2.id}/agents/${a.id}/session`, { sessionId: s1 });
+      const replay = (await api<ReplayTurn[]>("GET", `/api/rooms/${r2.id}/agents/${a.id}/replay`)).data;
+      expect(replay.map((t) => t.user)).toEqual(["外部历史"]);
+      expect(replay[0]?.reply.parts.some((p) => p.kind === "text")).toBe(true);
+      // Back in r1 the same session's turns are already in the transcript: nothing extra.
+      await api("POST", `/api/rooms/${r1.id}/agents/${a.id}/session`, { sessionId: s1 });
+      expect((await api<ReplayTurn[]>("GET", `/api/rooms/${r1.id}/agents/${a.id}/replay`)).data).toEqual([]);
+    } finally {
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
   });
 });

@@ -19,7 +19,7 @@ export function emptyChat(roomId: string): ChatState {
   return {
     roomId,
     messages: [],
-    state: { activeRunId: null, queued: 0 },
+    state: { activeRunId: null, queued: 0, tasks: [] },
     sessions: {},
     asks: [],
     terminals: {},
