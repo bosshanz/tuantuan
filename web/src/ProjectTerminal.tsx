@@ -1,10 +1,14 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { ChevronDown, RotateCcw, SquareTerminal, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ProjectTerminalEvent, ProjectTerminalMeta } from "../../shared/project-terminal";
 import { api, type Project } from "./api";
 import "@xterm/xterm/css/xterm.css";
+
+export interface TerminalFocusRequest {
+  origin: Element | null;
+}
 
 type Connection = "starting" | "connected" | "reconnecting" | "error";
 
@@ -12,20 +16,38 @@ type Connection = "starting" | "connected" | "reconnecting" | "error";
 export default function ProjectTerminal(props: {
   project: Project;
   visible: boolean;
+  height: number;
+  onHeightChange: (height: number) => void;
+  focusRequest: TerminalFocusRequest | null;
   onHide: () => void;
   onEnded: () => void;
 }) {
-  const { project, visible } = props;
+  const { project, visible, height, onHeightChange } = props;
   const dock = useRef<HTMLElement>(null);
   const container = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
-  const fit = useRef<FitAddon | null>(null);
+  const ready = useRef(false);
+  const visibleNow = useRef(visible);
+  const focusRequest = useRef(props.focusRequest);
+  const focusedRequest = useRef<TerminalFocusRequest | null>(null);
+  const focusRequested = useCallback(() => {
+    const request = focusRequest.current;
+    if (!visibleNow.current || !ready.current || !request || focusedRequest.current === request) return;
+    focusedRequest.current = request;
+    // Opening is intentional, but a slow lazy load or reconnect must not steal a newer focus choice.
+    if (document.activeElement === request.origin) terminal.current?.focus();
+  }, []);
+  useLayoutEffect(() => {
+    visibleNow.current = visible;
+    focusRequest.current = props.focusRequest;
+    if (terminal.current) terminal.current.options.disableStdin = !visible || !ready.current;
+    focusRequested();
+  }, [visible, props.focusRequest, focusRequested]);
   const [meta, setMeta] = useState<ProjectTerminalMeta | null>(null);
   const [connection, setConnection] = useState<Connection>("starting");
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [closing, setClosing] = useState(false);
-  const [height, setHeight] = useState(280);
   const [maxHeight, setMaxHeight] = useState(600);
   const drag = useRef<{ y: number; height: number } | null>(null);
   const endpoint = `/api/projects/${encodeURIComponent(project.id)}/terminal`;
@@ -38,7 +60,7 @@ export default function ProjectTerminal(props: {
     let socket: WebSocket | undefined;
     let reconnect: ReturnType<typeof setTimeout> | undefined;
     let failures = 0;
-    let ready = false;
+    ready.current = false;
     let running = false;
     const term = new Terminal({
       cursorBlink: true,
@@ -54,7 +76,6 @@ export default function ProjectTerminal(props: {
     term.loadAddon(fitAddon);
     term.open(host);
     terminal.current = term;
-    fit.current = fitAddon;
     const theme = () => {
       const css = getComputedStyle(host);
       const dark =
@@ -95,10 +116,11 @@ export default function ProjectTerminal(props: {
     observer.observe(host);
     resize();
     term.onResize(({ cols, rows }) => {
-      if (ready && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "resize", cols, rows }));
+      if (ready.current && socket?.readyState === WebSocket.OPEN)
+        socket.send(JSON.stringify({ type: "resize", cols, rows }));
     });
     term.onData((data) => {
-      if (!ready || socket?.readyState !== WebSocket.OPEN) return;
+      if (!ready.current || !visibleNow.current || socket?.readyState !== WebSocket.OPEN) return;
       // Paste can be larger than one frame. Do not split a Unicode surrogate pair.
       for (let start = 0; start < data.length; ) {
         let end = Math.min(start + 4096, data.length);
@@ -109,7 +131,7 @@ export default function ProjectTerminal(props: {
     });
     const fail = (e: unknown) => {
       if (disposed) return;
-      ready = false;
+      ready.current = false;
       term.options.disableStdin = true;
       setConnection("error");
       setError(e instanceof Error ? e.message : String(e));
@@ -130,23 +152,28 @@ export default function ProjectTerminal(props: {
           term.resize(message.terminal.cols, message.terminal.rows);
           term.write(message.output, () => {
             if (disposed) return;
-            ready = running;
-            term.options.disableStdin = !ready;
+            ready.current = running;
+            term.options.disableStdin = !ready.current || !visibleNow.current;
             resize();
-            if (ready && socket?.readyState === WebSocket.OPEN)
+            if (ready.current && socket?.readyState === WebSocket.OPEN)
               socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-            if (host.clientHeight > 0) term.focus();
+            focusRequested();
           });
         } else if (message.type === "output") term.write(message.data);
         else if (message.type === "exit") {
           running = false;
-          ready = false;
+          ready.current = false;
           term.options.disableStdin = true;
+          // Exit is authoritative: late input/resize acknowledgements may have reported the closing PTY first.
+          setConnection("connected");
+          setError(null);
           setMeta((current) => current && { ...current, status: "exited", exitCode: message.exitCode });
-        } else if (message.type === "error") fail(new Error(message.error));
+        } else if (message.type === "error" && (running || message.error !== "终端已退出，请重新打开")) {
+          fail(new Error(message.error));
+        }
       };
       socket.onclose = () => {
-        ready = false;
+        ready.current = false;
         term.options.disableStdin = true;
         if (disposed) return;
         setConnection("reconnecting");
@@ -183,29 +210,22 @@ export default function ProjectTerminal(props: {
       themeObserver.disconnect();
       media.removeEventListener("change", theme);
       terminal.current = null;
-      fit.current = null;
+      ready.current = false;
       term.dispose();
     };
   }, [endpoint, attempt]);
 
   useEffect(() => {
-    if (visible) {
-      fit.current?.fit();
-      terminal.current?.focus();
-    }
-  }, [visible]);
-
-  useEffect(() => {
-    const workspace = dock.current?.parentElement;
+    const workspace = dock.current?.closest(".conversation-workspace");
     if (!workspace) return;
     const observer = new ResizeObserver(() => {
       const max = Math.max(180, Math.min(720, workspace.clientHeight - 260));
       setMaxHeight(max);
-      setHeight((current) => Math.min(current, max));
+      if (height > max) onHeightChange(max);
     });
     observer.observe(workspace);
     return () => observer.disconnect();
-  }, []);
+  }, [height, onHeightChange]);
 
   const end = async (restart: boolean) => {
     setClosing(true);
@@ -230,7 +250,7 @@ export default function ProjectTerminal(props: {
             ? `已退出${meta.exitCode === null ? "" : ` · ${meta.exitCode}`}`
             : "";
   return (
-    <section ref={dock} className="project-terminal" hidden={!visible} style={{ height }} aria-label="项目终端">
+    <section ref={dock} className="project-terminal" style={{ height }} aria-label="项目终端">
       <hr
         className="terminal-resize"
         tabIndex={0}
@@ -246,7 +266,7 @@ export default function ProjectTerminal(props: {
         }}
         onPointerMove={(event) => {
           if (drag.current)
-            setHeight(Math.max(180, Math.min(maxHeight, drag.current.height + drag.current.y - event.clientY)));
+            onHeightChange(Math.max(180, Math.min(maxHeight, drag.current.height + drag.current.y - event.clientY)));
         }}
         onPointerUp={() => {
           drag.current = null;
@@ -257,12 +277,12 @@ export default function ProjectTerminal(props: {
         onKeyDown={(event) => {
           if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
           event.preventDefault();
-          setHeight((current) =>
+          onHeightChange(
             event.key === "Home"
               ? 180
               : event.key === "End"
                 ? maxHeight
-                : Math.max(180, Math.min(maxHeight, current + (event.key === "ArrowUp" ? 20 : -20))),
+                : Math.max(180, Math.min(maxHeight, height + (event.key === "ArrowUp" ? 20 : -20))),
           );
         }}
       />

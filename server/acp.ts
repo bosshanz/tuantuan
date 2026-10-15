@@ -42,6 +42,7 @@ export class AcpProcess {
   private conn: acp.ClientConnection;
   private terms = new Map<string, Term>();
   private stderrTail = "";
+  private stopping: NodeJS.Signals | null = null;
   private root: string;
   init: acp.InitializeResponse | null = null;
   /** Resolves (never rejects) when the process exits. */
@@ -116,9 +117,19 @@ export class AcpProcess {
   }
 
   kill(signal: NodeJS.Signals = "SIGTERM") {
-    for (const t of this.terms.values()) killProcessTree(t.proc, signal);
+    if (this.stopping && (signal !== "SIGKILL" || this.stopping === "SIGKILL")) return;
+    const previous = this.stopping;
+    this.stopping = signal;
+    try {
+      for (const t of this.terms.values()) killProcessTree(t.proc, signal);
+      // Closing stdin first can make a starting harness exit before it is signalled.
+      // On macOS, signalling a process group containing only that zombie returns EPERM.
+      killProcessTree(this.proc, signal);
+    } catch (error) {
+      this.stopping = previous;
+      throw error;
+    }
     this.conn.close();
-    killProcessTree(this.proc, signal);
   }
 
   private async collectStderr() {

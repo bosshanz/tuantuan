@@ -8,6 +8,7 @@ import { chromium, type Page } from "playwright-core";
 import { serve } from "../server/app";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
 import { repliesSmoke } from "./e2e-replies";
+import { schedulingSmoke } from "./e2e-scheduling";
 import { terminalSmoke } from "./e2e-terminal";
 
 process.env.TUANTUAN_MOCK_HARNESS = "1";
@@ -488,6 +489,7 @@ try {
   await shot("conversation-handoff");
   await terminalSmoke(browser, `http://localhost:${server.port}`, group.id, project.id, cwd, shotsDir);
   await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
+  await schedulingSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   // Single-agent conversation in 草稿
 
   // No project chosen → 草稿.
@@ -730,7 +732,7 @@ try {
       await btn.screenshot({ path: join(shotsDir, "stop-1x.png") });
     }
   }
-  await page.getByRole("button", { name: "停止" }).click();
+  await page.getByRole("button", { name: "停止", exact: true }).click();
   await page.locator(".state-tag", { hasText: "已停止" }).waitFor();
 
   // A harness that never answers and ignores session/cancel: 停止 still ends the turn.
@@ -740,7 +742,7 @@ try {
   await input.fill("卡住了吗");
   await input.press("Enter");
   await page.locator('.send-btn[data-mode="stop"]').waitFor();
-  await page.getByRole("button", { name: "停止" }).click();
+  await page.getByRole("button", { name: "停止", exact: true }).click();
   await page.locator('.send-btn[data-mode="stop"]').waitFor({ state: "detached", timeout: 10_000 });
   await page.locator(".model-trigger").click();
   await page.getByRole("option", { name: "Mock Smart" }).click();

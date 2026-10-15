@@ -20,10 +20,22 @@ export type RoomEvent =
   | { type: "permission"; roomId: string; ask: PermissionAsk | null; resolvedId?: string }
   | { type: "terminal"; roomId: string; terminal: TerminalSnapshot };
 
+export interface RoomTask {
+  id: string;
+  runId: string;
+  parentTaskId: string | null;
+  agentId: string;
+  agentName: string;
+  messageId: string | null;
+  status: "queued" | "running" | "cancelling" | "waiting";
+  text: string;
+}
+
 export interface RoomState {
-  /** Human message id whose agent chain is executing, if any. */
+  /** One active human message id, retained as a compatibility busy indicator. */
   activeRunId: string | null;
   queued: number;
+  tasks: RoomTask[];
 }
 
 export interface ImageAttachment {
@@ -32,20 +44,32 @@ export interface ImageAttachment {
   data: string;
 }
 
-interface Trigger {
-  agentId: string;
+interface Task extends Omit<RoomTask, "status"> {
+  status: RoomTask["status"] | "done" | "error" | "cancelled";
   hop: number;
-  /** Set when another agent handed this turn off through the `handoff` tool. */
   from?: Handoff;
+  abort: AbortController;
+  handoffs?: Handoff[];
 }
 
-/** A running agent turn; MCP tool calls from that agent land here. */
+interface Run {
+  human: Message;
+  images: ImageAttachment[];
+  everyone: boolean;
+  triggered: Set<string>;
+  handoffs: number;
+  reservations: Set<string>;
+  limitNotified: boolean;
+}
+
+/** MCP calls are accepted only while this exact turn is still running. */
 interface TurnCtx {
   signal: AbortSignal;
+  task: Task;
+  run: Run;
   handoffs: Handoff[];
 }
 
-const INTERJECTION = "被新消息打断";
 /** Agent-to-agent hand-offs per human message. */
 export const MAX_AGENT_HOPS = 5;
 /** Group relay (会话转述): messages since this agent last spoke, at most this many / this many characters. */
@@ -54,18 +78,15 @@ export const RELAY_MAX_CHARS = 8000;
 const RELAY_MESSAGE_MAX_CHARS = 2000;
 
 interface RoomRuntime {
-  queue: { msg: Message; images: ImageAttachment[] }[];
-  active: { runId: string; abort: AbortController } | null;
-  idle: Promise<void>;
+  tasks: Map<string, Task>;
+  runs: Map<string, Run>;
+  idleWaiters: (() => void)[];
 }
 
-/**
- * Owns in-flight agent work. Each room runs one human message chain at a time (later messages
- * queue; in groups a new message interrupts). Each agent turn is one ACP session/prompt on that
- * agent's harness; the reply's timeline is persisted and streamed as raw ACP updates.
- */
+/** Owns the task graph and one FIFO execution lane per (room, agent). */
 export class Orchestrator implements ToolProvider {
   private rooms = new Map<string, RoomRuntime>();
+  private closed = false;
   private turns = new Map<string, TurnCtx>(); // `${roomId}|${agentId}`
 
   constructor(
@@ -81,6 +102,7 @@ export class Orchestrator implements ToolProvider {
     images: ImageAttachment[] = [],
     replyToId?: string | null,
   ): Message {
+    if (this.closed) throw new ValidationError("服务正在关闭", 503);
     const room = this.store.getRoom(roomId);
     if (!room) throw new ValidationError("房间不存在", 404);
     const text = content.trim();
@@ -106,31 +128,82 @@ export class Orchestrator implements ToolProvider {
       });
     this.publish(roomId, { type: "message", message: msg });
     const rt = this.runtime(roomId);
-    if (room.kind === "group" && rt.active && !rt.active.abort.signal.aborted)
-      rt.active.abort.abort(new DOMException(INTERJECTION, "AbortError"));
-    rt.queue.push({ msg, images });
-    if (!rt.active && rt.queue.length === 1) rt.idle = this.drain(roomId, rt);
-    this.publishState(roomId);
+    const members = room.agentIds.map((id) => this.store.getAgent(id)).filter((a): a is Agent => a !== null);
+    const everyone = room.kind === "group" && mentionsEveryone(text);
+    let initial =
+      room.kind === "dm"
+        ? room.agentIds.slice(0, 1)
+        : everyone
+          ? members.map((a) => a.id)
+          : parseMentions(text, members);
+    if (room.kind === "group" && initial.length === 0)
+      initial = [room.mainAgentId ?? members[0]?.id].filter((id): id is string => !!id);
+    const run: Run = {
+      human: msg,
+      images,
+      everyone,
+      triggered: new Set(initial),
+      handoffs: 0,
+      reservations: new Set(),
+      limitNotified: false,
+    };
+    if (initial.length === 0) {
+      this.system(roomId, id, 0, "会话里还没有 Agent，消息不会得到回复。");
+      return msg;
+    }
+    rt.runs.set(id, run);
+    // Register every root before starting any turn, so @所有人 and handoff dedup see the whole run.
+    for (const agentId of initial) this.enqueue(rt, run, agentId, null, 1);
+    this.pump(roomId, rt);
     return msg;
   }
 
-  cancel(roomId: string): boolean {
+  cancel(roomId: string, taskId?: string): boolean {
     const rt = this.rooms.get(roomId);
-    if (!rt?.active) return false;
-    const dropped = rt.queue.length;
-    rt.queue = [];
-    rt.active.abort.abort(new DOMException("用户取消", "AbortError"));
-    if (dropped > 0) this.system(roomId, rt.active.runId, 0, `已取消；排队中的 ${dropped} 条消息不会再触发 Agent。`);
+    if (!rt) return false;
+    if (!taskId) {
+      if (this.store.getRoom(roomId)?.kind !== "dm") return false;
+      taskId = [...rt.tasks.values()].find((t) => t.status === "running" || t.status === "cancelling")?.id;
+    }
+    const task = taskId ? rt.tasks.get(taskId) : undefined;
+    if (!task || !this.visibleTasks(rt).some((t) => t.id === task.id)) return false;
+    this.cancelTasks(roomId, rt, new Set([task.id]));
     return true;
+  }
+
+  /** Destructive room/project operations explicitly discard all work. */
+  cancelAll(roomId: string): boolean {
+    const rt = this.rooms.get(roomId);
+    if (!rt || rt.tasks.size === 0) return false;
+    this.cancelTasks(roomId, rt, new Set(rt.tasks.keys()));
+    return true;
+  }
+
+  cancelAgent(roomId: string, agentId: string): boolean {
+    const rt = this.rooms.get(roomId);
+    if (!rt) return false;
+    const ids = new Set([...rt.tasks.values()].filter((t) => t.agentId === agentId).map((t) => t.id));
+    if (ids.size === 0) return false;
+    this.cancelTasks(roomId, rt, ids);
+    return true;
+  }
+
+  shutdown() {
+    this.closed = true;
+    for (const roomId of this.rooms.keys()) this.cancelAll(roomId);
   }
 
   state(roomId: string): RoomState {
     const rt = this.rooms.get(roomId);
-    return { activeRunId: rt?.active?.runId ?? null, queued: rt?.queue.length ?? 0 };
+    const tasks = rt ? this.visibleTasks(rt) : [];
+    return { activeRunId: tasks[0]?.runId ?? null, queued: tasks.filter((t) => t.status === "queued").length, tasks };
   }
 
   idle(roomId: string): Promise<void> {
-    return this.rooms.get(roomId)?.idle ?? Promise.resolve();
+    const rt = this.rooms.get(roomId);
+    if (!rt || rt.runs.size === 0) return Promise.resolve();
+    // Resolve on quiescence, after derived handoffs are registered, rather than taking a promise snapshot.
+    return new Promise((resolve) => rt.idleWaiters.push(resolve));
   }
 
   /** Identity doc + room context for an agent, delivered to its harness (plan §3.4). */
@@ -156,85 +229,130 @@ export class Orchestrator implements ToolProvider {
   private runtime(roomId: string): RoomRuntime {
     let rt = this.rooms.get(roomId);
     if (!rt) {
-      rt = { queue: [], active: null, idle: Promise.resolve() };
+      rt = { tasks: new Map(), runs: new Map(), idleWaiters: [] };
       this.rooms.set(roomId, rt);
     }
     return rt;
+  }
+
+  private enqueue(rt: RoomRuntime, run: Run, agentId: string, parent: Task | null, hop: number, from?: Handoff) {
+    const task: Task = {
+      id: crypto.randomUUID(),
+      runId: run.human.id,
+      parentTaskId: parent?.id ?? null,
+      agentId,
+      agentName: this.store.getAgent(agentId)?.name ?? agentId,
+      messageId: null,
+      status: "queued",
+      text: from?.task ?? run.human.content,
+      hop,
+      from,
+      abort: new AbortController(),
+    };
+    rt.tasks.set(task.id, task);
+    return task;
+  }
+
+  private isActive(task: Task): boolean {
+    return task.status === "queued" || task.status === "running" || task.status === "cancelling";
+  }
+
+  private visibleTasks(rt: RoomRuntime): RoomTask[] {
+    const visible = new Set<string>();
+    for (const task of rt.tasks.values()) {
+      if (!this.isActive(task)) continue;
+      let ancestor: Task | undefined = task;
+      while (ancestor && !visible.has(ancestor.id)) {
+        visible.add(ancestor.id);
+        ancestor = ancestor.parentTaskId ? rt.tasks.get(ancestor.parentTaskId) : undefined;
+      }
+    }
+    return [...rt.tasks.values()]
+      .filter((t) => visible.has(t.id))
+      .map((t) => ({
+        id: t.id,
+        runId: t.runId,
+        parentTaskId: t.parentTaskId,
+        agentId: t.agentId,
+        agentName: t.agentName,
+        messageId: t.messageId,
+        text: t.text,
+        status: this.isActive(t) ? (t.status as RoomTask["status"]) : "waiting",
+      }));
   }
 
   private publishState(roomId: string) {
     this.publish(roomId, { type: "room.state", roomId, state: this.state(roomId) });
   }
 
-  private async drain(roomId: string, rt: RoomRuntime): Promise<void> {
-    for (let item = rt.queue[0]; item; item = rt.queue[0]) {
-      const abort = new AbortController();
-      rt.active = { runId: item.msg.id, abort };
-      rt.queue.shift();
-      this.publishState(roomId);
-      try {
-        await this.runChain(item.msg, item.images, abort.signal);
-      } catch (e) {
-        this.system(roomId, item.msg.id, 0, `内部错误，本轮已停止：${(e as Error).message}`);
+  private cancelTasks(roomId: string, rt: RoomRuntime, ids: Set<string>) {
+    // A task owns only descendants created from its accepted handoffs, never sibling roots.
+    for (const task of rt.tasks.values()) if (task.parentTaskId && ids.has(task.parentTaskId)) ids.add(task.id);
+    for (const id of ids) {
+      const task = rt.tasks.get(id);
+      if (!task) continue;
+      task.abort.abort(new DOMException("用户取消", "AbortError"));
+      if (task.status === "queued") task.status = "cancelled";
+      else if (task.status === "running") task.status = "cancelling";
+    }
+    this.pump(roomId, rt);
+  }
+
+  private pump(roomId: string, rt: RoomRuntime) {
+    const busy = new Set(
+      [...rt.tasks.values()].filter((t) => t.status === "running" || t.status === "cancelling").map((t) => t.agentId),
+    );
+    for (const task of rt.tasks.values()) {
+      if (task.status !== "queued" || busy.has(task.agentId)) continue;
+      const room = this.store.getRoom(roomId);
+      const agent = this.store.getAgent(task.agentId);
+      const run = rt.runs.get(task.runId);
+      if (this.closed || !room || !agent || !room.agentIds.includes(task.agentId) || !run) {
+        task.status = "cancelled";
+        continue;
       }
-      rt.active = null;
-      this.publishState(roomId);
+      task.status = "running";
+      busy.add(task.agentId);
+      void this.execute(room, agent, run, task, rt);
+    }
+    for (const runId of rt.runs.keys()) {
+      if ([...rt.tasks.values()].some((t) => t.runId === runId && this.isActive(t))) continue;
+      rt.runs.delete(runId);
+      for (const [id, task] of rt.tasks) if (task.runId === runId) rt.tasks.delete(id);
+    }
+    this.publishState(roomId);
+    if (rt.runs.size === 0) {
+      this.rooms.delete(roomId);
+      for (const resolve of rt.idleWaiters.splice(0)) resolve();
     }
   }
 
-  private async runChain(human: Message, images: ImageAttachment[], signal: AbortSignal) {
-    const room = this.store.getRoom(human.roomId);
-    if (!room) return;
-    const members = room.agentIds.map((id) => this.store.getAgent(id)).filter((a): a is Agent => a !== null);
-
-    let initial: string[];
-    if (room.kind === "dm") {
-      initial = room.agentIds.slice(0, 1);
-      if (initial.length === 0) return this.system(room.id, human.id, 0, "该会话的 Agent 已被删除，消息不会得到回复。");
-    } else if (mentionsEveryone(human.content)) {
-      initial = members.map((m) => m.id);
-    } else {
-      initial = parseMentions(human.content, members);
-      if (initial.length === 0) {
-        const main = room.mainAgentId ?? members[0]?.id;
-        if (!main) return this.system(room.id, human.id, 0, "会话里还没有 Agent，消息不会得到回复。");
-        initial = [main];
+  private async execute(room: Room, agent: Agent, run: Run, task: Task, rt: RoomRuntime) {
+    try {
+      const { reply, handoffs } = await this.runAgentTurn(room, agent, run, task);
+      task.status = reply.status === "done" ? "done" : reply.status === "cancelled" ? "cancelled" : "error";
+      if (reply.status === "done" && !task.abort.signal.aborted && this.store.getRoom(room.id)) {
+        for (const h of handoffs) {
+          run.triggered.add(h.agentId);
+          this.enqueue(rt, run, h.agentId, task, task.hop + 1, {
+            agentId: agent.id,
+            agentName: agent.name,
+            task: h.task,
+          });
+        }
       }
+    } catch (e) {
+      task.status = task.abort.signal.aborted ? "cancelled" : "error";
+      if (!task.abort.signal.aborted)
+        this.system(room.id, run.human.id, task.hop, `内部错误，本任务已停止：${(e as Error).message}`);
+    } finally {
+      const turn = this.turns.get(`${room.id}|${agent.id}`);
+      if (turn?.task === task) this.turns.delete(`${room.id}|${agent.id}`);
+      // Reservations outlive the host promise until children are atomically registered.
+      for (const h of task.handoffs ?? []) run.reservations.delete(h.agentId);
+      if (task.status !== "done" || task.abort.signal.aborted) run.handoffs -= task.handoffs?.length ?? 0;
+      this.pump(room.id, rt);
     }
-
-    const queue: Trigger[] = initial.map((agentId) => ({ agentId, hop: 1 }));
-    const everyone = room.kind === "group" && mentionsEveryone(human.content);
-    const replied = new Set<string>();
-    let agentHops = 0;
-    while (queue.length > 0) {
-      if (signal.aborted) return this.noteInterjection(room.id, human.id, signal, queue);
-      const t = queue.shift() as Trigger;
-      if (t.hop >= 2 && ++agentHops > MAX_AGENT_HOPS) {
-        this.system(room.id, human.id, t.hop, `已达到每条消息最多 ${MAX_AGENT_HOPS} 次 Agent 交接的上限。`);
-        return;
-      }
-      const agent = this.store.getAgent(t.agentId);
-      if (!agent) continue;
-      const { reply, handoffs } = await this.runAgentTurn(room, agent, human, images, t, signal);
-      replied.add(agent.id);
-      if (reply.status === "cancelled") return this.noteInterjection(room.id, human.id, signal, queue);
-      if (reply.status !== "done") continue;
-      for (const h of handoffs) {
-        // Already queued for this message, or (in an @所有人 round) already answered: don't trigger twice.
-        if (queue.some((q) => q.agentId === h.agentId) || (everyone && replied.has(h.agentId))) continue;
-        queue.push({
-          agentId: h.agentId,
-          hop: t.hop + 1,
-          from: { agentId: agent.id, agentName: agent.name, task: h.task },
-        });
-      }
-    }
-  }
-
-  private noteInterjection(roomId: string, runId: string, signal: AbortSignal, pending: Trigger[]) {
-    if ((signal.reason as Error | undefined)?.message !== INTERJECTION || pending.length === 0) return;
-    const names = pending.map((x) => `@${this.store.getAgent(x.agentId)?.name ?? x.agentId}`);
-    this.system(roomId, runId, 0, `${INTERJECTION}，未执行的触发：${names.join("、")}`);
   }
 
   /**
@@ -245,7 +363,14 @@ export class Orchestrator implements ToolProvider {
     const quoted = human.quote ? `${quotePrompt(human.quote)}\n\n` : "";
     const imageBlocks: acp.ContentBlock[] = images.map((i) => ({ type: "image", mimeType: i.mimeType, data: i.data }));
     if (room.kind === "dm") return [{ type: "text", text: quoted + human.content }, ...imageBlocks];
-    const history = this.store.recentMessages(room.id, GROUP_CONTEXT_MESSAGES);
+    const history = this.store.recentMessages(room.id, GROUP_CONTEXT_MESSAGES, human.seq + 1);
+    // Later independent messages cannot replace this task. Handoffs also see their own run's completed replies.
+    if (from)
+      history.push(
+        ...this.store
+          .recentMessages(room.id, GROUP_CONTEXT_MESSAGES)
+          .filter((m) => m.seq > human.seq && m.runId === human.id && m.senderKind === "agent" && m.status === "done"),
+      );
     const lastOwn = history.findLastIndex(
       (m) => m.senderKind === "agent" && m.senderId === agent.id && m.status === "done",
     );
@@ -271,7 +396,7 @@ export class Orchestrator implements ToolProvider {
     const header = `${lastOwn >= 0 ? "你上次发言之后，会话里的新消息" : "会话里最近的消息"}${
       omitted > 0 ? `（更早的 ${omitted} 条已省略）` : ""
     }：`;
-    let text = `${quoted}${header}\n\n${kept.join("\n\n")}`;
+    let text = `${header}\n\n${kept.join("\n\n")}\n\n<tuantuan-task>\n${quoted}[${human.senderName}]: ${human.content}\n</tuantuan-task>`;
     if (from)
       text += `\n\n<tuantuan-handoff from="${from.agentName}">\n${from.task}\n</tuantuan-handoff>\n@${from.agentName} 用 handoff 把上面这个任务交给了你，请接手处理。`;
     return [{ type: "text", text }, ...imageBlocks];
@@ -280,13 +405,13 @@ export class Orchestrator implements ToolProvider {
   private async runAgentTurn(
     room: Room,
     agent: Agent,
-    human: Message,
-    images: ImageAttachment[],
-    trigger: Trigger,
-    signal: AbortSignal,
+    run: Run,
+    task: Task,
   ): Promise<{ reply: Message; handoffs: Handoff[] }> {
-    const hop = trigger.hop;
-    const blocks = this.promptFor(room, agent, human, images, trigger.from);
+    const { human, images } = run;
+    const signal = task.abort.signal;
+    const hop = task.hop;
+    const blocks = this.promptFor(room, agent, human, images, task.from);
     const placeholder = this.store.insertMessage({
       roomId: room.id,
       runId: human.id,
@@ -297,21 +422,26 @@ export class Orchestrator implements ToolProvider {
       content: "",
       status: "streaming",
     });
+    task.messageId = placeholder.id;
     this.publish(room.id, { type: "message", message: placeholder });
-    let timeline: Timeline = trigger.from ? { ...emptyTimeline(), handoffFrom: trigger.from } : emptyTimeline();
+    let timeline: Timeline = task.from ? { ...emptyTimeline(), handoffFrom: task.from } : emptyTimeline();
     let saved = Date.now();
     const turnKey = `${room.id}|${agent.id}`;
-    const turn: TurnCtx = { signal, handoffs: [] };
+    const turn: TurnCtx = { signal, task, run, handoffs: [] };
+    task.handoffs = turn.handoffs;
     this.turns.set(turnKey, turn);
     const finish = (status: Message["status"], error: string | null, stopReason: string | null = null) => {
       if (this.turns.get(turnKey) === turn) this.turns.delete(turnKey);
       timeline = { ...timeline, stopReason };
       if (turn.handoffs.length > 0) timeline.handoffs = turn.handoffs;
-      const done = this.store.updateReply(placeholder.id, { content: timelineText(timeline), status, error, timeline });
-      this.publish(room.id, { type: "message", message: done });
+      // A room may be deleted while its harness is acknowledging cancellation.
+      const done = this.store.getMessage(placeholder.id)
+        ? this.store.updateReply(placeholder.id, { content: timelineText(timeline), status, error, timeline })
+        : { ...placeholder, content: timelineText(timeline), status, error, timeline };
+      if (this.store.getMessage(placeholder.id)) this.publish(room.id, { type: "message", message: done });
       return { reply: done, handoffs: status === "done" ? turn.handoffs : [] };
     };
-    if (trigger.from)
+    if (task.from)
       this.publish(room.id, {
         type: "message",
         message: this.store.updateReply(placeholder.id, { content: "", status: "streaming", timeline }),
@@ -323,6 +453,7 @@ export class Orchestrator implements ToolProvider {
         this.identityFor(room, agent),
         blocks,
         (update) => {
+          if (signal.aborted || !this.store.getMessage(placeholder.id)) return;
           const next = applyUpdate(timeline, update);
           if (next === timeline) return;
           timeline = next;
@@ -348,6 +479,11 @@ export class Orchestrator implements ToolProvider {
   }
 
   // ---- Tuantuan MCP tools (server/tuantuan-mcp.ts) ----
+
+  captureContext(ctx: ToolCtx): ToolCtx {
+    const turn = this.turns.get(`${ctx.roomId}|${ctx.agentId}`);
+    return { ...ctx, taskId: turn?.task.id ?? null };
+  }
 
   tools(ctx: ToolCtx): ToolDef[] {
     const room = this.store.getRoom(ctx.roomId);
@@ -391,7 +527,9 @@ export class Orchestrator implements ToolProvider {
           )
           .join("\n");
       case "handoff": {
-        if (!turn) throw new Error("只能在回复过程中交接");
+        if (!turn || turn.signal.aborted) throw new Error("只能在未取消的回复过程中交接");
+        if (ctx.taskId !== undefined && ctx.taskId !== turn.task.id)
+          throw new Error("交接请求不属于当前任务，原任务已结束或请求到达时没有任务");
         const target = String(args.agent ?? "")
           .trim()
           .replace(/^@/, "");
@@ -407,6 +545,27 @@ export class Orchestrator implements ToolProvider {
           );
         if (to.id === ctx.agentId) throw new Error("不能交接给自己");
         if (turn.handoffs.some((h) => h.agentId === to.id)) return `这条回复已经交接给 @${to.name} 了。`;
+        const rt = this.rooms.get(ctx.roomId) as RoomRuntime;
+        const duplicate =
+          [...rt.tasks.values()].some((t) => t.runId === turn.task.runId && t.agentId === to.id && this.isActive(t)) ||
+          turn.run.reservations.has(to.id);
+        if (duplicate || (turn.run.everyone && turn.run.triggered.has(to.id)))
+          return `@${to.name} 已有本轮任务，本次交接已忽略。`;
+        if (turn.run.handoffs >= MAX_AGENT_HOPS) {
+          if (!turn.run.limitNotified) {
+            turn.run.limitNotified = true;
+            this.system(
+              ctx.roomId,
+              turn.task.runId,
+              turn.task.hop,
+              `已达到每条消息最多 ${MAX_AGENT_HOPS} 次 Agent 交接的上限。`,
+            );
+          }
+          return `已达到最多 ${MAX_AGENT_HOPS} 次 Agent 交接的上限，本次交接已忽略。`;
+        }
+        // Reserve synchronously before returning to concurrent callers in other agent lanes.
+        turn.run.handoffs++;
+        turn.run.reservations.add(to.id);
         turn.handoffs.push({ agentId: to.id, agentName: to.name, task: task.slice(0, 4000) });
         return `已交接给 @${to.name}：你这条回复结束后对方会接手。请简短告诉用户你交给了谁，不要替对方完成任务。`;
       }
@@ -416,6 +575,7 @@ export class Orchestrator implements ToolProvider {
   }
 
   private system(roomId: string, runId: string, hop: number, content: string) {
+    if (!this.store.getRoom(roomId)) return;
     const msg = this.store.insertMessage({
       roomId,
       runId,
