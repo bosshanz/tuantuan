@@ -177,3 +177,19 @@ export function defaultsSummary(d: Record<string, string> | undefined): string[]
   }
   return out;
 }
+
+/** Sidebar subtitle: short harness name · friendly model; drops internal ids like builtin:… */
+export function agentSubtitle(harness: string, d: Record<string, string> | undefined): string {
+  const h = harness.replace(/\s*[（(].*?[）)]\s*/g, "").trim();
+  const model = defaultsSummary(d)
+    .filter((x) => !x.startsWith("推理"))
+    .map(
+      (x) =>
+        x
+          .replace(/^builtin:/i, "")
+          .split(/[/:]/)
+          .pop() ?? "",
+    )
+    .find((x) => x && x.length <= 24);
+  return model ? `${h} · ${model}` : h;
+}

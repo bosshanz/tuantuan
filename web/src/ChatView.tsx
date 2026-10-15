@@ -11,6 +11,7 @@ import {
   Loader2,
   PanelRight,
   Plus,
+  Square,
   Trash2,
   Users,
   X,
@@ -357,25 +358,6 @@ export function ChatView(props: {
         </div>
 
         <footer className="composer">
-          {(running || state.queued > 0) && (
-            <div className="run-bar" role="status">
-              <Loader2 size={14} className="spin" />
-              <span className="grow">
-                {replying ? `${replying.senderName} 正在回复…` : "正在准备回复…"}
-                {state.queued > 0 && ` · ${state.queued} 条消息排队中`}
-              </span>
-              <button
-                type="button"
-                className="btn sm"
-                onClick={() => void cancel()}
-                disabled={!running}
-                title="停止回复"
-              >
-                <CircleStop size={13} />
-                停止
-              </button>
-            </div>
-          )}
           {sendError && (
             <div className="error-text" role="alert" style={{ marginBottom: 6 }}>
               {sendError}
@@ -395,6 +377,10 @@ export function ChatView(props: {
             images={images}
             onImages={setImages}
             imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
+            running={running}
+            queued={state.queued}
+            replyingName={replying?.senderName}
+            onStop={() => void cancel()}
             modelPicker={
               <>
                 {primaryView && members.length === 1 && <CtxUsage view={primaryView} />}
@@ -981,6 +967,11 @@ function Composer(props: {
   /** null = the harness does not take images (button hidden). */
   imageNote: string | null;
   modelPicker?: React.ReactNode;
+  /** A reply is in flight: the send button becomes 停止 while the draft is empty. */
+  running?: boolean;
+  queued?: number;
+  replyingName?: string;
+  onStop?: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const addFiles = async (files: Iterable<File>) => {
@@ -1204,15 +1195,29 @@ function Composer(props: {
           <span className="grow" />
         )}
         {props.modelPicker}
-        <button
-          type="button"
-          className="send-btn"
-          onClick={props.onSubmit}
-          disabled={!props.value.trim() && props.images.length === 0}
-          aria-label="发送"
-        >
-          <ArrowUp size={17} />
-        </button>
+        {props.running && !props.value.trim() && props.images.length === 0 ? (
+          <button
+            type="button"
+            className="send-btn stop"
+            onClick={props.onStop}
+            aria-label="停止"
+            title={`停止${props.replyingName ? ` · ${props.replyingName} 正在回复` : ""}${props.queued ? ` · ${props.queued} 条排队中` : ""}`}
+          >
+            <span className="stop-ring" aria-hidden />
+            <Square size={11} fill="currentColor" strokeWidth={0} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="send-btn"
+            onClick={props.onSubmit}
+            disabled={!props.value.trim() && props.images.length === 0}
+            aria-label="发送"
+            title={props.queued ? `发送 · ${props.queued} 条排队中` : "发送"}
+          >
+            <ArrowUp size={17} />
+          </button>
+        )}
       </div>
     </div>
   );

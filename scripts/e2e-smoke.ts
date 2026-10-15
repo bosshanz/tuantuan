@@ -393,7 +393,7 @@ try {
   await page.getByRole("button", { name: "默认推理" }).scrollIntoViewIfNeeded();
   await shot("agent-defaults");
   await page.getByRole("button", { name: "保存修改" }).click();
-  await page.locator(".list-item", { hasText: "Alice" }).filter({ hasText: "推理 高" }).waitFor();
+  await page.locator('.side-agent[title*="推理 高"]', { hasText: "Alice" }).waitFor();
 
   await toRooms();
   await page.locator(".side-top").getByRole("button", { name: "新建会话" }).click();
@@ -559,6 +559,10 @@ try {
 
   await input.fill("/slow");
   await input.press("Enter");
+  await page.locator(".send-btn.stop").waitFor();
+  if (await page.locator(".run-bar").count()) throw new Error("reply banner should be gone");
+  await page.waitForTimeout(250);
+  await shot("composer-stop");
   await page.getByRole("button", { name: "停止" }).click();
   await page.locator(".state-tag", { hasText: "已停止" }).waitFor();
 
@@ -568,9 +572,9 @@ try {
   await page.locator(".model-trigger", { hasText: "Mock Stuck" }).waitFor();
   await input.fill("卡住了吗");
   await input.press("Enter");
-  await page.locator(".run-bar").waitFor();
+  await page.locator(".send-btn.stop").waitFor();
   await page.getByRole("button", { name: "停止" }).click();
-  await page.locator(".run-bar").waitFor({ state: "detached", timeout: 10_000 });
+  await page.locator(".send-btn.stop").waitFor({ state: "detached", timeout: 10_000 });
   await page.locator(".model-trigger").click();
   await page.getByRole("option", { name: "Mock Smart" }).click();
   await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
@@ -880,6 +884,43 @@ try {
       if (label === "Harness" && width === 1024) await shot("harness-1024");
     }
   }
+  // Settings sidebar: Agents sub-list expands smoothly, "新建 Agent" never clipped, concise subtitles.
+  await page.setViewportSize({ width: 1024, height: 640 });
+  await page.goto(`http://localhost:${server.port}/#/harness`);
+  await page.locator(".main .main-head").first().waitFor();
+  const collapse = page.locator(".side-collapse");
+  if ((await collapse.getAttribute("data-open")) !== null) throw new Error("agents list open outside Agents");
+  await page.locator(".side-nav", { hasText: "Agents" }).click();
+  for (const t of [40, 90]) {
+    await page.waitForTimeout(t === 40 ? 40 : 50);
+    if (shotsDir) await page.locator(".side").screenshot({ path: join(shotsDir, `sidebar-expand-${t}ms.png`) });
+  }
+  await page.waitForTimeout(300);
+  const addBtn = page.locator(".side-agent-add");
+  const clip = await addBtn.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const sub = el.closest(".side-sub")?.getBoundingClientRect();
+    const scroll = el.closest(".side-scroll")?.getBoundingClientRect();
+    if (!sub || !scroll) return "missing containers";
+    if (
+      r.bottom > sub.bottom + 0.5 &&
+      (el.closest(".side-sub") as HTMLElement).scrollHeight <= (el.closest(".side-sub") as HTMLElement).clientHeight
+    )
+      return `clipped by list: ${r.bottom} > ${sub.bottom}`;
+    return "";
+  });
+  if (clip) throw new Error(`新建 Agent ${clip}`);
+  await addBtn.scrollIntoViewIfNeeded();
+  if (!(await addBtn.isVisible())) throw new Error("新建 Agent not visible");
+  for (const sub of await page.locator(".side-agent .li-sub").allTextContents())
+    if (/builtin:/i.test(sub)) throw new Error(`internal id in subtitle: ${sub}`);
+  await page.locator(".side-agent", { hasText: ccAgent.name }).first().click();
+  await page.locator(`.side-agent[aria-current="page"]`).waitFor();
+  await page.waitForTimeout(350);
+  await shot("settings-agents");
+  await page.locator(".side-nav", { hasText: "Harness" }).click();
+  await page.waitForTimeout(60);
+  if (shotsDir) await page.locator(".side").screenshot({ path: join(shotsDir, "sidebar-collapse-60ms.png") });
   await page.setViewportSize({ width: 1440, height: 900 });
 
   // Dev setup (`bun dev`): the UI must reach the API and its WebSocket through the Vite proxy.

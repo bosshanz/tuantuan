@@ -22,7 +22,7 @@ import { type Agent, api, connectWs, type McpServer, type Meta, type Project, ty
 import { BrandMark } from "./BrandMark";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
-import { defaultsSummary } from "./config";
+import { agentSubtitle, defaultsSummary } from "./config";
 import { LibraryPage } from "./Library";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
@@ -268,35 +268,54 @@ export function App() {
               </button>
               <div className="side-section-title">设置</div>
               <SideNav icon={<Bot size={17} />} label="Agents" current={section === "agents"} onClick={() => go("a")} />
-              {section === "agents" && (
-                <div className="side-sub">
-                  {agents.map((a) => (
+              <div
+                className="side-collapse"
+                data-open={section === "agents" ? "" : undefined}
+                inert={section !== "agents"}
+              >
+                <div className="side-collapse-inner">
+                  <div className="side-sub">
+                    {agents.map((a) => {
+                      const full = a.harness
+                        ? [harnessName(a.harness), ...defaultsSummary(a.configDefaults)].join(" · ")
+                        : "未绑定 Harness";
+                      return (
+                        <button
+                          type="button"
+                          key={a.id}
+                          className="list-item side-agent"
+                          aria-current={detailId === a.id ? "page" : undefined}
+                          title={`${a.name}\n${full}`}
+                          onClick={() => go(`a/${a.id}`)}
+                        >
+                          <AgentAvatar agent={a} size={24} />
+                          <span className="li-body">
+                            <span className="li-title">{a.name}</span>
+                            <span className="li-sub">
+                              {a.harness ? (
+                                agentSubtitle(harnessName(a.harness), a.configDefaults)
+                              ) : (
+                                <span className="warn-text">未绑定 Harness</span>
+                              )}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
                     <button
                       type="button"
-                      key={a.id}
-                      className="list-item"
-                      aria-current={detailId === a.id ? "page" : undefined}
-                      onClick={() => go(`a/${a.id}`)}
+                      className="side-agent side-agent-add"
+                      aria-current={detailId === "new" ? "page" : undefined}
+                      onClick={() => go("a/new")}
                     >
-                      <AgentAvatar agent={a} size={28} />
-                      <span className="li-body">
-                        <span className="li-title">{a.name}</span>
-                        <span className="li-sub">
-                          {a.harness ? (
-                            [harnessName(a.harness), ...defaultsSummary(a.configDefaults)].join(" · ")
-                          ) : (
-                            <span className="warn-text">未绑定 Harness</span>
-                          )}
-                        </span>
+                      <span className="side-agent-plus">
+                        <Plus size={14} />
                       </span>
+                      新建 Agent
                     </button>
-                  ))}
-                  <button type="button" className="side-add-project" onClick={() => go("a/new")}>
-                    <Plus size={14} />
-                    新建 Agent
-                  </button>
+                  </div>
                 </div>
-              )}
+              </div>
               <SideNav
                 icon={<PlugZap size={17} />}
                 label="Harness"
@@ -339,131 +358,138 @@ export function App() {
       </aside>
 
       <main className="main">
-        {loadError && (
-          <div className="form-error" role="alert" style={{ margin: 12 }}>
-            加载失败：{loadError}
-            <button type="button" className="btn sm" onClick={() => void reload()}>
-              重试
-            </button>
-          </div>
-        )}
-        {projectPage === "new" && (
-          <NewProject
-            workspacesRoot={meta?.workspacesRoot ?? ""}
-            onBack={() => go("c")}
-            onCreated={async (p) => {
-              await reload();
-              go(`p/${p.id}`);
-            }}
-          />
-        )}
-        {editingProject && (
-          <ProjectSettings
-            key={editingProject.id}
-            project={editingProject}
-            conversations={rooms.filter((r) => r.projectId === editingProject.id).length}
-            onChange={reload}
-            onBack={() => go("c")}
-            onDeleted={async () => {
-              await reload();
-              go("c");
-            }}
-          />
-        )}
-        {projectPage && projectPage !== "new" && loaded && !editingProject && (
-          <NotFound what="项目" onBack={() => go("c")} />
-        )}
-        {section === "rooms" && !detailId && loaded && <Welcome agents={agents} rooms={rooms} meta={meta} go={go} />}
-        {route[0] === "c" && detailId === "new" && (
-          <NewRoom
-            key={route[2] ?? "drafts"}
-            agents={agents}
-            projects={projects}
-            projectId={route[2] && projects.some((p) => p.id === route[2]) ? route[2] : "drafts"}
-            onBack={() => go("c")}
-            onCreated={async (r) => {
-              await reload();
-              go(`c/${r.id}`);
-            }}
-          />
-        )}
-        {section === "rooms" && roomId && loaded && !room && <NotFound what="会话" onBack={() => go("c")} />}
-        {room && (
-          <ChatView
-            key={room.id}
-            room={room}
-            project={projects.find((p) => p.id === room.projectId) ?? null}
-            agents={agents}
-            userName={userName}
-            harnessName={harnessName}
-            subscribeEvents={subscribeEvents}
-            onBack={() => go("c")}
-            onRoomChange={reload}
-            onDeleted={async () => {
-              await reload();
-              go("c");
-            }}
-          />
-        )}
-        {section === "setup" && meta && !meta.onboarded && (
-          <Onboarding
-            agents={agents}
-            onDone={async (roomId) => {
-              finishing.current = true;
-              await api("POST", "/api/onboarding");
-              // leave #/setup first, or the "already onboarded" redirect sends us to Harness 管理
-              go(roomId ? `c/${roomId}` : "c");
-              await reload();
-            }}
-          />
-        )}
-        {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
-        {section === "library" && meta && <LibraryPage meta={meta} />}
-        {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
-        {section === "agents" && !detailId && loaded && (
-          <div className="empty">
-            <div className="empty-icon">
-              <Bot size={24} />
+        <div className="pane" key={`${section}/${projectPage ?? ""}/${detailId ?? ""}`}>
+          {loadError && (
+            <div className="form-error" role="alert" style={{ margin: 12 }}>
+              加载失败：{loadError}
+              <button type="button" className="btn sm" onClick={() => void reload()}>
+                重试
+              </button>
             </div>
-            <h2>{agents.length ? "选择一个 Agent 进行编辑" : "创建你的第一个 Agent"}</h2>
-            <button type="button" className="btn primary" onClick={() => go("a/new")}>
-              <Plus size={16} />
-              新建 Agent
-            </button>
-          </div>
-        )}
-        {section === "agents" && detailId && meta && (detailId === "new" || agents.some((a) => a.id === detailId)) && (
-          <AgentEditor
-            key={detailId}
-            meta={meta}
-            agent={detailId === "new" ? null : (agents.find((a) => a.id === detailId) ?? null)}
-            mcpServers={mcpServers}
-            onBack={() => go("a")}
-            onMcpChange={reload}
-            onSaved={async (a) => {
-              await reload();
-              go(`a/${a.id}`);
-            }}
-            onDeleted={async () => {
-              await reload();
-              go("a");
-            }}
-            onStartChat={(a) => {
-              const solo = rooms.find(
-                (r) => r.projectId === "drafts" && r.agentIds.length === 1 && r.agentIds[0] === a.id,
-              );
-              if (solo) go(`c/${solo.id}`);
-              else
-                void api<Room>("POST", "/api/rooms", { name: a.name, agentIds: [a.id] }).then(async (r) => {
+          )}
+          {projectPage === "new" && (
+            <NewProject
+              workspacesRoot={meta?.workspacesRoot ?? ""}
+              onBack={() => go("c")}
+              onCreated={async (p) => {
+                await reload();
+                go(`p/${p.id}`);
+              }}
+            />
+          )}
+          {editingProject && (
+            <ProjectSettings
+              key={editingProject.id}
+              project={editingProject}
+              conversations={rooms.filter((r) => r.projectId === editingProject.id).length}
+              onChange={reload}
+              onBack={() => go("c")}
+              onDeleted={async () => {
+                await reload();
+                go("c");
+              }}
+            />
+          )}
+          {projectPage && projectPage !== "new" && loaded && !editingProject && (
+            <NotFound what="项目" onBack={() => go("c")} />
+          )}
+          {section === "rooms" && !detailId && loaded && <Welcome agents={agents} rooms={rooms} meta={meta} go={go} />}
+          {route[0] === "c" && detailId === "new" && (
+            <NewRoom
+              key={route[2] ?? "drafts"}
+              agents={agents}
+              projects={projects}
+              projectId={route[2] && projects.some((p) => p.id === route[2]) ? route[2] : "drafts"}
+              onBack={() => go("c")}
+              onCreated={async (r) => {
+                await reload();
+                go(`c/${r.id}`);
+              }}
+            />
+          )}
+          {section === "rooms" && roomId && loaded && !room && <NotFound what="会话" onBack={() => go("c")} />}
+          {room && (
+            <ChatView
+              key={room.id}
+              room={room}
+              project={projects.find((p) => p.id === room.projectId) ?? null}
+              agents={agents}
+              userName={userName}
+              harnessName={harnessName}
+              subscribeEvents={subscribeEvents}
+              onBack={() => go("c")}
+              onRoomChange={reload}
+              onDeleted={async () => {
+                await reload();
+                go("c");
+              }}
+            />
+          )}
+          {section === "setup" && meta && !meta.onboarded && (
+            <Onboarding
+              agents={agents}
+              onDone={async (roomId) => {
+                finishing.current = true;
+                await api("POST", "/api/onboarding");
+                // leave #/setup first, or the "already onboarded" redirect sends us to Harness 管理
+                go(roomId ? `c/${roomId}` : "c");
+                await reload();
+              }}
+            />
+          )}
+          {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
+          {section === "library" && meta && <LibraryPage meta={meta} />}
+          {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
+          {section === "agents" && !detailId && loaded && (
+            <div className="empty">
+              <div className="empty-icon">
+                <Bot size={24} />
+              </div>
+              <h2>{agents.length ? "选择一个 Agent 进行编辑" : "创建你的第一个 Agent"}</h2>
+              <button type="button" className="btn primary" onClick={() => go("a/new")}>
+                <Plus size={16} />
+                新建 Agent
+              </button>
+            </div>
+          )}
+          {section === "agents" &&
+            detailId &&
+            meta &&
+            (detailId === "new" || agents.some((a) => a.id === detailId)) && (
+              <AgentEditor
+                key={detailId}
+                meta={meta}
+                agent={detailId === "new" ? null : (agents.find((a) => a.id === detailId) ?? null)}
+                mcpServers={mcpServers}
+                onBack={() => go("a")}
+                onMcpChange={reload}
+                onSaved={async (a) => {
                   await reload();
-                  go(`c/${r.id}`);
-                });
-            }}
-          />
-        )}
-        {section === "agents" && detailId && detailId !== "new" && loaded && !agents.some((a) => a.id === detailId) && (
-          <NotFound what="Agent" onBack={() => go("a")} />
-        )}
+                  go(`a/${a.id}`);
+                }}
+                onDeleted={async () => {
+                  await reload();
+                  go("a");
+                }}
+                onStartChat={(a) => {
+                  const solo = rooms.find(
+                    (r) => r.projectId === "drafts" && r.agentIds.length === 1 && r.agentIds[0] === a.id,
+                  );
+                  if (solo) go(`c/${solo.id}`);
+                  else
+                    void api<Room>("POST", "/api/rooms", { name: a.name, agentIds: [a.id] }).then(async (r) => {
+                      await reload();
+                      go(`c/${r.id}`);
+                    });
+                }}
+              />
+            )}
+          {section === "agents" &&
+            detailId &&
+            detailId !== "new" &&
+            loaded &&
+            !agents.some((a) => a.id === detailId) && <NotFound what="Agent" onBack={() => go("a")} />}
+        </div>
       </main>
 
       {palette.mounted && (
