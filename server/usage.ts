@@ -35,6 +35,8 @@ export interface HarnessUsage {
   limits: LimitWindow[];
   limitsAt: number | null;
   limitsSource: string | null;
+  /** USD spent today, when the harness records prices (Grok's costUsdTicks). */
+  costToday?: number | null;
   /** Why something is missing (honest "not available"). */
   notes: string[];
   plan: string | null;
@@ -226,4 +228,80 @@ export function parseCodexStatusMarkdown(md: string): { limits: LimitWindow[]; a
   }
   const account = /\*\*Account:\*\*\s*([^\n]+)/.exec(md)?.[1]?.trim() ?? null;
   return { limits, account };
+}
+
+/**
+ * Grok Build: per-turn token (and cost) totals via the documented `grok usage <session-id>` command
+ * ("use this instead of reading session files"). Session ids come from the directory names under
+ * ~/.grok/sessions/<cwd>/; only sessions touched in the last 7 days are queried.
+ */
+export async function grokLocalUsage(
+  bin: string,
+  now = new Date(),
+): Promise<{ today: TokenTotals; week: TokenTotals; costToday: number | null; sessions: number } | null> {
+  const root = join(home(), ".grok", "sessions");
+  if (!existsSync(root)) return null;
+  const day = startOfToday(now);
+  const week = now.getTime() - 7 * 86_400_000;
+  const ids: string[] = [];
+  for (const cwd of readdirSafe(root)) {
+    const dir = join(root, cwd);
+    for (const id of readdirSafe(dir)) {
+      if (!/^[0-9a-f-]{20,}$/i.test(id)) continue;
+      try {
+        const st = statSync(join(dir, id));
+        if (st.isDirectory() && st.mtimeMs >= week) ids.push(id);
+      } catch {
+        // vanished
+      }
+    }
+  }
+  const t = zero();
+  const w = zero();
+  let cost: number | null = null;
+  const env = { ...process.env, ...(process.env.TUANTUAN_USAGE_HOME ? { HOME: home() } : {}) };
+  const one = async (id: string) => {
+    try {
+      const p = Bun.spawn([bin, "usage", id], { stdout: "pipe", stderr: "ignore", stdin: "ignore", env });
+      const timer = setTimeout(() => p.kill(), 10_000);
+      const out = await new Response(p.stdout).text();
+      clearTimeout(timer);
+      if ((await p.exited) !== 0) return; // "No usage recorded" etc.
+      const v = JSON.parse(out) as { turns?: Record<string, unknown>[] };
+      for (const turn of v.turns ?? []) {
+        const at = Date.parse(String(turn.endedAt ?? ""));
+        if (!Number.isFinite(at) || at < week) continue;
+        const n = (k: string) => (typeof turn[k] === "number" ? (turn[k] as number) : 0);
+        const add = (x: TokenTotals) => {
+          x.input += n("inputTokens") - n("cachedReadTokens");
+          x.cacheRead += n("cachedReadTokens");
+          x.cacheWrite += n("cacheCreationTokens");
+          x.output += n("outputTokens");
+          x.total += n("totalTokens");
+        };
+        add(w);
+        if (at >= day) {
+          add(t);
+          if (typeof turn.costUsdTicks === "number") cost = (cost ?? 0) + turn.costUsdTicks / 1e10;
+        }
+      }
+    } catch {
+      // unreadable output: skip this session
+    }
+  };
+  const queue = ids.slice(0, 200);
+  await Promise.all(
+    Array.from({ length: 6 }, async () => {
+      for (let id = queue.shift(); id; id = queue.shift()) await one(id);
+    }),
+  );
+  return { today: t, week: w, costToday: cost, sessions: ids.length };
+}
+
+function readdirSafe(d: string): string[] {
+  try {
+    return readdirSync(d);
+  } catch {
+    return [];
+  }
 }

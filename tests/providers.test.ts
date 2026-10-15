@@ -24,6 +24,7 @@ const prov = (x: Partial<ProviderSecret> = {}): ProviderSecret => ({
   anthropicBaseUrl: "https://api.deepseek.com/anthropic/",
   openaiBaseUrl: "https://api.deepseek.com/v1",
   apiKey: "sk-secret-1234567890",
+  mgmtKey: "",
   model: "deepseek-v4-pro",
   smallModel: "deepseek-flash",
   wireApi: "chat",

@@ -547,6 +547,27 @@ try {
       body: JSON.stringify({ name: "架构师", harness: "claude-code", identity: "", env: {}, mcpServerIds: [] }),
     })
   ).json();
+  // Grok Build "installed" now (after the install checks above): a stand-in CLI that answers
+  // `grok usage <id>` with the JSON captured from the real grok 1.0.52.
+  {
+    const gdir = join(fakeHome, ".grok");
+    mkdirSync(join(gdir, "bin"), { recursive: true });
+    const sid = "01a13d37-9bd8-7672-97ce-4c27e230203f";
+    mkdirSync(join(gdir, "sessions", "%2Fwork", sid), { recursive: true });
+    const real = JSON.parse(readFileSync("tests/fixtures/grok-usage.json", "utf8"));
+    const turns = [1290, 1290, 1290].map((totalTokens) => ({
+      ...real.turns[0],
+      totalTokens,
+      endedAt: new Date().toISOString(),
+      costUsdTicks: 4e8,
+    }));
+    writeFileSync(join(gdir, "usage.json"), JSON.stringify({ ...real, turns }));
+    writeFileSync(
+      join(gdir, "bin", "grok"),
+      `#!/bin/sh\ncase "$1" in --version) echo "grok 1.0.52";; usage) cat "${join(gdir, "usage.json")}";; *) exit 1;; esac\n`,
+    );
+    chmodSync(join(gdir, "bin", "grok"), 0o755);
+  }
   await page.reload();
   await page.locator(".rail .dot.ok").waitFor();
   await page.locator(".rail").getByRole("button", { name: "服务商" }).click();
@@ -556,7 +577,11 @@ try {
   await codexCard.getByText("剩 19%").waitFor();
   await codexCard.getByText("plus").waitFor();
   await page.getByTestId("usage-claude-code").getByText("126.0k").first().waitFor();
-  await page.getByTestId("usage-grok").getByText("暂不支持查询").waitFor();
+  await page.getByTestId("usage-opencode").getByText("暂不支持查询").waitFor();
+  const grokCard = page.getByTestId("usage-grok");
+  await grokCard.getByText("3.9k").first().waitFor();
+  await grokCard.getByText("$0.12").waitFor();
+  await grokCard.getByText(/ACP 没有提供/).waitFor();
   await page
     .getByTestId("usage-tuantuan")
     .getByText(/\d+ 轮/)

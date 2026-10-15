@@ -69,7 +69,7 @@ test("providers API: create masked, edit keeps key, assign, delete falls back to
   expect(after?.providerId).toBeNull();
 });
 
-test("usage API: per-turn ACP usage is logged; grok / opencode honestly not available", async () => {
+test("usage API: per-turn ACP usage is logged; opencode honestly not available, grok account allowance flagged", async () => {
   const a = await api<Agent>("POST", "/api/agents", agentInput("U"));
   const pj = await api<Project>("POST", "/api/projects", { name: "u", cwd: WORKSPACES });
   const room = await api<Room>("POST", "/api/rooms", { name: "u", agentIds: [a.data.id], projectId: pj.data.id });
@@ -80,7 +80,9 @@ test("usage API: per-turn ACP usage is logged; grok / opencode honestly not avai
     tuantuan: { harness: string; turns: number; total: number }[];
   }>("GET", "/api/usage");
   expect(u.data.tuantuan).toContainEqual(expect.objectContaining({ harness: "mock", turns: 1, total: 1200 }));
-  for (const h of ["grok", "opencode"])
-    expect(u.data.harnesses.find((x) => x.harness === h)?.notes).toEqual(["没有公开的用量 / 额度来源"]);
+  expect(u.data.harnesses.find((x) => x.harness === "opencode")?.notes).toEqual(["没有公开的用量 / 额度来源"]);
+  expect(u.data.harnesses.find((x) => x.harness === "grok")?.notes).toContain(
+    "账号额度只在 Grok 界面的 /usage 里显示，ACP 没有提供",
+  );
   expect(u.data.harnesses.map((x) => x.harness)).toEqual(["claude-code", "codex", "grok", "opencode"]);
 });

@@ -10,7 +10,7 @@ import { type CustomFormat, maskKey } from "./custom";
  * BYOK directly. Never written to ~/.claude or ~/.codex. Presets follow CC Switch's list.
  */
 
-export type BalanceKind = "deepseek" | "openrouter" | "kimi" | "siliconflow";
+export type BalanceKind = "deepseek" | "openrouter" | "kimi" | "siliconflow" | "xai";
 
 export interface ProviderPreset {
   id: string;
@@ -51,6 +51,16 @@ export const PRESETS: ProviderPreset[] = [
     openaiBaseUrl: "https://api.openai.com/v1",
     wireApi: "responses",
     keyUrl: "https://platform.openai.com/api-keys",
+  }),
+  p({
+    id: "xai",
+    name: "xAI Grok",
+    color: "#0a0a0a",
+    openaiBaseUrl: "https://api.x.ai/v1",
+    model: "grok-4.6",
+    wireApi: "responses",
+    balance: "xai",
+    keyUrl: "https://console.x.ai",
   }),
   p({
     id: "deepseek",
@@ -132,6 +142,8 @@ export interface ProviderSecret {
   anthropicBaseUrl: string;
   openaiBaseUrl: string;
   apiKey: string;
+  /** xAI only: Management API key (console.x.ai → Settings → Management Keys), for the prepaid balance. */
+  mgmtKey: string;
   model: string;
   smallModel: string;
   wireApi: "responses" | "chat";
@@ -139,12 +151,23 @@ export interface ProviderSecret {
   updatedAt: number;
 }
 
-export type Provider = Omit<ProviderSecret, "apiKey"> & { keyHint: string; color: string; balance: BalanceKind | null };
+export type Provider = Omit<ProviderSecret, "apiKey" | "mgmtKey"> & {
+  keyHint: string;
+  mgmtKeyHint: string;
+  color: string;
+  balance: BalanceKind | null;
+};
 
 export function publicProvider(s: ProviderSecret): Provider {
-  const { apiKey, ...rest } = s;
+  const { apiKey, mgmtKey, ...rest } = s;
   const preset = PRESETS.find((x) => x.id === s.preset);
-  return { ...rest, keyHint: maskKey(apiKey), color: preset?.color ?? "#6b7280", balance: preset?.balance ?? null };
+  return {
+    ...rest,
+    keyHint: maskKey(apiKey),
+    mgmtKeyHint: mgmtKey ? maskKey(mgmtKey) : "",
+    color: preset?.color ?? "#6b7280",
+    balance: preset?.balance ?? null,
+  };
 }
 
 /** Harnesses a profile can drive. */
@@ -303,6 +326,7 @@ export async function providerBalance(s: ProviderSecret): Promise<Balance> {
   if (!kind) return none("这个服务商没有公开的余额接口");
   if (!s.apiKey) return none("没有 Key");
   const base = origin(s.openaiBaseUrl || s.anthropicBaseUrl);
+  if (kind === "xai") return xaiBalance(s, base, at);
   const url =
     kind === "deepseek"
       ? `${base}/user/balance`
@@ -340,6 +364,61 @@ export async function providerBalance(s: ProviderSecret): Promise<Balance> {
   const valid = amounts.filter((a) => Number.isFinite(a.amount));
   if (!valid.length) return { ...none("返回格式无法识别"), source: url };
   return { available: true, amounts: valid, note: null, source: url, at };
+}
+
+/**
+ * xAI (documented): GET /v1/api-key with the inference key gives the team id and whether the key /
+ * team is blocked; the prepaid balance needs a separate Management key:
+ * GET https://management-api.x.ai/v1/billing/teams/{team_id}/prepaid/balance → total.val in USD
+ * cents, where purchases are negative (so available credit = -total).
+ */
+async function xaiBalance(s: ProviderSecret, base: string, at: number): Promise<Balance> {
+  const none = (note: string, source: string | null = null): Balance => ({
+    available: false,
+    amounts: [],
+    note,
+    source,
+    at,
+  });
+  const keyUrl = `${base}/v1/api-key`;
+  let info: Record<string, unknown>;
+  try {
+    const r = await fetch(keyUrl, {
+      headers: { authorization: `Bearer ${s.apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!r.ok) return none(r.status === 401 || r.status === 400 ? "Key 无效" : `HTTP ${r.status}`, keyUrl);
+    info = (await r.json()) as Record<string, unknown>;
+  } catch (e) {
+    return none((e as Error).message, keyUrl);
+  }
+  if (info.api_key_blocked || info.api_key_disabled) return none("这个 Key 已被停用", keyUrl);
+  if (info.team_blocked) return none("团队已被停用（可能欠费）", keyUrl);
+  const team = typeof info.team_id === "string" ? info.team_id : "";
+  if (!s.mgmtKey) return none("Key 正常。查余额需要填写 Management Key", keyUrl);
+  if (!team) return none("没拿到 team_id", keyUrl);
+  const mgmt = base === "https://api.x.ai" ? "https://management-api.x.ai" : base;
+  const url = `${mgmt}/v1/billing/teams/${encodeURIComponent(team)}/prepaid/balance`;
+  try {
+    const r = await fetch(url, {
+      headers: { authorization: `Bearer ${s.mgmtKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!r.ok)
+      return none(r.status === 401 || r.status === 403 ? "Management Key 无效或没有权限" : `HTTP ${r.status}`, url);
+    const body = (await r.json()) as { total?: { val?: string | number } };
+    const cents = Number(body.total?.val);
+    if (!Number.isFinite(cents)) return none("返回格式无法识别", url);
+    return {
+      available: true,
+      amounts: [{ currency: "USD", amount: -cents / 100, label: "预付余额" }],
+      note: null,
+      source: url,
+      at,
+    };
+  } catch (e) {
+    return none((e as Error).message, url);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

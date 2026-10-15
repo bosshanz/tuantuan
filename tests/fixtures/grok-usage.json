@@ -1,0 +1,52 @@
+{
+  "sessionId": "01a13d37-9bd8-7672-97ce-4c27e230203f",
+  "updatedAt": "2026-10-15T01:40:17.119155634+00:00",
+  "session": {
+    "inputTokens": 1234,
+    "outputTokens": 56,
+    "cachedReadTokens": 1000,
+    "cacheCreationTokens": 0,
+    "reasoningTokens": 0,
+    "totalTokens": 1290,
+    "modelCalls": 1,
+    "turnCount": 1,
+    "primaryModelId": "mock-model",
+    "modelUsage": {
+      "mock-model": {
+        "inputTokens": 1234,
+        "outputTokens": 56,
+        "cachedReadTokens": 1000,
+        "cacheCreationTokens": 0,
+        "reasoningTokens": 0,
+        "totalTokens": 1290,
+        "modelCalls": 1
+      }
+    }
+  },
+  "turns": [
+    {
+      "turnNumber": 1,
+      "endedAt": "2026-10-15T01:40:17.119155634+00:00",
+      "inputTokens": 1234,
+      "outputTokens": 56,
+      "cachedReadTokens": 1000,
+      "cacheCreationTokens": 0,
+      "reasoningTokens": 0,
+      "totalTokens": 1290,
+      "modelCalls": 1,
+      "turnCount": 1,
+      "primaryModelId": "mock-model",
+      "modelUsage": {
+        "mock-model": {
+          "inputTokens": 1234,
+          "outputTokens": 56,
+          "cachedReadTokens": 1000,
+          "cacheCreationTokens": 0,
+          "reasoningTokens": 0,
+          "totalTokens": 1290,
+          "modelCalls": 1
+        }
+      }
+    }
+  ]
+}

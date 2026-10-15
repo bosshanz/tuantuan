@@ -475,7 +475,8 @@ export class HarnessHost {
           );
         }),
       ]);
-      const u = res.usage;
+      // ACP `usage` (Claude Code, Codex); Grok Build reports the same counters under `_meta.usage`.
+      const u = res.usage ?? grokMetaUsage(res._meta);
       if (u)
         this.store.logUsage({
           roomId: room.id,
@@ -724,4 +725,17 @@ export function selectValues(o: acp.SessionConfigOption): string[] {
     else if (g.value !== undefined) out.push(g.value);
   }
   return out;
+}
+
+function grokMetaUsage(meta: unknown): acp.Usage | null {
+  const u = (meta as { usage?: Record<string, unknown> } | null | undefined)?.usage;
+  if (!u || typeof u.totalTokens !== "number") return null;
+  const n = (k: string) => (typeof u[k] === "number" ? (u[k] as number) : 0);
+  return {
+    inputTokens: n("inputTokens"),
+    outputTokens: n("outputTokens"),
+    cachedReadTokens: n("cachedReadTokens"),
+    cachedWriteTokens: n("cacheCreationTokens"),
+    totalTokens: n("totalTokens"),
+  };
 }

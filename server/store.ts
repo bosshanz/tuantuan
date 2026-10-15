@@ -184,6 +184,8 @@ export const MIGRATIONS: string[] = [
      total_tokens INTEGER NOT NULL DEFAULT 0
    );
    CREATE INDEX usage_log_at ON usage_log(at);`,
+  // xAI: optional Management API key for the prepaid balance (separate from the inference key).
+  `ALTER TABLE providers ADD COLUMN mgmt_key TEXT NOT NULL DEFAULT '';`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -668,7 +670,9 @@ export class Store {
     return r ? toProvider(r) : null;
   }
 
-  saveProvider(input: Omit<ProviderSecret, "id" | "createdAt" | "updatedAt"> & { id?: string }): ProviderSecret {
+  saveProvider(
+    input: Omit<ProviderSecret, "id" | "createdAt" | "updatedAt" | "mgmtKey"> & { id?: string; mgmtKey?: string },
+  ): ProviderSecret {
     const now = Date.now();
     const old = input.id ? this.getProvider(input.id) : null;
     const id = old?.id ?? input.id ?? crypto.randomUUID();
@@ -680,6 +684,7 @@ export class Store {
       openai_base_url: input.openaiBaseUrl,
       // empty key on edit = keep the stored one (the browser only ever sees a mask)
       api_key: input.apiKey || old?.apiKey || "",
+      mgmt_key: input.mgmtKey || old?.mgmtKey || "",
       model: input.model,
       small_model: input.smallModel,
       wire_api: input.wireApi,
@@ -688,10 +693,10 @@ export class Store {
     };
     this.db
       .query(
-        `INSERT INTO providers (id,name,preset,anthropic_base_url,openai_base_url,api_key,model,small_model,wire_api,created_at,updated_at)
-         VALUES ($id,$name,$preset,$anthropic_base_url,$openai_base_url,$api_key,$model,$small_model,$wire_api,$created_at,$updated_at)
+        `INSERT INTO providers (id,name,preset,anthropic_base_url,openai_base_url,api_key,mgmt_key,model,small_model,wire_api,created_at,updated_at)
+         VALUES ($id,$name,$preset,$anthropic_base_url,$openai_base_url,$api_key,$mgmt_key,$model,$small_model,$wire_api,$created_at,$updated_at)
          ON CONFLICT(id) DO UPDATE SET name=$name,preset=$preset,anthropic_base_url=$anthropic_base_url,openai_base_url=$openai_base_url,
-           api_key=$api_key,model=$model,small_model=$small_model,wire_api=$wire_api,updated_at=$updated_at`,
+           api_key=$api_key,mgmt_key=$mgmt_key,model=$model,small_model=$small_model,wire_api=$wire_api,updated_at=$updated_at`,
       )
       .run(row);
     return this.getProvider(id) as ProviderSecret;
@@ -796,6 +801,7 @@ function toProvider(r: Row): ProviderSecret {
     anthropicBaseUrl: r.anthropic_base_url as string,
     openaiBaseUrl: r.openai_base_url as string,
     apiKey: r.api_key as string,
+    mgmtKey: (r.mgmt_key as string) ?? "",
     model: r.model as string,
     smallModel: r.small_model as string,
     wireApi: (r.wire_api as string) === "responses" ? "responses" : "chat",

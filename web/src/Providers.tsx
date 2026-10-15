@@ -28,6 +28,7 @@ export interface ProviderItem {
   smallModel: string;
   wireApi: "responses" | "chat";
   keyHint: string;
+  mgmtKeyHint: string;
   color: string;
   balance: string | null;
   usedBy: string[];
@@ -241,7 +242,7 @@ function Tokens({ label, t }: { label: string; t: TokenTotals | null }) {
 function UsageCard({ u, onUpdate }: { u: HarnessUsage; onUpdate: (h: HarnessUsage[]) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const live = u.harness === "claude-code" || u.harness === "codex";
+  const live = u.harness === "claude-code" || u.harness === "codex" || u.harness === "grok";
   const na = !live;
   const refresh = async () => {
     setBusy(true);
@@ -290,6 +291,12 @@ function UsageCard({ u, onUpdate }: { u: HarnessUsage; onUpdate: (h: HarnessUsag
           <div className="toks">
             <Tokens label="今天" t={u.today} />
             <Tokens label="7 天" t={u.week} />
+            {typeof u.costToday === "number" && (
+              <div className="tok">
+                <span className="muted">今天花费</span>
+                <b>${u.costToday.toFixed(2)}</b>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -470,6 +477,7 @@ interface Draft {
   anthropicBaseUrl: string;
   openaiBaseUrl: string;
   apiKey: string;
+  mgmtKey: string;
   model: string;
   smallModel: string;
   wireApi: "responses" | "chat";
@@ -483,13 +491,14 @@ function ProviderDialog(props: {
   const v = props.value;
   const [d, setD] = useState<Draft>(
     v
-      ? { ...v, apiKey: "" }
+      ? { ...v, apiKey: "", mgmtKey: "" }
       : {
           name: "",
           preset: "custom",
           anthropicBaseUrl: "",
           openaiBaseUrl: "",
           apiKey: "",
+          mgmtKey: "",
           model: "",
           smallModel: "",
           wireApi: "chat",
@@ -579,6 +588,21 @@ function ProviderDialog(props: {
               onChange={(e) => set("apiKey", e.target.value)}
             />
           </label>
+          {preset?.balance === "xai" && (
+            <label className="field">
+              <span className="label">Management Key（选填，用于查余额）</span>
+              <input
+                className="input"
+                type="password"
+                autoComplete="off"
+                placeholder={
+                  v?.mgmtKeyHint ? `${v.mgmtKeyHint}（留空不变）` : "console.x.ai → Settings → Management Keys"
+                }
+                value={d.mgmtKey}
+                onChange={(e) => set("mgmtKey", e.target.value)}
+              />
+            </label>
+          )}
           <label className="field">
             <span className="label">Claude Code 地址</span>
             <input

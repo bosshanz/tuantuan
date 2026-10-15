@@ -37,6 +37,7 @@ import { TuantuanMcp } from "./tuantuan-mcp";
 import {
   claudeLocalUsage,
   codexLocalUsage,
+  grokLocalUsage,
   type HarnessUsage,
   type LimitWindow,
   parseClaudeUsageMarkdown,
@@ -292,7 +293,25 @@ export function createApp(deps: AppDeps) {
     }
   }
 
-  function usageOverview(): HarnessUsage[] {
+  let grokCache: { at: number; v: { usage: Awaited<ReturnType<typeof grokLocalUsage>>; note: string | null } } | null =
+    null;
+  async function grokUsage(force = false) {
+    if (!force && grokCache && Date.now() - grokCache.at < 60_000) return grokCache.v;
+    const spec = harnessSpec("grok");
+    const status = spec
+      ? await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {}).grok ?? null)
+      : null;
+    let v: { usage: Awaited<ReturnType<typeof grokLocalUsage>>; note: string | null };
+    if (!status?.command) v = { usage: null, note: "没有安装 Grok" };
+    else {
+      const usage = await grokLocalUsage(status.command);
+      v = { usage, note: usage ? null : "没有 ~/.grok/sessions 记录" };
+    }
+    grokCache = { at: Date.now(), v };
+    return v;
+  }
+
+  async function usageOverview(): Promise<HarnessUsage[]> {
     const out: HarnessUsage[] = [];
     const cl = claudeLocalUsage();
     const clLive = liveLimits.get("claude-code");
@@ -322,17 +341,28 @@ export function createApp(deps: AppDeps) {
       plan: cx?.plan ?? (liveFresh ? cxLive.plan : null),
       notes: [...(cx ? [] : ["没有 ~/.codex/sessions 记录"]), ...(cxLive?.error && !liveFresh ? [cxLive.error] : [])],
     });
-    for (const h of ["grok", "opencode"])
-      out.push({
-        harness: h,
-        today: null,
-        week: null,
-        limits: [],
-        limitsAt: null,
-        limitsSource: null,
-        plan: null,
-        notes: ["没有公开的用量 / 额度来源"],
-      });
+    const gk = await grokUsage();
+    out.push({
+      harness: "grok",
+      today: gk.usage?.today ?? null,
+      week: gk.usage?.week ?? null,
+      costToday: gk.usage?.costToday ?? null,
+      limits: [],
+      limitsAt: null,
+      limitsSource: gk.usage ? "grok usage <session>" : null,
+      plan: null,
+      notes: [...(gk.note ? [gk.note] : []), "账号额度只在 Grok 界面的 /usage 里显示，ACP 没有提供"],
+    });
+    out.push({
+      harness: "opencode",
+      today: null,
+      week: null,
+      limits: [],
+      limitsAt: null,
+      limitsSource: null,
+      plan: null,
+      notes: ["没有公开的用量 / 额度来源"],
+    });
     return out;
   }
 
@@ -477,6 +507,7 @@ export function createApp(deps: AppDeps) {
         anthropicBaseUrl: z.string().trim().max(500).default(""),
         openaiBaseUrl: z.string().trim().max(500).default(""),
         apiKey: z.string().max(4000).default(""),
+        mgmtKey: z.string().max(4000).default(""),
         model: z.string().trim().max(200).default(""),
         smallModel: z.string().trim().max(200).default(""),
         wireApi: z.enum(["responses", "chat"]).default("chat"),
@@ -547,11 +578,15 @@ export function createApp(deps: AppDeps) {
       if (!id && method === "GET") {
         const day = new Date();
         const since = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
-        return json({ harnesses: usageOverview(), tuantuan: store.usageSince(since) });
+        return json({ harnesses: await usageOverview(), tuantuan: store.usageSince(since) });
       }
       if ((id === "claude-code" || id === "codex") && sub === "live" && method === "POST") {
         await harnessLiveLimits(id);
-        return json({ harnesses: usageOverview() });
+        return json({ harnesses: await usageOverview() });
+      }
+      if (id === "grok" && sub === "live" && method === "POST") {
+        await grokUsage(true);
+        return json({ harnesses: await usageOverview() });
       }
     }
 

@@ -138,7 +138,7 @@ Harness 通过 ACP `configOptions`（及旧的 `modes`）提供的设置，显�
 
 ## 服务商与用量
 
-左侧「服务商」页保存可复用的 API 服务商（名称、图标、Claude Code 地址、OpenAI 兼容地址、Key、主模型 / 快速模型、接口格式）。预设：Anthropic、OpenAI、DeepSeek、Kimi、智谱 GLM、通义千问、MiniMax、硅基流动、OpenRouter、自定义。每个服务商可以「测速」（带 Key 请求 `/models`，显示延迟）、查「余额」（只有公开接口的才有），并用「切换 Agent」一键改用它。
+左侧「服务商」页保存可复用的 API 服务商（名称、图标、Claude Code 地址、OpenAI 兼容地址、Key、主模型 / 快速模型、接口格式）。预设：Anthropic、OpenAI、xAI Grok、DeepSeek、Kimi、智谱 GLM、通义千问、MiniMax、硅基流动、OpenRouter、自定义。每个服务商可以「测速」（带 Key 请求 `/models`，显示延迟）、查「余额」（只有公开接口的才有），并用「切换 Agent」一键改用它。
 
 Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的登录、CC Switch 和环境变量。选了服务商后只影响这个 Agent 的 Harness 进程：
 
@@ -158,7 +158,10 @@ Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的
 | Claude Code `/usage`（点刷新） | 5 小时 / 每周额度、重置时间、套餐 | 由 claude-agent-acp 自己查询；只用 API Key 时没有额度信息 |
 | Codex 本机记录 `~/.codex/sessions/**/rollout-*.jsonl` | token、`rate_limits`（5 小时 / 每周）、套餐 | 取最新一条 `token_count` |
 | Codex `/status`（点刷新） | 额度 | 需要已 `codex login` |
-| Grok / OpenCode | — | 没有公开来源，显示「暂不支持查询」 |
+| Grok：官方 `grok usage <session-id>`（文档建议用它，不直接读会话文件） | 今天 / 7 天 token、今天花费（有价格时） | 只查最近 7 天动过的会话；账号额度只在 Grok 界面的 `/usage` 里，ACP 没有提供，如实注明 |
+| Grok 每轮 ACP 返回的 `_meta.usage` | 计入「团团今天」 | |
+| OpenCode | — | 没有公开来源，显示「暂不支持查询」 |
+| 余额：xAI `GET /v1/api-key`（检查 Key / 团队是否被停用，拿 team_id）+ Management API `GET /v1/billing/teams/{team_id}/prepaid/balance`（需另填 Management Key） | 预付余额（美元） | 没填 Management Key 时只显示 Key 状态 |
 | 余额：DeepSeek `/user/balance`、OpenRouter `/api/v1/credits`、Kimi `/v1/users/me/balance`、硅基流动 `/v1/user/info` | 余额 | 其它服务商显示「没有公开的余额接口」 |
 | 团团自己 | 今天每个 Harness / 服务商的轮数和 token | 来自每轮 ACP `session/prompt` 返回的 `usage` |
 
