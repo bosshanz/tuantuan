@@ -3,7 +3,7 @@
 // SHOTS_DIR=<dir> also saves screenshots of the main screens.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { chromium } from "playwright-core";
 import { serve } from "../server/app";
 
@@ -24,6 +24,21 @@ chmodSync(fakeShell, 0o755);
 process.env.SHELL = fakeShell;
 process.env.TUANTUAN_MOCK_INSTALL_DIR = join(fakeHome, "bin");
 writeFileSync(join(cwd, "mock-edit.txt"), "hello\n");
+// No OS folder dialog in CI: the in-app folder browser is used. Skills are discovered from a fake home.
+process.env.TUANTUAN_NATIVE_PICKER = "0";
+process.env.TUANTUAN_SKILLS_HOME = fakeHome;
+const putSkill = (root: string, name: string, description: string) => {
+  mkdirSync(join(root, name), { recursive: true });
+  writeFileSync(join(root, name, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n\nUse ${name}.\n`);
+};
+putSkill(join(fakeHome, ".claude", "skills"), "code-review", "审查改动并指出风险");
+putSkill(join(fakeHome, ".agents", "skills"), "pdf-tools", "读取、拆分和合并 PDF");
+putSkill(join(fakeHome, ".codex", "skills"), "release-notes", "根据提交生成发布说明");
+putSkill(join(cwd, ".agents", "skills"), "deploy", "部署到预发环境");
+const skillSrv = Bun.serve({
+  port: 0,
+  fetch: () => new Response("---\nname: changelog\ndescription: 维护 CHANGELOG.md\n---\n\nKeep a changelog.\n"),
+});
 const shotsDir = process.env.SHOTS_DIR;
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });
 const { server, app } = serve({ dbPath, staticDir: "web/dist" }, 0);
@@ -125,12 +140,47 @@ try {
   await page.getByRole("button", { name: "新建项目" }).click();
   await page.getByLabel("项目名称").fill("冒烟项目");
   await page.getByRole("button", { name: "选择已有" }).click();
-  await page.getByLabel("文件夹路径").fill(cwd);
+  await page.getByRole("button", { name: "选择文件夹" }).click();
+  const fb = page.getByRole("dialog", { name: "选择项目文件夹" });
+  await fb.locator(".fb-crumb button", { hasText: /^\/$/ }).click();
+  for (const part of cwd.split("/").filter(Boolean)) {
+    await fb.locator(".fb-crumb:last-child button").waitFor();
+    await fb.locator(".fb-row", { has: page.locator(".fb-name", { hasText: new RegExp(`^${part}$`) }) }).click();
+    await fb.locator(".fb-crumb:last-child button", { hasText: part }).waitFor();
+  }
+  await page.waitForTimeout(250);
+  await shot("folder-picker");
+  await fb.getByRole("button", { name: "选择此文件夹" }).click();
+  await page.locator(".folder-chip", { hasText: cwd.split("/").pop() ?? "" }).waitFor();
+  await page.getByLabel("项目名称").fill("冒烟项目");
   await shot("new-project");
   await page.getByRole("button", { name: "创建项目" }).click();
   await page.getByRole("heading", { name: "冒烟项目" }).waitFor();
   const project = app.store.listProjects().find((p) => p.name === "冒烟项目");
   if (!project || project.cwd !== cwd) throw new Error("new project dir mismatch");
+
+  // Skills: discovered from the user's dirs + the selected project, enable one, add one from a URL.
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.locator(".list-item", { hasText: "Alice" }).first().click();
+  const skillsCard = page.locator(".skills-card");
+  await skillsCard.getByLabel("项目").selectOption({ label: "冒烟项目" });
+  await skillsCard.locator(".skill-row", { hasText: "deploy" }).waitFor();
+  for (const n of ["code-review", "pdf-tools", "release-notes"])
+    await skillsCard.locator(".skill-row", { hasText: n }).waitFor();
+  await skillsCard.getByLabel("pdf-tools").check();
+  await skillsCard.getByLabel("Skill 链接").fill(`http://localhost:${skillSrv.port}/SKILL.md`);
+  await skillsCard.getByRole("button", { name: "查找" }).click();
+  await skillsCard.getByLabel("添加 changelog").waitFor();
+  await skillsCard.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(250);
+  await shot("skills-preview");
+  await skillsCard.getByRole("button", { name: /^添加/ }).click();
+  await skillsCard.locator(".skill-row", { hasText: "changelog" }).locator(".badge", { hasText: "已导入" }).waitFor();
+  const aliceId = app.store.listAgents().find((a) => a.name === "Alice")?.id ?? "";
+  const linked = readFileSync(join(dirname(dbPath), "agents", aliceId, "skills-linked.json"), "utf8");
+  if (!linked.includes("pdf-tools")) throw new Error("skill link not saved");
+  await page.waitForTimeout(250);
+  await shot("skills");
 
   await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
   await page.locator(".pane-head").getByRole("button", { name: "会话" }).click();
@@ -388,6 +438,7 @@ try {
   rmSync(cwd, { recursive: true, force: true });
   rmSync(workspaces, { recursive: true, force: true });
   rmSync(fakeHome, { recursive: true, force: true });
+  skillSrv.stop(true);
   rmSync(dbPath, { force: true });
   rmSync(authFile, { force: true });
   rmSync(`${dbPath}-wal`, { force: true });

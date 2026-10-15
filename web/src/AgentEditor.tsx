@@ -1,4 +1,14 @@
-import { AlertTriangle, Check, ChevronLeft, MessageCircle, Plug, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  FolderOpen,
+  Link2,
+  Loader2,
+  MessageCircle,
+  Plug,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import { CUSTOM_FORMATS, DEFAULT_BASE_URL } from "../../server/custom";
@@ -11,7 +21,9 @@ import {
   IDENTITY_DELIVERY,
   type McpServer,
   type Meta,
+  type Project,
 } from "./api";
+import { useFolderPicker } from "./FolderPicker";
 import { type PickItem, PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
@@ -574,85 +586,215 @@ function CustomFields(props: {
   );
 }
 
+interface SkillItem {
+  key: string;
+  name: string;
+  description: string;
+  origin: string;
+  label: string;
+  enabled: boolean;
+  native: boolean;
+}
+interface RemoteSkill {
+  path: string;
+  name: string;
+  description: string;
+}
+
 function SkillsCard({ agentId }: { agentId: string }) {
-  const [list, setList] = useState<{ name: string; description: string; enabled: boolean; source: string }[]>([]);
-  const [path, setPath] = useState("");
+  const [items, setItems] = useState<SkillItem[] | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const [_tick, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
+  const [url, setUrl] = useState("");
+  const [preview, setPreview] = useState<RemoteSkill[] | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<"preview" | "add" | null>(null);
+  const folder = useFolderPicker();
+  const base = `/api/agents/${agentId}/skills`;
+
+  useEffect(() => {
+    void api<Project[]>("GET", "/api/projects").then(setProjects, () => {});
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tick forces a refetch
   useEffect(() => {
     let cancelled = false;
-    void api<{ agent: typeof list }>("GET", `/api/agents/${agentId}/skills`).then(
-      (r) => {
-        if (!cancelled) setList(r.agent);
-      },
-      (e) => {
-        if (!cancelled) setErr((e as Error).message);
-      },
+    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    void api<{ items: SkillItem[] }>("GET", `${base}${q}`).then(
+      (r) => !cancelled && setItems(r.items),
+      (e) => !cancelled && setErr((e as Error).message),
     );
     return () => {
       cancelled = true;
     };
-  }, [agentId]);
+  }, [base, projectId, tick]);
   const refresh = () => setTick((t) => t + 1);
+  const post = (b: object) => api("POST", base, b);
+
+  const toggle = (sk: SkillItem) => {
+    setItems((l) => l?.map((x) => (x.key === sk.key ? { ...x, enabled: !x.enabled } : x)) ?? l);
+    void post({ action: sk.enabled ? "disable" : "enable", key: sk.key }).then(refresh, (e) => {
+      setErr((e as Error).message);
+      refresh();
+    });
+  };
+  const doPreview = async () => {
+    setBusy("preview");
+    setErr(null);
+    try {
+      const r = await api<{ skills: RemoteSkill[] }>("POST", base, { action: "preview-url", url: url.trim() });
+      setPreview(r.skills);
+      setChosen(new Set(r.skills.map((x) => x.path)));
+    } catch (e2) {
+      setErr((e2 as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const doAdd = async () => {
+    setBusy("add");
+    setErr(null);
+    try {
+      await post({ action: "import-url", url: url.trim(), paths: [...chosen] });
+      setPreview(null);
+      setUrl("");
+      refresh();
+    } catch (e2) {
+      setErr((e2 as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const fromFolder = async () => {
+    const dir = await folder.pick("选择 Skill 文件夹");
+    if (!dir) return;
+    setErr(null);
+    await post({ action: "import", path: dir }).then(refresh, (e) => setErr((e as Error).message));
+  };
+
   return (
-    <section className="card">
-      <div className="card-head">
-        <h3>Skills</h3>
-        <p>SKILL.md 约定；可从 .claude / .agents 导入。</p>
+    <section className="card skills-card">
+      <div className="card-head row" style={{ alignItems: "center" }}>
+        <h3 className="grow">Skills</h3>
+        <select
+          className="select sm"
+          aria-label="项目"
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+          style={{ width: "auto", maxWidth: 200 }}
+        >
+          <option value="">不含项目</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
       </div>
-      <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {list.length === 0 && (
-          <span className="muted" style={{ fontSize: 12 }}>
-            还没有 Skill
-          </span>
-        )}
-        {list.map((sk) => (
-          <label key={sk.name} className="row" style={{ gap: 8, alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={sk.enabled}
-              onChange={() =>
-                void api("POST", `/api/agents/${agentId}/skills`, {
-                  action: sk.enabled ? "disable" : "enable",
-                  name: sk.name,
-                }).then(refresh)
-              }
-            />
-            <span className="grow">
-              <code>{sk.name}</code>
-              <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
-                {sk.description}
-              </span>
-            </span>
-          </label>
-        ))}
-        <div className="row" style={{ gap: 8 }}>
+      <div className="card-body skills-body">
+        <ul className="skill-list" aria-label="Skill 列表">
+          {items === null && <li className="skill-empty muted">…</li>}
+          {items?.length === 0 && <li className="skill-empty muted">没有找到 Skill</li>}
+          {items?.map((sk) => (
+            <li key={sk.key}>
+              <label className="skill-row" title={sk.native ? "Harness 已自动读取" : sk.key}>
+                <input
+                  type="checkbox"
+                  checked={sk.enabled}
+                  disabled={sk.native}
+                  onChange={() => toggle(sk)}
+                  aria-label={sk.name}
+                />
+                <span className="skill-text">
+                  <span className="skill-name">{sk.name}</span>
+                  {sk.description && <span className="skill-desc">{sk.description}</span>}
+                </span>
+                <span className={`badge skill-src src-${sk.origin}`}>{sk.label}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+
+        <div className="skill-add">
           <input
-            className="input mono grow"
-            aria-label="导入路径"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="~/proj/.agents 或含 skills/ 的目录"
+            className="input grow"
+            aria-label="Skill 链接"
+            value={url}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              setPreview(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              if (url.trim() && !busy) void doPreview();
+            }}
+            placeholder="GitHub / git / SKILL.md 链接"
             spellCheck={false}
           />
           <button
             type="button"
-            className="btn sm"
-            disabled={!path.trim()}
-            onClick={() =>
-              void api("POST", `/api/agents/${agentId}/skills`, { action: "import", path: path.trim() })
-                .then(() => {
-                  setPath("");
-                  refresh();
-                })
-                .catch((e) => setErr((e as Error).message))
-            }
+            className="btn"
+            disabled={!url.trim() || busy !== null}
+            onClick={() => void doPreview()}
           >
-            导入
+            {busy === "preview" ? <Loader2 size={14} className="spin" /> : <Link2 size={14} />}
+            查找
+          </button>
+          <button type="button" className="btn" onClick={() => void fromFolder()} disabled={folder.busy}>
+            <FolderOpen size={14} />
+            文件夹
           </button>
         </div>
+
+        {preview && (
+          <div className="skill-preview">
+            <ul className="skill-list">
+              {preview.map((r) => (
+                <li key={r.path}>
+                  <label className="skill-row">
+                    <input
+                      type="checkbox"
+                      aria-label={`添加 ${r.name}`}
+                      checked={chosen.has(r.path)}
+                      onChange={() =>
+                        setChosen((c) => {
+                          const n = new Set(c);
+                          if (n.has(r.path)) n.delete(r.path);
+                          else n.add(r.path);
+                          return n;
+                        })
+                      }
+                    />
+                    <span className="skill-text">
+                      <span className="skill-name">{r.name}</span>
+                      {r.description && <span className="skill-desc">{r.description}</span>}
+                    </span>
+                    {r.path !== "." && <span className="badge mono skill-src">{r.path}</span>}
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="btn ghost sm" onClick={() => setPreview(null)}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn primary sm"
+                disabled={chosen.size === 0 || busy !== null}
+                onClick={() => void doAdd()}
+              >
+                {busy === "add" ? <Loader2 size={13} className="spin" /> : null}
+                添加 {chosen.size}
+              </button>
+            </div>
+          </div>
+        )}
         {err && <div className="error-text">{err}</div>}
       </div>
+      {folder.dialog}
     </section>
   );
 }

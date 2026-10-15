@@ -983,3 +983,61 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .install-log { margin: 0; max-height: 160px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; animation: t-pop-in 0.16s var(--ease); }
 .install-log[data-state="error"] { box-shadow: inset 2px 0 0 var(--danger, #d33); }
 .install-log[data-state="done"] { box-shadow: inset 2px 0 0 var(--ok, #2a9d63); }
+
+/* Folder picker */
+.folder-chip { display: flex; align-items: center; gap: 8px; min-width: 0; height: 40px; padding: 0 4px 0 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); }
+.folder-chip-icon { flex: none; color: var(--text-2); }
+.folder-chip-path { flex: 1; min-width: 0; display: flex; align-items: baseline; overflow: hidden; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+.folder-chip-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); direction: rtl; text-align: left; }
+.folder-chip-path b { flex: none; font-weight: 600; color: var(--text); }
+.folder-chip .btn { flex: none; }
+.folder-choose { align-self: flex-start; }
+.folder-browser { width: min(760px, calc(100vw - 32px)); height: min(520px, calc(100vh - 120px)); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.fb-head { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--border); }
+.fb-head h3 { margin: 0; font-size: 14px; }
+.fb-body { flex: 1; min-height: 0; display: flex; }
+.fb-places { width: 168px; flex: none; padding: 8px; overflow-y: auto; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 1px; }
+.fb-place { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border: none; border-radius: 8px; background: none; color: var(--text-2); font-size: 12px; text-align: left; }
+.fb-place span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-place:hover { background: var(--surface-hover); color: var(--text); }
+.fb-place[aria-current] { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.fb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fb-crumbs { display: flex; align-items: center; flex-wrap: nowrap; overflow-x: auto; gap: 2px; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--border); font-size: 12px; scrollbar-width: none; }
+.fb-crumb { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.fb-crumb button { border: none; background: none; padding: 3px 6px; border-radius: 6px; color: var(--text-2); }
+.fb-crumb:last-child button { color: var(--text); font-weight: 600; }
+.fb-crumb button:hover { background: var(--surface-hover); }
+.fb-list { flex: 1; overflow-y: auto; padding: 6px; outline: none; }
+.fb-row { width: 100%; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border: none; border-radius: 8px; background: none; color: var(--text); font-size: 13px; text-align: left; }
+.fb-row[data-active] { background: var(--surface-hover); }
+.fb-icon { flex: none; color: var(--text-3); }
+.fb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-git { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; }
+.fb-empty { display: flex; align-items: center; justify-content: center; height: 80px; font-size: 12px; }
+.fb-foot { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 12px 0 16px; border-top: 1px solid var(--border); }
+.fb-hidden { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); flex: none; }
+.fb-current { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-3); direction: rtl; justify-content: flex-end; }
+@media (max-width: 640px) { .fb-places { display: none; } }
+.dir-field { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%; }
+.dir-field .segmented { align-self: flex-start; }
+.folder-chip.ghosted { border-style: dashed; background: transparent; padding-right: 12px; }
+.quiet-link { align-self: flex-start; border: none; background: none; padding: 0; font-size: 11px; color: var(--text-3); cursor: pointer; transition: color var(--dur-1, 0.12s); }
+.quiet-link:hover { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Skills card */
+.skills-body { display: flex; flex-direction: column; gap: 12px; }
+.skill-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; max-height: 320px; overflow-y: auto; }
+.skill-list li + li { border-top: 1px solid var(--border); }
+.skill-row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 12px; cursor: pointer; transition: background var(--dur-1, 0.12s); }
+.skill-row:hover { background: var(--surface-hover); }
+.skill-row input { flex: none; margin: 0; }
+.skill-row input:disabled { cursor: default; }
+.skill-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.skill-name { font-size: 13px; font-weight: 600; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-desc { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-src { flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.skill-empty { padding: 14px 12px; font-size: 12px; }
+.skill-add { display: flex; gap: 8px; align-items: center; }
+.skill-add .btn { flex: none; }
+.skill-preview { display: flex; flex-direction: column; gap: 8px; animation: t-fade-in var(--dur-2, 0.16s) var(--ease-out, ease-out); }
+.select.sm { height: 28px; font-size: 12px; }

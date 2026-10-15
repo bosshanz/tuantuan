@@ -1,6 +1,7 @@
-import { ChevronLeft, Trash2 } from "lucide-react";
+import { ChevronLeft, FolderPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Project } from "./api";
+import { FolderField } from "./FolderPicker";
 
 function DirField(props: {
   pick: boolean;
@@ -10,7 +11,7 @@ function DirField(props: {
   preview: string;
 }) {
   return (
-    <div className="field">
+    <div className="field dir-field">
       <span className="label">目录</span>
       <fieldset className="segmented" aria-label="目录">
         <button type="button" aria-pressed={!props.pick} onClick={() => props.setPick(false)}>
@@ -21,17 +22,15 @@ function DirField(props: {
         </button>
       </fieldset>
       {props.pick ? (
-        <input
-          className="input mono"
-          aria-label="文件夹路径"
-          value={props.cwd}
-          onChange={(e) => props.setCwd(e.target.value)}
-          maxLength={1024}
-          placeholder="~/code/my-project"
-          spellCheck={false}
-        />
+        <FolderField value={props.cwd} onChange={props.setCwd} title="选择项目文件夹" />
       ) : (
-        <span className="muted mono dir-preview">{props.preview}</span>
+        <div className="folder-chip ghosted">
+          <FolderPlus size={15} className="folder-chip-icon" />
+          <span className="folder-chip-path" title={props.preview}>
+            <span className="folder-chip-dir">{"\u200e" + props.preview.replace(/\/[^/]+$/, "/")}</span>
+            <b>{props.preview.split("/").pop()}</b>
+          </span>
+        </div>
       )}
     </div>
   );
@@ -91,7 +90,10 @@ export function NewProject(props: { workspacesRoot: string; onCreated: (p: Proje
             pick={pick}
             setPick={setPick}
             cwd={cwd}
-            setCwd={setCwd}
+            setCwd={(v) => {
+              setCwd(v);
+              if (!name.trim()) setName(v.split("/").pop() ?? "");
+            }}
             preview={`${props.workspacesRoot}/${slug(name)}`}
           />
           {error && (
@@ -182,17 +184,10 @@ export function ProjectSettings(props: {
               maxLength={64}
             />
           </label>
-          <label className="field">
+          <div className="field dir-field">
             <span className="label">目录</span>
-            <input
-              className="input mono"
-              aria-label="项目目录"
-              value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
-              maxLength={1024}
-              spellCheck={false}
-            />
-          </label>
+            <FolderField value={cwd} onChange={setCwd} title="选择项目文件夹" />
+          </div>
           {error && (
             <div className="form-error" role="alert">
               {error}

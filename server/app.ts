@@ -8,6 +8,7 @@ import { replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
 import { CUSTOM_FORMATS, CUSTOM_HARNESS, testConnection } from "./custom";
+import { listDirs, pickFolderNative, places } from "./dirpicker";
 import {
   detectHarness,
   harnessSpec,
@@ -28,6 +29,7 @@ import {
   DRAFTS_PROJECT_ID,
   ensureDrafts,
   existingFolder,
+  expandHome,
   migrateRoomsToProjects,
   workspacesRoot,
 } from "./workspace";
@@ -289,6 +291,18 @@ export function createApp(deps: AppDeps) {
       }
     }
 
+    if (resource === "fs") {
+      if (id === "pick" && method === "POST") {
+        const b = z
+          .object({ title: z.string().max(80).optional(), start: z.string().max(1024).optional() })
+          .parse(await body());
+        return json(await pickFolderNative(b.title || "选择文件夹", b.start ? expandHome(b.start) : undefined));
+      }
+      if (id === "dirs" && method === "GET")
+        return json(listDirs(url.searchParams.get("path") ?? undefined, url.searchParams.get("hidden") === "1"));
+      if (id === "places" && method === "GET") return json(places(store.listProjects().map((x) => x.cwd)));
+    }
+
     if (resource === "harnesses") {
       if (!id && method === "GET") return json(await harnessStatuses());
       if (id && sub === "path" && method === "PUT") {
@@ -333,30 +347,47 @@ export function createApp(deps: AppDeps) {
       if (id && method === "DELETE")
         return store.deleteAgent(id) ? json({ ok: true }) : json({ error: "Agent 不存在" }, 404);
       if (id && sub === "skills" && method === "GET") {
-        if (!store.getAgent(id)) throw new ValidationError("Agent 不存在", 404);
-        const roomId = new URL(req.url).searchParams.get("roomId");
-        const room = roomId ? store.getRoom(roomId) : null;
-        return json({
-          agent: skills.listAgentSkills(dataDir, id),
-          room: room ? skills.listRoomSkills(room.cwd) : [],
-        });
+        const agent = store.getAgent(id);
+        if (!agent) throw new ValidationError("Agent 不存在", 404);
+        const pid = url.searchParams.get("projectId");
+        const project = pid ? store.getProject(pid) : null;
+        return json({ items: skills.discoverSkills(dataDir, id, agent.harness, project?.cwd ?? null) });
       }
       if (id && sub === "skills" && method === "POST") {
-        if (!store.getAgent(id)) throw new ValidationError("Agent 不存在", 404);
+        const agent = store.getAgent(id);
+        if (!agent) throw new ValidationError("Agent 不存在", 404);
         const b = z
           .object({
-            action: z.enum(["import", "enable", "disable"]),
+            action: z.enum(["import", "enable", "disable", "preview-url", "import-url"]),
             path: z.string().optional(),
-            name: z.string().optional(),
+            key: z.string().optional(),
+            url: z.string().max(2048).optional(),
+            paths: z.array(z.string()).optional(),
           })
           .parse(await body());
         if (b.action === "import") {
-          if (!b.path) throw new ValidationError("请填写导入路径");
-          return json(skills.importSkills(dataDir, id, b.path));
+          if (!b.path) throw new ValidationError("请选择文件夹");
+          skills.importSkills(dataDir, id, b.path);
+          return json({ ok: true });
         }
-        if (!b.name) throw new ValidationError("请填写 skill 名称");
-        skills.setSkillEnabled(dataDir, id, b.name, b.action === "enable");
-        return json(skills.listAgentSkills(dataDir, id));
+        if (b.action === "preview-url") {
+          if (!b.url) throw new ValidationError("请填写链接");
+          try {
+            return json({ skills: (await skills.previewSkillUrl(dataDir, b.url)).skills });
+          } catch (e) {
+            throw new ValidationError((e as Error).message);
+          }
+        }
+        if (b.action === "import-url") {
+          if (!b.url || !b.paths?.length) throw new ValidationError("请选择要添加的 Skill");
+          return json({ added: await skills.importSkillUrl(dataDir, id, b.url, b.paths) });
+        }
+        if (!b.key) throw new ValidationError("缺少 skill");
+        const on = b.action === "enable";
+        const imported = skills.listAgentSkills(dataDir, id).find((x) => resolve(x.dir) === resolve(b.key as string));
+        if (imported) skills.setSkillEnabled(dataDir, id, imported.name, on);
+        else skills.setSkillLinked(dataDir, id, b.key, on);
+        return json({ ok: true });
       }
     }
 

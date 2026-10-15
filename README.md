@@ -126,9 +126,27 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 - 团团内置的轻量 harness，只做对话：SSE 流式、身份文档作系统提示、会话转述；多 Agent 时 `handoff` / `list_members` 以原生 function/tool call 提供（与 MCP 走同一处理逻辑）。**没有文件读写和终端。**
 - API Key 只存服务端（SQLite），接口只返回掩码（如 `sk-••••abcd`），不写日志；编辑时留空即保持原 Key。
 
+## 选择文件夹
+
+浏览器拿不到绝对路径，所以由服务端弹系统对话框：macOS 用 `osascript choose folder`，Linux 桌面用 `zenity` / `kdialog`。都不可用时（或 `TUANTUAN_NATIVE_PICKER=0`）改用应用内的文件夹浏览器（面包屑、常用目录、最近项目、git 仓库标记）。接口统一为 `POST /api/fs/pick`、`GET /api/fs/dirs`、`GET /api/fs/places`；桌面壳可通过 `setNativePicker()` 换成自己的原生对话框。新建项目、项目设置、Skill 导入都用它。
+
+![选择文件夹](docs/screenshots/folder-picker.png)
+
 ## Skills
 
-每个 Agent 有自己的 Skills，按通用约定存放：`skills/<name>/SKILL.md`（frontmatter `name` / `description`，可带附属文件），兼容旧的 `commands/*.md`。在 Agent 页「Skills」里可从 `.claude` / `.agents` / 插件目录（含 `.claude-plugin/plugin.json` 的根目录）或 git 地址导入，逐个启用/停用。
+每个 Agent 有自己的 Skills，按通用约定存放：`skills/<name>/SKILL.md`（frontmatter `name` / `description`，可带附属文件），兼容旧的 `commands/*.md`。
+
+Agent 页「Skills」是一张勾选清单，自动列出：
+
+- 用户级：`~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`，以及 `~/.claude/plugins/**/skills`（插件名取自 `.claude-plugin/plugin.json`）；
+- 项目级：右上角选中项目的 `.agents/skills`、`.claude/skills`；
+- 已导入到该 Agent 的 Skills。
+
+勾选即对这个 Agent 启用（只记录路径到 `<数据目录>/agents/<id>/skills-linked.json`，不复制）。Harness 本来就会读取的位置（如 Claude Code 的 `~/.claude/skills`）显示为已勾选且不可取消——要停用请改用户自己的配置。
+
+「从链接添加」支持 GitHub 仓库 / `tree` 链接（下载 tarball）、原始 `SKILL.md` 链接、任意 git 地址（`git clone --depth 1`）：先列出找到的 SKILL.md，勾选后复制到该 Agent。「文件夹」用文件夹选择器导入本地目录。
+
+![Skills](docs/screenshots/skills.png)
 
 会话开始时，启用的 Skills 以符号链接放进会话目录里该 Harness 原生扫描的位置（同名已存在则跳过，不覆盖）：
 

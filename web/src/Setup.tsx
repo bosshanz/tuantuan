@@ -295,8 +295,8 @@ function PathOverride({ h, onSaved }: { h: HarnessStatus; onSaved: (l: HarnessSt
   const [value, setValue] = useState(h.override ?? "");
   if (!open)
     return (
-      <button type="button" className="linkish" onClick={() => setOpen(true)}>
-        指定可执行文件路径…
+      <button type="button" className="quiet-link" onClick={() => setOpen(true)}>
+        自定义路径
       </button>
     );
   return (
@@ -319,6 +319,11 @@ function PathOverride({ h, onSaved }: { h: HarnessStatus; onSaved: (l: HarnessSt
       <button type="submit" className="btn sm">
         保存
       </button>
+      {!h.override && (
+        <button type="button" className="btn ghost sm" onClick={() => setOpen(false)}>
+          取消
+        </button>
+      )}
     </form>
   );
 }
