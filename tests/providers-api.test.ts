@@ -1,4 +1,7 @@
 import { afterAll, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { serve } from "../server/app";
 import type { Agent, Message, Project, Room } from "../server/store";
 import { agentInput, WORKSPACES } from "./helpers";
@@ -69,7 +72,7 @@ test("providers API: create masked, edit keeps key, assign, delete falls back to
   expect(after?.providerId).toBeNull();
 });
 
-test("usage API: per-turn ACP usage is logged; opencode honestly not available, grok account allowance flagged", async () => {
+test("usage API: per-turn ACP usage is logged; OpenCode has no quota placeholder, Grok offers billing refresh", async () => {
   const a = await api<Agent>("POST", "/api/agents", agentInput("U"));
   const pj = await api<Project>("POST", "/api/projects", { name: "u", cwd: WORKSPACES });
   const room = await api<Room>("POST", "/api/rooms", { name: "u", agentIds: [a.data.id], projectId: pj.data.id });
@@ -80,11 +83,71 @@ test("usage API: per-turn ACP usage is logged; opencode honestly not available, 
     tuantuan: { harness: string; turns: number; total: number }[];
   }>("GET", "/api/usage");
   expect(u.data.tuantuan).toContainEqual(expect.objectContaining({ harness: "mock", turns: 1, total: 1494 }));
-  expect(u.data.harnesses.find((x) => x.harness === "opencode")?.notes).toEqual(["没有公开的用量 / 额度来源"]);
-  expect(u.data.harnesses.find((x) => x.harness === "grok")?.notes).toContain(
-    "账号额度只在 Grok 界面的 /usage 里显示，ACP 没有提供",
+  expect(u.data.harnesses.find((x) => x.harness === "grok")?.notes).toContain("额度：点刷新向 Grok 查询");
+  expect(u.data.harnesses.map((x) => x.harness)).toEqual(["claude-code", "codex", "grok"]);
+});
+
+test("Grok live quota uses only initialize and the read-only billing extension; failures stay unknown", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "grok-billing-test-"));
+  const bin = join(dir, "grok");
+  const calls = join(dir, "calls");
+  const fail = join(dir, "fail");
+  writeFileSync(
+    bin,
+    `#!${process.execPath}
+import { appendFileSync, existsSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+if (process.argv.includes('--version')) { console.log('grok 1.0.52'); process.exit(0); }
+if (process.argv[2] === 'usage') { console.log('{"turns":[]}'); process.exit(0); }
+for await (const line of createInterface({input:process.stdin})) {
+  const r = JSON.parse(line);
+  appendFileSync(${JSON.stringify(calls)}, r.method + '\\n');
+  if (r.id === undefined) continue;
+  let result;
+  if (r.method === 'initialize') result = { protocolVersion:1,agentCapabilities:{},authMethods:[] };
+  else if (r.method === '_x.ai/billing' && !existsSync(${JSON.stringify(fail)}))
+    result = { config:{creditUsagePercent:42,currentPeriod:{type:'USAGE_PERIOD_TYPE_WEEKLY',end:'2026-10-22T01:00:00Z'},prepaidBalance:{val:1250}},subscription_tier:'SuperGrok' };
+  else { console.log(JSON.stringify({jsonrpc:'2.0',id:r.id,error:{code:-32601,message:'Method not found'}})); continue; }
+  console.log(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));
+}
+`,
+    { mode: 0o755 },
   );
-  expect(u.data.harnesses.map((x) => x.harness)).toEqual(["claude-code", "codex", "grok", "opencode"]);
+  const previous = app.store.getSetting<Record<string, string>>("harnessPaths", {});
+  app.store.setSetting("harnessPaths", { ...previous, grok: bin });
+  try {
+    type Row = {
+      harness: string;
+      limits: unknown[];
+      plan: string | null;
+      creditBalanceUsd: number | null;
+      notes: string[];
+    };
+    const first = await api<{ harnesses: Row[] }>("POST", "/api/usage/grok/live");
+    expect(first.status).toBe(200);
+    expect(first.data.harnesses.find((x) => x.harness === "grok")).toMatchObject({
+      limits: [{ label: "每周额度", usedPercent: 42, resetsAt: "2026-10-22T01:00:00Z" }],
+      plan: "SuperGrok",
+      creditBalanceUsd: 12.5,
+    });
+    writeFileSync(fail, "1");
+    const second = await api<{ harnesses: Row[] }>("POST", "/api/usage/grok/live");
+    expect(second.data.harnesses.find((x) => x.harness === "grok")).toMatchObject({
+      limits: [],
+      plan: null,
+      creditBalanceUsd: null,
+      notes: expect.arrayContaining(["当前 Grok 版本不支持额度查询，请更新 Grok"]),
+    });
+    expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual([
+      "initialize",
+      "_x.ai/billing",
+      "initialize",
+      "_x.ai/billing",
+    ]);
+  } finally {
+    app.store.setSetting("harnessPaths", previous);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("usage stats: per-turn tokens with model, cache split and cost delta; grouped and daily", async () => {

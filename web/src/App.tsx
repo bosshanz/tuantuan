@@ -16,7 +16,8 @@ import {
   Sparkles,
   UserRound,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { previewText } from "../../shared/roomPreview";
 import { AgentEditor } from "./AgentEditor";
 import { AvatarShowcase } from "./AvatarShowcase";
 import { type Agent, api, connectWs, type McpServer, type Meta, type Project, type Room, type WsEvent } from "./api";
@@ -32,13 +33,15 @@ import { Onboarding } from "./Onboarding";
 import { applyAppearance, EMPTY_PROFILE, type Profile, ProfilePage } from "./Profile";
 import { NewProject, ProjectSettings } from "./Projects";
 import { ProvidersPage } from "./Providers";
+import { roomListReducer } from "./roomListState";
 import { SetupPage } from "./Setup";
 import { AgentAvatar, RoomIcon, roomSubtitle, useHashRoute } from "./ui";
 
 export function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const [{ rooms }, dispatchRooms] = useReducer(roomListReducer, { rooms: [], loading: null });
+  const reloadId = useRef(0);
   const [projects, setProjects] = useState<Project[]>([]);
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try {
@@ -72,6 +75,8 @@ export function App() {
   const ws = useRef<ReturnType<typeof connectWs> | null>(null);
 
   const reload = useCallback(async () => {
+    const id = ++reloadId.current;
+    dispatchRooms({ type: "load", id });
     try {
       const [m, a, r, s, p] = await Promise.all([
         api<Meta>("GET", "/api/meta"),
@@ -80,24 +85,35 @@ export function App() {
         api<McpServer[]>("GET", "/api/mcp-servers"),
         api<Project[]>("GET", "/api/projects"),
       ]);
+      if (id !== reloadId.current) return;
       setProjects(p);
       setMeta(m);
       setAgents(a);
-      setRooms(r);
+      dispatchRooms({ type: "snapshot", id, rooms: r });
       setMcpServers(s);
       setLoadError(null);
     } catch (e) {
+      if (id !== reloadId.current) return;
+      dispatchRooms({ type: "load.failed", id });
       setLoadError((e as Error).message);
     } finally {
-      setLoaded(true);
+      if (id === reloadId.current) setLoaded(true);
     }
   }, []);
 
   useEffect(() => {
     void reload();
-    ws.current = connectWs((e) => {
-      for (const l of listeners.current) l(e);
-    }, setConnected);
+    ws.current = connectWs(
+      (e) => {
+        if (e.type === "activity" || e.type === "room.preview") dispatchRooms({ type: "event", event: e });
+        for (const l of listeners.current) l(e);
+      },
+      (online) => {
+        setConnected(online);
+        // Catch events missed before the first socket opened or while it was disconnected.
+        if (online) void reload();
+      },
+    );
     return () => ws.current?.close();
   }, [reload]);
 
@@ -159,7 +175,6 @@ export function App() {
     agents,
     openRoomId: roomId,
     open: (id) => go(`c/${id}`),
-    setRooms,
   });
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
@@ -584,7 +599,7 @@ function SideNav(props: { icon: React.ReactNode; label: string; current: boolean
 function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; unread: number; onOpen: () => void }) {
   const { r } = props;
   const preview = r.last
-    ? `${r.last.sender && r.agentIds.length > 1 ? `${r.last.sender}：` : ""}${r.last.text}`
+    ? `${r.last.sender && r.agentIds.length > 1 ? `${r.last.sender}：` : ""}${previewText(r.last)}`
     : roomSubtitle(r, props.agents);
   return (
     <button

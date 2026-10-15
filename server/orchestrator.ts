@@ -1,4 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
+import { quotePrompt } from "../shared/messageQuote";
 import { applyUpdate, emptyTimeline, type Handoff, type Timeline, timelineText } from "../shared/timeline";
 import type { TerminalSnapshot } from "./acp";
 import { CUSTOM_HARNESS } from "./custom";
@@ -73,7 +74,13 @@ export class Orchestrator implements ToolProvider {
     private publish: (roomId: string, event: RoomEvent) => void,
   ) {}
 
-  postHumanMessage(roomId: string, senderName: string, content: string, images: ImageAttachment[] = []): Message {
+  postHumanMessage(
+    roomId: string,
+    senderName: string,
+    content: string,
+    images: ImageAttachment[] = [],
+    replyToId?: string | null,
+  ): Message {
     const room = this.store.getRoom(roomId);
     if (!room) throw new ValidationError("房间不存在", 404);
     const text = content.trim();
@@ -89,6 +96,7 @@ export class Orchestrator implements ToolProvider {
       senderName: senderName.trim() || "我",
       content: text,
       status: "done",
+      replyToId,
     });
     if (images.length > 0)
       msg = this.store.updateReply(id, {
@@ -234,8 +242,9 @@ export class Orchestrator implements ToolProvider {
    * was said since it last spoke, newest kept when over RELAY_MAX_CHARS, plus the hand-off task if any.
    */
   promptFor(room: Room, agent: Agent, human: Message, images: ImageAttachment[], from?: Handoff): acp.ContentBlock[] {
+    const quoted = human.quote ? `${quotePrompt(human.quote)}\n\n` : "";
     const imageBlocks: acp.ContentBlock[] = images.map((i) => ({ type: "image", mimeType: i.mimeType, data: i.data }));
-    if (room.kind === "dm") return [{ type: "text", text: human.content }, ...imageBlocks];
+    if (room.kind === "dm") return [{ type: "text", text: quoted + human.content }, ...imageBlocks];
     const history = this.store.recentMessages(room.id, GROUP_CONTEXT_MESSAGES);
     const lastOwn = history.findLastIndex(
       (m) => m.senderKind === "agent" && m.senderId === agent.id && m.status === "done",
@@ -262,7 +271,7 @@ export class Orchestrator implements ToolProvider {
     const header = `${lastOwn >= 0 ? "你上次发言之后，会话里的新消息" : "会话里最近的消息"}${
       omitted > 0 ? `（更早的 ${omitted} 条已省略）` : ""
     }：`;
-    let text = `${header}\n\n${kept.join("\n\n")}`;
+    let text = `${quoted}${header}\n\n${kept.join("\n\n")}`;
     if (from)
       text += `\n\n<tuantuan-handoff from="${from.agentName}">\n${from.task}\n</tuantuan-handoff>\n@${from.agentName} 用 handoff 把上面这个任务交给了你，请接手处理。`;
     return [{ type: "text", text }, ...imageBlocks];

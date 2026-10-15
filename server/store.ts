@@ -1,6 +1,8 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { type MessageQuote, messageQuote } from "../shared/messageQuote";
+import { messagePreview, type RoomPreview } from "../shared/roomPreview";
 import { emptyTimeline, type Timeline } from "../shared/timeline";
 import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
 import { type CustomFormat, type CustomSecret, maskKey } from "./custom";
@@ -196,6 +198,8 @@ export const MIGRATIONS: string[] = [
    UPDATE usage_log SET cache_read_tokens = cached_tokens;`,
   // 个人资料: an agent can opt out of the user's 「关于我」 text.
   `ALTER TABLE agents ADD COLUMN use_profile INTEGER NOT NULL DEFAULT 1;`,
+  // Group replies keep a bounded server-generated snapshot of the referenced message.
+  `ALTER TABLE messages ADD COLUMN quote TEXT;`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -300,7 +304,7 @@ export interface Room {
   cwd: string;
   createdAt: number;
   /** Sidebar preview: last message (list endpoint only). sender null = the user. */
-  last?: { sender: string | null; text: string; at: number };
+  last?: RoomPreview;
   /** List endpoint only: an agent chain is running in this room. */
   busy?: boolean;
 }
@@ -321,6 +325,7 @@ export interface Message {
   error: string | null;
   /** Agent replies: everything the harness streamed (text, thoughts, tool calls, plan). Null for others. */
   timeline: Timeline | null;
+  quote: MessageQuote | null;
   createdAt: number;
 }
 
@@ -489,7 +494,7 @@ export class Store {
       (
         this.db
           .query(
-            `SELECT m.room_id, m.sender_name, m.sender_kind, m.content, m.error, m.created_at FROM messages m
+            `SELECT m.room_id, m.id, m.seq, m.status, m.sender_name, m.sender_kind, m.content, m.error, m.created_at FROM messages m
              JOIN (SELECT room_id, MAX(seq) AS seq FROM messages WHERE sender_kind != 'system' GROUP BY room_id) x
                ON x.room_id = m.room_id AND x.seq = m.seq`,
           )
@@ -500,13 +505,17 @@ export class Store {
       const room = this.toRoom(r);
       const l = last.get(room.id);
       if (l)
-        room.last = {
-          sender: l.sender_kind === "human" ? null : (l.sender_name as string),
-          text: String(l.content || l.error || "")
-            .replace(/\s+/g, " ")
-            .slice(0, 120),
-          at: l.created_at as number,
-        };
+        room.last =
+          messagePreview({
+            id: l.id as string,
+            seq: l.seq as number,
+            status: l.status as MessageStatus,
+            senderKind: l.sender_kind as Message["senderKind"],
+            senderName: l.sender_name as string,
+            content: l.content as string,
+            error: l.error as string | null,
+            createdAt: l.created_at as number,
+          }) ?? undefined;
       return room;
     });
   }
@@ -639,16 +648,30 @@ export class Store {
   }
 
   // ---- messages ----
-  insertMessage(m: Omit<Message, "id" | "seq" | "createdAt" | "timeline" | "error"> & { id?: string }): Message {
+  insertMessage(
+    m: Omit<Message, "id" | "seq" | "createdAt" | "timeline" | "error" | "quote"> & {
+      id?: string;
+      replyToId?: string | null;
+    },
+  ): Message {
     const id = m.id ?? crypto.randomUUID();
     this.db.transaction(() => {
+      let quote: MessageQuote | null = null;
+      if (m.replyToId) {
+        if (m.senderKind !== "human" || this.getRoom(m.roomId)?.kind !== "group")
+          throw new ValidationError("引用回复仅用于群聊消息");
+        const original = this.getMessage(m.replyToId);
+        if (!original || original.roomId !== m.roomId) throw new ValidationError("引用消息不存在或不在当前会话");
+        quote = messageQuote(original);
+        if (!quote) throw new ValidationError("只能引用已完成的用户或 Agent 消息");
+      }
       const { next } = this.db
         .query("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM messages WHERE room_id = ?")
         .get(m.roomId) as { next: number };
       this.db
         .query(
-          `INSERT INTO messages (id, room_id, seq, run_id, hop, sender_kind, sender_id, sender_name, content, status, created_at, timeline)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO messages (id, room_id, seq, run_id, hop, sender_kind, sender_id, sender_name, content, status, created_at, timeline, quote)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           id,
@@ -663,6 +686,7 @@ export class Store {
           m.status,
           Date.now(),
           m.senderKind === "agent" ? JSON.stringify(emptyTimeline()) : null,
+          quote ? JSON.stringify(quote) : null,
         );
     })();
     return this.getMessage(id) as Message;
@@ -986,6 +1010,7 @@ function toMessage(r: Row): Message {
     status: r.status as MessageStatus,
     error: (r.error as string | null) ?? null,
     timeline: r.timeline ? (JSON.parse(r.timeline as string) as Timeline) : null,
+    quote: r.quote ? (JSON.parse(r.quote as string) as MessageQuote) : null,
     createdAt: r.created_at as number,
   };
 }

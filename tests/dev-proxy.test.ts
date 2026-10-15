@@ -11,7 +11,8 @@ describe("Vite dev proxy covers every server route", () => {
   ];
   test("server/routes.ts lists exactly the paths server/app.ts handles", () => {
     expect(handled.length).toBeGreaterThan(0);
-    expect([...handled].sort()).toEqual([...SERVER_ROUTES.http, ...SERVER_ROUTES.ws].sort());
+    // Several handlers can share one proxy prefix (for example /ws and /ws/terminal/:id).
+    expect([...new Set(handled)].sort()).toEqual([...SERVER_ROUTES.http, ...SERVER_ROUTES.ws].sort());
   });
   test("vite.config.ts proxies all of them, with ws for socket routes", () => {
     const proxy = (viteConfig as { server: { proxy: Record<string, string | { ws?: boolean }> } }).server.proxy;

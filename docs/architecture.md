@@ -10,7 +10,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `server/main.ts` | 打开数据库，按本机监听地址启动服务；退出时关闭 Harness 与安装任务，桌面父进程看门狗 |
+| `server/main.ts` | 打开数据库，按本机监听地址启动服务；退出时关闭 Harness、安装任务与项目终端，桌面父进程看门狗 |
+| `server/project-terminal.ts` / `shared/project-terminal.ts` | 项目交互式终端：Bun PTY、每项目一个 shell、输入 / 尺寸校验、有界输出重放、退出与进程清理；独立于 ACP 工具终端 |
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件；HTTP / WS 共用 Host、Origin 与跨站请求检查 |
 | `server/harness.ts` | Harness 定义（常用 6 个 + mock，及 `reg:<id>` 形式的任意 Registry Agent）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖、来源判定 |
 | `server/registry.ts` | 官方 ACP Registry 客户端：本地缓存 → 随包快照兜底、zod 校验（坏条目跳过）、6 小时刷新、图标缓存（只接受 SVG）；平台键；额外的实验性条目（ZCode 桥接） |
@@ -25,7 +26,7 @@
 | `usage_log` 表 | 每轮 Token（Harness 报告的 usage、模型、缓存读 / 写、思考、费用差分）；`GET /api/usage/stats?since=&tz=` 按 Agent / 模型 / Harness 汇总并按天分桶，`reporting` 列出报告过数据的 Harness |
 | `server/library.ts` | 「Skills 与插件」：只读扫描 ~/.claude / ~/.agents / ~/.codex / 项目目录，解析 Claude 插件（plugin.json），导入到 `<data>/library`（更新 / 删除），算各 Harness 支持；按 Agent 勾选的插件在建会话时变成 Claude `_meta.claudeCode.options.plugins` 或 Skill 链接 + stdio MCP |
 | `web/src/brands.ts` | 模型 id → 厂商（含 `openrouter/…`、`anthropic/…` 前缀），未知一律中性图标；Logo 来自 @lobehub/icons（MIT） |
-| `server/usage.ts` | 用量：读 `~/.claude/projects` / `~/.codex/sessions` 的 JSONL（只读），解析 Claude Code `/usage` 与 codex `/status` 的回复 |
+| `server/usage.ts` | 用量：读 `~/.claude/projects` / `~/.codex/sessions` 的 JSONL，解析 Claude Code `/usage`、Codex `/status`、Grok CLI 会话用量及 ACP billing 额度；未知值保留为空 |
 | `server/dirpicker.ts` | 选择文件夹：系统对话框（osascript / zenity / kdialog，可由桌面壳替换）+ 应用内浏览器的目录列表与常用位置 |
 | `server/host.ts` | `HarnessHost`：按「Agent + 会话工作目录」复用进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；权限请求挂起直到用户回答 |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
@@ -40,6 +41,8 @@
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
+| `shared/roomPreview.ts` / `web/src/roomListState.ts` | 列表快照和全局 `room.preview` 共用摘要规则；按消息 seq 与状态防回退，列表加载期间重放全局事件，重连刷新 |
+| `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，刷新重连同一项目 shell，浅深色和窄屏停靠布局 |
 | `web/src/messageMerge.ts` | 历史快照与实时消息按 id 合并，保留完成态 / 较长流式文本；发送接口返回的消息立即插入 |
 | `web/src/motion.ts` | `usePresence`（退场动画期间保持挂载）、`withViewTransition`（路由切换） |
 | `web/src/BrandMark.tsx` | 团团 Logo（导航栏，眨眼 + 悬停互看）；favicon 在 `web/public/` |
@@ -76,10 +79,17 @@
 | 14 | 服务商 `mgmt_key` |
 | 15 | 用量的模型、缓存读写、思考 token、费用及币种 |
 | 16 | `agents.use_profile`：是否附带用户个人资料 |
+| 17 | `messages.quote`：群聊引用的服务端有界快照（原消息 id、作者、角色及摘录），旧消息为空 |
 
 头像动画只用 CSS transform：≥32px 完整动画、更小只眨眼；`prefers-reduced-motion` 全部关闭；离屏（IntersectionObserver）和标签页隐藏（`html[data-tab-hidden]`）时暂停。
 
 ## 编排
+
+项目终端不参与 Agent 编排：`POST /api/projects/:id/terminal` 幂等打开，`GET` 读取状态，`DELETE ?terminalId=` 按实例结束，`/ws/terminal/:id` 推送快照 / 输出 / 退出。所有入口沿用本机请求边界。服务端内存拥有进程、最多 12 个终端及每终端 256K 字符尾部输出；浏览器只保留面板开关，断线不杀进程。Bun 1.3 的 PTY 部分写入按实际接受字节补发；交互式任务各自有进程组，结束时按专属 TTY 和后代身份清理。自然退出后已主动脱离的任务保留 shell 语义，无数据库迁移。
+
+Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建立模型会话；解析当前周期百分比及旧版 credits schema，缓存最新查询和错误。此处是 Grok 的只读扩展，不引入原生 provider 适配层。
+
+群聊引用由 `POST messages` 的 `replyToId` 指定；`Store.insertMessage` 在写入事务中校验同房间及完成态，再生成最多 400 字符的快照。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
 
 1. 人类消息写库并入房间队列，每个房间同时只执行一条链，不同房间并行。
 2. 触发：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 主 Agent。串行执行。

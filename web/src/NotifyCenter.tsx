@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { defaultAvatar } from "../../server/avatars";
 import { type GlobalEvent, NOTIFY_KINDS, NOTIFY_LABEL, type NotifyKind } from "../../shared/notify";
-import type { Agent, Room, WsEvent } from "./api";
+import type { Agent, WsEvent } from "./api";
 import { BotAvatar } from "./BotAvatar";
 import {
   avatarIcon,
@@ -39,7 +39,7 @@ function agentIcon(agent: Agent | undefined): Promise<string | undefined> {
 }
 
 /**
- * Global activity: sidebar busy flags, desktop/web notifications, unread counts and the dock badge.
+ * Desktop/web notifications, unread counts and the dock badge.
  * Suppressed while the window is focused and that conversation is open.
  */
 export function useNotifications(o: {
@@ -47,7 +47,6 @@ export function useNotifications(o: {
   agents: Agent[];
   openRoomId: string | null;
   open: (roomId: string) => void;
-  setRooms: React.Dispatch<React.SetStateAction<Room[]>>;
 }) {
   const [unread, setUnread] = useState<Record<string, number>>({});
   const ctx = useRef(o);
@@ -56,10 +55,6 @@ export function useNotifications(o: {
   useEffect(
     () =>
       o.subscribe((e) => {
-        if (e.type === "activity") {
-          ctx.current.setRooms((rs) => rs.map((r) => (r.id === e.roomId ? { ...r, busy: e.busy } : r)));
-          return;
-        }
         if (e.type !== "notify" || seen.current.has(`${e.kind}:${e.id}`)) return;
         seen.current.add(`${e.kind}:${e.id}`);
         const focused = document.hasFocus() && !document.hidden;
