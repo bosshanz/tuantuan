@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "../server/app";
@@ -24,8 +24,10 @@ const mock = Bun.serve({
     const u = new URL(req.url);
     const b = (req.method === "POST" ? await req.json().catch(() => ({})) : {}) as Record<string, unknown>;
     const auth = req.headers.get("authorization") ?? req.headers.get("x-api-key");
-    if (u.pathname.startsWith("/anthropic/v1/messages")) {
-      calls.push({ api: "anthropic", path: u.pathname, auth, model: b.model });
+    if (u.pathname.startsWith("/local/v1/messages"))
+      calls.push({ api: "local", path: u.pathname, auth, model: b.model });
+    if (u.pathname.startsWith("/anthropic/v1/messages") || u.pathname.startsWith("/local/v1/messages")) {
+      if (u.pathname.startsWith("/anthropic")) calls.push({ api: "anthropic", path: u.pathname, auth, model: b.model });
       if (!b.stream)
         return Response.json({
           id: "m",
@@ -123,15 +125,22 @@ afterAll(() => {
   resetLoginShellEnv();
 });
 
-async function turn(harness: string, providerId: string) {
+async function turn(harness: string, providerId: string, tag = "") {
   const a = await api<Agent>(
     "POST",
     "/api/agents",
-    agentInput(`A-${harness}`, { harness, providerId, permissionPolicy: "allow" }),
+    agentInput(`A-${harness}${tag}`, { harness, providerId, permissionPolicy: "allow" }),
   );
   expect(a.status).toBe(201);
-  const pj = await api<Project>("POST", "/api/projects", { name: harness, cwd: mkdtempSync(join(dir, "cwd-")) });
-  const room = await api<Room>("POST", "/api/rooms", { name: harness, agentIds: [a.data.id], projectId: pj.data.id });
+  const pj = await api<Project>("POST", "/api/projects", {
+    name: `${harness}${tag}`,
+    cwd: mkdtempSync(join(dir, "cwd-")),
+  });
+  const room = await api<Room>("POST", "/api/rooms", {
+    name: `${harness}${tag}`,
+    agentIds: [a.data.id],
+    projectId: pj.data.id,
+  });
   await api<Message>("POST", `/api/rooms/${room.data.id}/messages`, { senderName: "Andy", content: "hi" });
   await app.orchestrator.idle(room.data.id);
   return last(room.data.id);
@@ -190,6 +199,62 @@ test(
       expect.objectContaining({ harness: "codex", providerId: p.data.id, turns: 2, total: 30 }),
     );
     expect(u.data.tuantuan).toContainEqual(expect.objectContaining({ harness: "claude-code", providerId: p.data.id }));
+  },
+  { timeout: 150_000 },
+);
+
+test(
+  "Claude Code: the profile wins over the user's settings.json env, and model choices follow the profile",
+  async () => {
+    // A user whose ~/.claude/settings.json points Claude Code at their own endpoint and model.
+    // Claude Code applies that env over the process env, so a plain env injection loses.
+    const settings = join(home, ".claude", "settings.json");
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    const mine = JSON.stringify({
+      env: {
+        ANTHROPIC_BASE_URL: `${base}/local`,
+        ANTHROPIC_AUTH_TOKEN: "user-settings-token",
+        ANTHROPIC_API_KEY: "user-settings-key",
+        ANTHROPIC_MODEL: "glm-local",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-local",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-local",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-local",
+      },
+    });
+    writeFileSync(settings, mine);
+    const p = await api<{ id: string }>("POST", "/api/providers", {
+      name: "GLM",
+      anthropicBaseUrl: `${base}/anthropic`,
+      apiKey: "sk-glm-key",
+      model: "glm-prov",
+      smallModel: "glm-prov-air",
+    });
+
+    // the 默认设置 model list is probed with the profile applied, not the local config
+    const local = await api<{ configOptions: { id: string; options?: { name: string }[] }[] }>(
+      "GET",
+      "/api/harnesses/claude-code/options",
+    );
+    const prov = await api<{ configOptions: { id: string; options?: { name: string }[] }[] }>(
+      "GET",
+      `/api/harnesses/claude-code/options?provider=${p.data.id}`,
+    );
+    const names = (r: typeof prov) =>
+      JSON.stringify(r.data.configOptions.find((o) => o.id === "model")?.options?.map((o) => o.name));
+    expect(names(local)).toContain("glm-local");
+    expect(names(prov)).toContain("glm-prov");
+    expect(names(prov)).toContain("glm-prov-air");
+    expect(names(prov)).not.toContain("glm-local");
+
+    calls.length = 0;
+    const c = await turn("claude-code", p.data.id, "-glm");
+    expect(JSON.stringify(c?.content)).toContain("来自 Claude 服务商");
+    expect(calls.filter((x) => x.api === "local")).toEqual([]);
+    const ca = calls.filter((x) => x.api === "anthropic");
+    expect(ca.length).toBeGreaterThan(0);
+    expect(ca.some((x) => x.model === "glm-prov")).toBe(true);
+    expect(ca.every((x) => x.auth?.includes("sk-glm-key"))).toBe(true);
+    expect(readFileSync(settings, "utf8")).toBe(mine); // never written
   },
   { timeout: 150_000 },
 );

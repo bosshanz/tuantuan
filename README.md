@@ -169,6 +169,10 @@ Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的
 
 ![服务商与用量](docs/screenshots/providers.png)
 
+Claude Code 用服务商时：Claude Code 会让 `~/.claude/settings.json` 里的 `env` 盖过进程环境变量，所以团团把服务商的地址、Key 和 `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` 通过会话的 `_meta.claudeCode.options.settings`（比用户设置优先级更高的程序设置层）传入，不写任何用户文件。Agent 的「默认设置」按 Harness + 服务商分别读取，模型列表是服务商的模型，可填自定义模型 ID；切换服务商会清掉旧的默认模型。
+
+![服务商的模型](docs/screenshots/agent-provider-models.png)
+
 ![从 CC Switch 导入](docs/screenshots/ccswitch-import.png)
 
 ![Agent 的服务商](docs/screenshots/agent-provider.png)

@@ -49,7 +49,7 @@ export interface Meta {
 }
 
 export const IDENTITY_DELIVERY: Record<HarnessInfo["identity"], string> = {
-  "claude-meta": "作为系统提示追加（_meta.systemPrompt.append）",
+  "claude-meta": "追加到系统提示",
   "grok-meta": "作为系统规则追加（_meta.rules）",
   "codex-env": "作为 developer_instructions（CODEX_CONFIG 环境变量）",
   "first-prompt": "放在每个新会话的第一条消息前",

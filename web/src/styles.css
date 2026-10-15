@@ -1169,7 +1169,11 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .usage-row b { font-variant-numeric: tabular-nums; }
 @keyframes t-fade-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
 @media (max-width: 640px) { .prov-row { flex-wrap: wrap; } .prov-actions { width: 100%; padding-left: 40px; flex-wrap: wrap; } .field-pair { grid-template-columns: 1fr; } }
-.prov-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.prov-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); grid-auto-rows: 40px; gap: 6px; }
+.prov-pick .preset { height: 40px; min-width: 0; }
+.prov-pick .preset[aria-pressed="true"] { border-color: var(--text-2); box-shadow: none; background: var(--surface-2); }
+.prov-pick .preset:focus-visible { box-shadow: var(--focus); }
+.preset-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .local-icon { width: 20px; height: 20px; font-size: 11px; background: var(--text-3); }
 fieldset.prov-pick, fieldset.preset-grid { border: 0; margin: 0; padding: 0; min-width: 0; }
 .proj-picker { display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; height: 38px; }
@@ -1178,3 +1182,10 @@ fieldset.prov-pick, fieldset.preset-grid { border: 0; margin: 0; padding: 0; min
 .proj-picker .proj-icon { color: var(--text-2); flex: none; }
 .proj-hint { font-size: var(--fs-xs); color: var(--text-3); }
 .opt-row .proj-icon { display: inline-flex; color: var(--text-2); }
+.proj-picker.sm { width: auto; min-width: 140px; max-width: 220px; height: 30px; font-size: var(--fs-sm); }
+.proj-picker.sm > span:not(.proj-hint) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-group { list-style: none; }
+.skill-group + .skill-group { margin-top: 8px; }
+.skill-group-title { display: block; padding: 4px 10px; font-size: var(--fs-xs, 11px); font-weight: 600; color: var(--text-3); }
+.skill-group > .skill-list { padding: 0; border: 0; border-radius: 0; max-height: none; overflow: visible; }
+.skill-lock { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none; color: var(--text-3); }

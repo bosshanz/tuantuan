@@ -5,8 +5,10 @@ import {
   ChevronDown,
   ChevronLeft,
   FolderOpen,
+  Laptop,
   Link2,
   Loader2,
+  Lock,
   MessageCircle,
   Plug,
   Trash2,
@@ -28,8 +30,9 @@ import {
 import { ChoiceList, OptIcon, Popover } from "./ConfigChips";
 import { describeOptions, type Opt } from "./config";
 import { useFolderPicker } from "./FolderPicker";
+import { ProjectPicker } from "./NewRoom";
 import { type PickItem, PickList } from "./PickList";
-import { ProviderIcon, type ProviderItem, providerFits } from "./Providers";
+import { HARNESS_NAMES, ProviderIcon, type ProviderItem, providerFits } from "./Providers";
 import { AgentAvatar } from "./ui";
 
 type Form = Omit<AgentInput, "custom"> & { color: string; avatarShape: AvatarShape; custom: CustomInput | null };
@@ -258,6 +261,11 @@ export function AgentEditor(props: {
                   harness={form.harness}
                   value={form.providerId ?? null}
                   onChange={(v) => {
+                    if (v !== (form.providerId ?? null) && form.configDefaults?.model) {
+                      // Model names differ per 服务商: don't carry one over.
+                      const { model: _drop, ...rest } = form.configDefaults;
+                      set("configDefaults", rest);
+                    }
                     set("providerId", v);
                     if (!v && form.harness === "custom" && !form.custom)
                       set("custom", { format: "openai-chat", baseUrl: "", model: "", apiKey: "" });
@@ -295,7 +303,9 @@ export function AgentEditor(props: {
               )}
               {form.harness && form.harness !== "custom" && (
                 <AgentDefaults
+                  key={form.providerId ?? "local"}
                   harness={form.harness}
+                  providerId={form.providerId ?? null}
                   value={form.configDefaults ?? {}}
                   onChange={(v) => set("configDefaults", v)}
                 />
@@ -353,7 +363,7 @@ export function AgentEditor(props: {
             </div>
           </section>
 
-          {agent && <SkillsCard agentId={agent.id} />}
+          {agent && <SkillsCard agentId={agent.id} harness={agent.harness} />}
 
           {agent && (
             <section className="card">
@@ -630,7 +640,20 @@ interface RemoteSkill {
   description: string;
 }
 
-function SkillsCard({ agentId }: { agentId: string }) {
+function SkillText({ sk }: { sk: SkillItem }) {
+  return (
+    <>
+      <span className="skill-text">
+        <span className="skill-name">{sk.name}</span>
+        {sk.description && <span className="skill-desc">{sk.description}</span>}
+      </span>
+      <span className={`badge skill-src src-${sk.origin}`}>{sk.label}</span>
+    </>
+  );
+}
+
+function SkillsCard({ agentId, harness }: { agentId: string; harness: string }) {
+  const harnessName = HARNESS_NAMES[harness] ?? "Harness";
   const [items, setItems] = useState<SkillItem[] | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
@@ -706,43 +729,55 @@ function SkillsCard({ agentId }: { agentId: string }) {
     <section className="card skills-card">
       <div className="card-head row" style={{ alignItems: "center" }}>
         <h3 className="grow">Skills</h3>
-        <select
-          className="select sm"
-          aria-label="项目"
+        <ProjectPicker
+          className="sm"
+          projects={projects}
           value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          style={{ width: "auto", maxWidth: 200 }}
-        >
-          <option value="">不含项目</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+          onChange={setProjectId}
+          none={{ id: "", label: "不含项目", desc: "只看全局和这个 Agent 的 Skill", hint: "" }}
+        />
       </div>
       <div className="card-body skills-body">
         <ul className="skill-list" aria-label="Skill 列表">
           {items === null && <li className="skill-empty muted">…</li>}
           {items?.length === 0 && <li className="skill-empty muted">没有找到 Skill</li>}
-          {items?.map((sk) => (
-            <li key={sk.key}>
-              <label className="skill-row" title={sk.native ? "Harness 已自动读取" : sk.key}>
-                <input
-                  type="checkbox"
-                  checked={sk.enabled}
-                  disabled={sk.native}
-                  onChange={() => toggle(sk)}
-                  aria-label={sk.name}
-                />
-                <span className="skill-text">
-                  <span className="skill-name">{sk.name}</span>
-                  {sk.description && <span className="skill-desc">{sk.description}</span>}
-                </span>
-                <span className={`badge skill-src src-${sk.origin}`}>{sk.label}</span>
-              </label>
-            </li>
-          ))}
+          {items &&
+            items.length > 0 &&
+            (
+              [
+                ["自动加载", items.filter((x) => x.native)],
+                ["可选", items.filter((x) => !x.native)],
+              ] as const
+            ).map(
+              ([title, list]) =>
+                list.length > 0 && (
+                  <li key={title} className="skill-group">
+                    <span className="skill-group-title">{title}</span>
+                    <ul className="skill-list">
+                      {list.map((sk) => (
+                        <li key={sk.key}>
+                          {sk.native ? (
+                            <div className="skill-row" data-locked title={`由 ${harnessName} 自动加载`}>
+                              <Lock size={13} className="skill-lock" aria-hidden />
+                              <SkillText sk={sk} />
+                            </div>
+                          ) : (
+                            <label className="skill-row" title={sk.key}>
+                              <input
+                                type="checkbox"
+                                checked={sk.enabled}
+                                onChange={() => toggle(sk)}
+                                aria-label={sk.name}
+                              />
+                              <SkillText sk={sk} />
+                            </label>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ),
+            )}
         </ul>
 
         <div className="skill-add">
@@ -831,6 +866,7 @@ function SkillsCard({ agentId }: { agentId: string }) {
 /** Default model / effort / mode… for new conversations, from the harness's own options. */
 function AgentDefaults(props: {
   harness: string;
+  providerId: string | null;
   value: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
 }) {
@@ -842,15 +878,30 @@ function AgentDefaults(props: {
     setState({ opts: null, error: null });
     void api<{ configOptions: acp.SessionConfigOption[]; modes: acp.SessionModeState | null; error: string | null }>(
       "GET",
-      `/api/harnesses/${props.harness}/options${tick ? "?refresh=1" : ""}`,
+      `/api/harnesses/${props.harness}/options?${new URLSearchParams({
+        ...(tick ? { refresh: "1" } : {}),
+        ...(props.providerId ? { provider: props.providerId } : {}),
+      })}`,
     ).then(
-      (r) => !off && setState({ opts: r.error ? null : describeOptions(r.configOptions), error: r.error }),
+      (r) => {
+        if (off) return;
+        const opts = r.error ? null : describeOptions(r.configOptions);
+        setState({ opts, error: r.error });
+        // A saved model the current 服务商 doesn't offer would silently fail: fall back to the default.
+        const model = opts?.find((o) => o.kind === "model");
+        const saved = model ? props.value[model.id] : undefined;
+        if (model && saved && !model.choices.some((c) => c.value === saved) && !props.providerId) {
+          const next = { ...props.value };
+          delete next[model.id];
+          props.onChange(next);
+        }
+      },
       (e) => !off && setState({ opts: null, error: (e as Error).message }),
     );
     return () => {
       off = true;
     };
-  }, [props.harness, tick]);
+  }, [props.harness, props.providerId, tick]);
   return (
     <div className="field">
       <span className="label">默认设置</span>
@@ -875,6 +926,7 @@ function AgentDefaults(props: {
               key={o.id}
               opt={o}
               harness={props.harness}
+              custom={o.kind === "model" && !!props.providerId}
               value={props.value[o.id] ?? null}
               onChange={(v) => {
                 const next = { ...props.value };
@@ -890,7 +942,14 @@ function AgentDefaults(props: {
   );
 }
 
-function DefaultRow(props: { opt: Opt; harness: string; value: string | null; onChange: (v: string | null) => void }) {
+function DefaultRow(props: {
+  opt: Opt;
+  harness: string;
+  value: string | null;
+  /** Allow typing a model id the 服务商 serves but the harness doesn't list. */
+  custom?: boolean;
+  onChange: (v: string | null) => void;
+}) {
   const { opt } = props;
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
@@ -935,6 +994,7 @@ function DefaultRow(props: { opt: Opt; harness: string; value: string | null; on
           <ChoiceList
             opt={shown}
             harness={props.harness}
+            free={props.custom ? { placeholder: "自定义模型 ID" } : null}
             onPick={(v) => {
               props.onChange(v === FOLLOW ? null : v);
               setOpen(false);
@@ -960,8 +1020,10 @@ function ProviderPick(props: { harness: string; value: string | null; onChange: 
       <span className="label">服务商</span>
       <fieldset className="prov-pick" aria-label="服务商">
         <button type="button" aria-pressed={!props.value} className="preset" onClick={() => props.onChange(null)}>
-          <span className="prov-icon local-icon">本</span>
-          本机配置
+          <span className="prov-icon local-icon">
+            <Laptop size={12} />
+          </span>
+          <span className="preset-name">本机配置</span>
         </button>
         {fits.map((p) => (
           <button
@@ -972,13 +1034,15 @@ function ProviderPick(props: { harness: string; value: string | null; onChange: 
             onClick={() => props.onChange(p.id)}
           >
             <ProviderIcon name={p.name} color={p.color} size={20} />
-            {p.name}
+            <span className="preset-name" title={p.name}>
+              {p.name}
+            </span>
           </button>
         ))}
       </fieldset>
       <span className="help">
         {props.value
-          ? "只对这个 Agent 的进程生效，不改你的本机配置。"
+          ? "只用于这个 Agent"
           : props.harness === "custom"
             ? "直接填写下面的接口。"
             : "沿用你自己的登录和环境变量。"}{" "}

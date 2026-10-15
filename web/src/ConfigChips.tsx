@@ -118,7 +118,11 @@ const KIND_ICON: Record<OptKind, typeof Gauge> = {
 };
 
 export function OptIcon({ opt, harness, value }: { opt: Opt; harness: string; value?: string }) {
-  if (opt.kind === "model") return <BrandLogo brand={brandFor(value ?? opt.current, harness)} />;
+  if (opt.kind === "model") {
+    const v = value ?? opt.current;
+    const c = opt.choices.find((x) => x.value === v);
+    return <BrandLogo brand={brandFor(v, harness, c ? `${c.name} ${c.description ?? ""}` : null)} />;
+  }
   const I = KIND_ICON[opt.kind];
   return <I size={13} className="opt-icon" aria-hidden />;
 }
@@ -192,7 +196,7 @@ export function ChoiceList(props: {
             onClick={() => props.onPick(c.value)}
           >
             {opt.kind === "model" ? (
-              <BrandLogo brand={brandFor(c.value, props.harness)} />
+              <BrandLogo brand={brandFor(c.value, props.harness, `${c.name} ${c.description ?? ""}`)} />
             ) : c.danger ? (
               <AlertTriangle size={13} className="opt-icon" aria-hidden />
             ) : null}

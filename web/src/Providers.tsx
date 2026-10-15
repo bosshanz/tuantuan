@@ -78,7 +78,7 @@ export function fmtReset(s: string | null): string | null {
   return d.toDateString() === now.toDateString() ? hm : `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
 }
 
-const HARNESS_NAMES: Record<string, string> = {
+export const HARNESS_NAMES: Record<string, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   grok: "Grok",

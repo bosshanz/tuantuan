@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import type * as acp from "@agentclientprotocol/sdk";
 import { methods } from "@agentclientprotocol/sdk";
 import { AcpProcess, type TerminalSnapshot, withTimeout } from "./acp";
-import { codexProviderSet, providerAsCustom, providerEnv, providerSupports } from "./providers";
+import { claudeSettingsOverride, codexProviderSet, providerAsCustom, providerEnv, providerSupports } from "./providers";
 
 const CANCEL_GRACE_MS = Number(process.env.TUANTUAN_CANCEL_GRACE_MS) || 4000;
 const RESUME_TIMEOUT_MS = 45_000;
@@ -312,7 +312,7 @@ export class HarnessHost {
     const own = this.mcp?.serverEntry({ roomId: room.id, agentId: agent.id }, caps.mcpCapabilities);
     if (own) mcpServers.push(own);
     const preferLoad = this.wantLoad.delete(slotKey);
-    const meta = identityMeta(proc.spec, identity);
+    const meta = withProviderMeta(identityMeta(proc.spec, identity), agent, this.store);
     const saved = this.store.getAcpSession(room.id, agent.id);
     let res: { configOptions?: acp.SessionConfigOption[] | null; modes?: acp.SessionModeState | null } | null = null;
     if (saved && saved.harness === proc.spec.id && (view.capabilities.resume || view.capabilities.loadSession)) {
@@ -681,6 +681,18 @@ export class HarnessHost {
   shutdown() {
     for (const p of [...this.procs.values()]) this.dropProc(p);
   }
+}
+
+/** Claude Code + 服务商: session-only settings that outrank the user's settings.json env. */
+export function withProviderMeta(
+  meta: Record<string, unknown> | undefined,
+  agent: Pick<Agent, "harness" | "providerId">,
+  store: Pick<Store, "getProvider">,
+): Record<string, unknown> | undefined {
+  if (agent.harness !== "claude-code" || !agent.providerId) return meta;
+  const prov = store.getProvider(agent.providerId);
+  if (!prov || !providerSupports(prov, "claude-code")) return meta;
+  return { ...meta, claudeCode: { options: { settings: claudeSettingsOverride(prov) } } };
 }
 
 function identityMeta(spec: HarnessSpec, identity: string): Record<string, unknown> | undefined {

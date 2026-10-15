@@ -231,6 +231,17 @@ export function providerEnv(
 }
 
 /**
+ * Claude Code applies `env` from ~/.claude/settings.json *after* the process env, so a user's own
+ * ANTHROPIC_BASE_URL / ANTHROPIC_MODEL there (e.g. written by CC Switch) would beat ours. The
+ * adapter's `_meta.claudeCode.options.settings` is the programmatic tier, above user / project /
+ * local settings, and lives only in this session: nothing is written to disk.
+ */
+export function claudeSettingsOverride(s: ProviderSecret): { apiKeyHelper: string; env: Record<string, string> } {
+  const { set } = providerEnv(s, "claude-code", {});
+  return { apiKeyHelper: "", env: { ...set, ANTHROPIC_API_KEY: "" } };
+}
+
+/**
  * ACP `providers/set` payload for codex-acp. Codex's own custom-provider config still demands an
  * OpenAI login; the ACP gateway slot does not, and keeps the key in this process's memory only.
  * codex-acp supports the Responses API only.

@@ -1,8 +1,25 @@
 /** Brand marks, drawn on a 16-unit grid in currentColor so they sit on any surface. */
-export type Brand = "anthropic" | "openai" | "xai" | "opencode" | "generic";
+export type Brand =
+  | "anthropic"
+  | "openai"
+  | "xai"
+  | "zhipu"
+  | "deepseek"
+  | "moonshot"
+  | "qwen"
+  | "opencode"
+  | "generic";
 
-export function brandFor(model: string, harness: string): Brand {
-  const m = model.toLowerCase();
+/**
+ * Logo by the model itself, not by the harness: Claude Code routed to GLM shows Zhipu.
+ * `name` is the display name (Claude's "opus" alias can be named "glm-5.3"), checked first.
+ */
+export function brandFor(model: string, harness: string, name?: string | null): Brand {
+  const m = `${name ?? ""} ${model}`.toLowerCase();
+  if (/glm|zhipu|bigmodel|chatglm/.test(m)) return "zhipu";
+  if (m.includes("deepseek")) return "deepseek";
+  if (/kimi|moonshot/.test(m)) return "moonshot";
+  if (/qwen|qwq|dashscope/.test(m)) return "qwen";
   if (/^(claude|anthropic|sonnet|opus|haiku)/.test(m) || m.includes("claude")) return "anthropic";
   if (/^(gpt|o[1-9]|codex|openai|chatgpt)/.test(m) || m.includes("gpt")) return "openai";
   if (/^(grok|xai)/.test(m) || m.includes("grok")) return "xai";
@@ -18,6 +35,10 @@ const BRAND_LABEL: Record<Brand, string> = {
   anthropic: "Anthropic",
   openai: "OpenAI",
   xai: "xAI",
+  zhipu: "智谱",
+  deepseek: "DeepSeek",
+  moonshot: "Kimi",
+  qwen: "通义千问",
   opencode: "OpenCode",
   generic: "自定义",
 };
@@ -42,6 +63,27 @@ function glyph(brand: Brand) {
     case "xai":
       return (
         <path fill="currentColor" d="M2 2.5h2.6l3.1 4.4 3.2-4.4H14L9.2 9.1l4.9 4.4h-2.6L7.7 10 5 13.5H2l4.4-5.9z" />
+      );
+    case "zhipu":
+      return <path fill="currentColor" d="M3 2.5h10v2L6.2 11.5H13v2H3v-2l6.8-7H3z" />;
+    case "deepseek":
+      return (
+        <path
+          fill="currentColor"
+          d="M1.5 7.5c1.5-3 5-4.6 8.3-3.6 2 .6 3.4 2.1 4.7 1.4-.2 1.9-1.4 3-2.6 3.3.1 2.6-2.2 4.9-5.2 4.9-3 0-5.2-2.1-5.2-4.6zm8.6 0a.9.9 0 1 0 0-1.8.9.9 0 0 0 0 1.8z"
+        />
+      );
+    case "moonshot":
+      return <path fill="currentColor" d="M10.5 1.8A6.3 6.3 0 1 0 14.2 11 5.2 5.2 0 0 1 10.5 1.8z" />;
+    case "qwen":
+      return (
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+          d="M8 1.8 13.4 5v6L8 14.2 2.6 11V5zM8 5.2l2.6 1.5v2.6L8 10.8 5.4 9.3V6.7z"
+        />
       );
     case "opencode":
       return (

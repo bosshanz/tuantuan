@@ -231,7 +231,10 @@ try {
   await page.getByRole("button", { name: "Agents", exact: true }).click();
   await page.locator(".list-item", { hasText: "Alice" }).first().click();
   const skillsCard = page.locator(".skills-card");
-  await skillsCard.getByLabel("项目").selectOption({ label: "冒烟项目" });
+  await skillsCard.getByRole("button", { name: "项目" }).click();
+  await page.getByRole("option", { name: /冒烟项目/ }).click();
+  await skillsCard.getByRole("button", { name: "项目" }).filter({ hasText: "冒烟项目" }).waitFor();
+  await skillsCard.locator(".skill-group-title", { hasText: "可选" }).waitFor();
   await skillsCard.locator(".skill-row", { hasText: "deploy" }).waitFor();
   for (const n of ["code-review", "pdf-tools", "release-notes"])
     await skillsCard.locator(".skill-row", { hasText: n }).waitFor();

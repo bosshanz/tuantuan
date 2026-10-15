@@ -138,9 +138,23 @@ export function NewRoom({
 const DRAFTS = "drafts";
 
 /** 项目（可选）: "不选项目" files the conversation under 草稿; otherwise a real project. */
-function ProjectPicker(props: { projects: Project[]; value: string; onChange: (id: string) => void }) {
+export function ProjectPicker(props: {
+  projects: Project[];
+  value: string;
+  onChange: (id: string) => void;
+  /** The "no project" entry: its value and wording. Defaults to 草稿. */
+  none?: { id: string; label: string; desc: string; hint: string };
+  className?: string;
+}) {
   const btn = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const none = props.none ?? {
+    id: DRAFTS,
+    label: "不选项目",
+    desc: "放进「草稿」，以后可以移到项目里",
+    hint: "放进「草稿」",
+  };
+  const DRAFTS_ID = none.id;
   const real = props.projects.filter((p) => p.id !== DRAFTS);
   const current = real.find((p) => p.id === props.value) ?? null;
   const pick = (id: string) => {
@@ -153,7 +167,7 @@ function ProjectPicker(props: { projects: Project[]; value: string; onChange: (i
       type="button"
       key={id}
       role="option"
-      aria-selected={(current?.id ?? DRAFTS) === id}
+      aria-selected={(current?.id ?? DRAFTS_ID) === id}
       className="opt-row"
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => pick(id)}
@@ -171,21 +185,26 @@ function ProjectPicker(props: { projects: Project[]; value: string; onChange: (i
       <button
         ref={btn}
         type="button"
-        className="select proj-picker"
+        className={`select proj-picker ${props.className ?? ""}`}
         aria-label="项目"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
         {current ? <Folder size={15} className="proj-icon" /> : <Inbox size={15} className="proj-icon muted" />}
-        <span className={current ? "" : "muted"}>{current ? current.name : "不选项目"}</span>
-        {!current && <span className="proj-hint">放进「草稿」</span>}
+        <span className={current ? "" : "muted"}>{current ? current.name : none.label}</span>
+        {!current && none.hint && <span className="proj-hint">{none.hint}</span>}
         <ChevronDown size={15} className="proj-caret" />
       </button>
       {open && (
-        <Popover anchor={btn.current} onClose={() => setOpen(false)} label="选择项目" width={btn.current?.offsetWidth}>
+        <Popover
+          anchor={btn.current}
+          onClose={() => setOpen(false)}
+          label="选择项目"
+          width={Math.max(btn.current?.offsetWidth ?? 0, 240)}
+        >
           <div role="listbox" aria-label="项目" className="opt-list">
-            {row(DRAFTS, <Inbox size={14} />, "不选项目", "放进「草稿」，以后可以移到项目里")}
+            {row(DRAFTS_ID, <Inbox size={14} />, none.label, none.desc)}
             {real.map((p) =>
               row(p.id, p.id === current?.id ? <FolderOpen size={14} /> : <Folder size={14} />, p.name, p.cwd ?? ""),
             )}

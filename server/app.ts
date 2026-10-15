@@ -18,14 +18,16 @@ import {
   resetLoginShellEnv,
   visibleHarnesses,
 } from "./harness";
-import { HarnessHost } from "./host";
+import { HarnessHost, withProviderMeta } from "./host";
 import { Installer } from "./installer";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import {
+  codexProviderSet,
   PRESETS,
   presetFor,
   providerBalance,
+  providerEnv,
   providerSupports,
   publicProvider,
   readCcSwitch,
@@ -195,31 +197,36 @@ export function createApp(deps: AppDeps) {
     { at: number; configOptions: acp.SessionConfigOption[]; modes: acp.SessionModeState | null; error: string | null }
   >();
   const optionsInflight = new Map<string, Promise<unknown>>();
-  async function harnessOptionsFor(id: string, refresh: boolean) {
-    const hit = harnessOptions.get(id);
+  /** Options cache key: per harness, and per 服务商 version when one is applied. */
+  const optionsKey = (id: string, prov: { id: string; updatedAt: number } | null) =>
+    prov ? `${id}|${prov.id}|${prov.updatedAt}` : id;
+  async function harnessOptionsFor(id: string, refresh: boolean, providerId: string | null = null) {
+    const prov = providerId ? store.getProvider(providerId) : null;
+    const key = optionsKey(id, prov && providerSupports(prov, id) ? prov : null);
+    const hit = harnessOptions.get(key);
     if (hit && !refresh && !hit.error && Date.now() - hit.at < 30 * 60_000) return hit;
-    let job = optionsInflight.get(id);
+    let job = optionsInflight.get(key);
     if (!job) {
-      job = probeHarness(id)
+      job = probeHarness(id, undefined, providerId)
         .then((r) => {
           const res = r as { ok: boolean; error?: string; sessionError?: string | null; loggedIn?: boolean | null };
-          if (!harnessOptions.has(id) || harnessOptions.get(id)?.error || refresh) {
+          if (!harnessOptions.has(key) || harnessOptions.get(key)?.error || refresh) {
             const err = !res.ok
               ? (res.error ?? "无法启动")
               : res.loggedIn === false
                 ? "需要先登录"
                 : (res.sessionError ?? null);
-            if (err) harnessOptions.set(id, { at: Date.now(), configOptions: [], modes: null, error: err });
+            if (err) harnessOptions.set(key, { at: Date.now(), configOptions: [], modes: null, error: err });
           }
         })
         .catch((e) =>
-          harnessOptions.set(id, { at: Date.now(), configOptions: [], modes: null, error: (e as Error).message }),
+          harnessOptions.set(key, { at: Date.now(), configOptions: [], modes: null, error: (e as Error).message }),
         )
-        .finally(() => optionsInflight.delete(id));
-      optionsInflight.set(id, job);
+        .finally(() => optionsInflight.delete(key));
+      optionsInflight.set(key, job);
     }
     await job;
-    return harnessOptions.get(id) ?? { at: Date.now(), configOptions: [], modes: null, error: "无法读取" };
+    return harnessOptions.get(key) ?? { at: Date.now(), configOptions: [], modes: null, error: "无法读取" };
   }
 
   /**
@@ -366,13 +373,22 @@ export function createApp(deps: AppDeps) {
     return out;
   }
 
-  async function probeHarness(id: string, methodId?: string) {
+  async function probeHarness(id: string, methodId?: string, providerId?: string | null) {
     const spec = harnessSpec(id);
     if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
     const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
     const command = status.command;
     if (!command) return { ok: false, error: status.error, install: spec.install, login: status.login };
-    const env = await loginShellEnv();
+    const env = { ...(await loginShellEnv()) };
+    // With a 服务商, probe exactly as the agent will run: same env, routing and settings tier.
+    const prov = providerId ? store.getProvider(providerId) : null;
+    const useProv = prov && providerSupports(prov, id) ? prov : null;
+    if (useProv) {
+      const pe = providerEnv(useProv, id, env);
+      for (const k of pe.unset) delete env[k];
+      Object.assign(env, pe.set);
+    }
+    const cacheKey = optionsKey(id, useProv);
     const scratch = mkdtempSync(join(tmpdir(), "tuantuan-probe-"));
     const p = new AcpProcess(
       { command, args: status.args, env, cwd: scratch },
@@ -412,13 +428,24 @@ export function createApp(deps: AppDeps) {
       let modes: acp.SessionModeState | null = null;
       try {
         const created = await withTimeout(
-          p.agent.request(acpMethods.agent.session.new, { cwd: scratch, mcpServers: [] }),
+          (async () => {
+            if (useProv && id === "codex")
+              await p.agent.request(
+                acpMethods.agent.providers.set,
+                codexProviderSet(useProv) as unknown as acp.SetProviderRequest,
+              );
+            return p.agent.request(acpMethods.agent.session.new, {
+              cwd: scratch,
+              mcpServers: [],
+              _meta: withProviderMeta(undefined, { harness: id, providerId: useProv?.id ?? null }, store),
+            });
+          })(),
           60_000,
           "session/new 超时",
         );
         configOptions = created.configOptions ?? [];
         modes = created.modes ?? null;
-        harnessOptions.set(id, { at: Date.now(), configOptions, modes, error: null });
+        harnessOptions.set(cacheKey, { at: Date.now(), configOptions, modes, error: null });
         loggedIn = true;
       } catch (e) {
         const msg = (e as { message?: string }).message ?? String(e);
@@ -615,7 +642,11 @@ export function createApp(deps: AppDeps) {
       if (id && sub === "test" && method === "POST") return json(await probeHarness(id));
       if (id && sub === "options" && method === "GET") {
         if (id === "custom") return json({ configOptions: [], modes: null, error: null });
-        const r = await harnessOptionsFor(id, url.searchParams.get("refresh") === "1");
+        const r = await harnessOptionsFor(
+          id,
+          url.searchParams.get("refresh") === "1",
+          url.searchParams.get("provider") || null,
+        );
         return json({ configOptions: r.configOptions, modes: r.modes, error: r.error });
       }
       if (id && sub === "install") {
