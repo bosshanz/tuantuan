@@ -900,6 +900,41 @@ try {
       if (label === "Harness" && width === 1024) await shot("harness-1024");
     }
   }
+  // Desktop titlebar: sidebar search / + stay clickable; no drag strip from another column covers them.
+  await page.setViewportSize({ width: 1024, height: 640 });
+  for (const hash of ["#/c", `#/c/${app.store.listRooms()[0]?.id}`, "#/a", "#/harness", "#/library", "#/providers"]) {
+    await page.goto(`http://localhost:${server.port}/${hash}`);
+    await page.locator(".side-top .side-icon").first().waitFor();
+    await page.waitForTimeout(300);
+    const bad = await page.evaluate(() => {
+      document.documentElement.dataset.desktop = "darwin";
+      const region = (el: Element) => getComputedStyle(el).getPropertyValue("-webkit-app-region") || "none";
+      const out: string[] = [];
+      const drags = [...document.querySelectorAll("body *")].filter(
+        (el) => region(el) === "drag" && el.getBoundingClientRect().width > 0,
+      );
+      for (const btn of document.querySelectorAll(".side-top button, .main-head button, .chat-head button")) {
+        const r = btn.getBoundingClientRect();
+        if (!r.width) continue;
+        const name = btn.getAttribute("aria-label") ?? btn.textContent?.trim();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const hit = document.elementFromPoint(cx, cy);
+        if (!hit || !(btn === hit || btn.contains(hit))) out.push(`${name}: covered by ${hit?.className}`);
+        if (region(btn) !== "no-drag") out.push(`${name}: app-region ${region(btn)}`);
+        for (const d of drags) {
+          if (d.contains(btn)) continue;
+          const q = d.getBoundingClientRect();
+          if (cx > q.left && cx < q.right && cy > q.top && cy < q.bottom)
+            out.push(`${name}: under drag strip ${d.className}`);
+        }
+      }
+      delete document.documentElement.dataset.desktop;
+      return out;
+    });
+    if (bad.length) throw new Error(`titlebar ${hash}: ${bad.join("; ")}`);
+  }
+
   // Settings sidebar: Agents sub-list expands smoothly, "新建 Agent" never clipped, concise subtitles.
   await page.setViewportSize({ width: 1024, height: 640 });
   await page.goto(`http://localhost:${server.port}/#/harness`);

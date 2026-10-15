@@ -1558,3 +1558,7 @@ fieldset.segmented { padding: 2px; min-inline-size: 0; }
   .stop-ring { animation: none; border-color: color-mix(in srgb, var(--text) 25%, transparent); }
   .typing i { animation: none; opacity: 0.6; }
 }
+/* Titlebar drag strips stay inside their own column: the floating chat/home header is absolutely
+   positioned, so .main must be its containing block or it spans the sidebar's search / + buttons. */
+.main, .pane { position: relative; }
+html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region: no-drag; }
