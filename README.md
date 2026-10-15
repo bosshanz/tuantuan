@@ -37,6 +37,24 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 生产方式：`bun run build && bun start`（API 同时托管 `web/dist`，访问 http://localhost:8787）。
 
+## 桌面版（Electron）
+
+下载 Releases 里的安装包（macOS `.dmg`、Windows `.exe`、Linux `.AppImage`），打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 的 ACP 适配器（含 Codex 引擎）已内置；你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+
+![桌面版（Linux，Xvfb 截图）](docs/screenshots/desktop-linux.png)
+
+自己打包：
+
+```bash
+bun install && bun run desktop:install   # 第一次：装 Electron 和打包工具
+bun run desktop:dev                      # 开发：构建前端后用 Electron 打开
+bun run desktop:build                    # 当前系统、当前架构的安装包 → desktop/release/
+bun run desktop:build -- --arch arm64,x64   # macOS 同时出 Apple 芯片和 Intel 包
+xvfb-run -a bun run desktop:smoke        # Linux：无界面端到端冒烟
+```
+
+macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/release/Tuantuan-<版本>-mac-arm64.dmg`。没有证书时包是未签名的，第一次打开需要右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/团团.app`。要签名公证，打包前设置 `CSC_LINK`、`CSC_KEY_PASSWORD`（Developer ID 证书）和 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`；Windows 用 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`。自动更新默认关闭，打包时设 `TUANTUAN_PUBLISH=github` 和 `GH_TOKEN` 才会写入 GitHub Releases 更新源。GitHub Actions 的 Desktop 工作流（打 `v*` 标签或手动触发）会打出三个平台的包作为构建产物，不发布。
+
 ## 安装和登录 Harness
 
 团团优先用你自己装的版本（登录 shell 的 PATH，或在「Harness」页填的绝对路径），这样会沿用你的版本和配置；找不到时才用团团内置的。「Harness」页会标出当前用的是「本机」「自定义路径」还是「内置」。

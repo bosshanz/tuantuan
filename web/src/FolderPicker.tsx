@@ -22,8 +22,8 @@ interface Place {
 type PickResult = { path: string } | { cancelled: true } | { unsupported: true };
 
 /**
- * Ask for a folder: the OS dialog when the server can show one (macOS / Linux desktop, later
- * Electrobun), otherwise the in-app browser. Resolves to an absolute path or null when cancelled.
+ * Ask for a folder: the OS dialog when the server can show one (macOS / Linux desktop, the desktop app
+ * via its preload bridge), otherwise the in-app browser. Resolves to an absolute path or null when cancelled.
  */
 export function useFolderPicker() {
   const [browse, setBrowse] = useState<{ title: string; start?: string; resolve: (p: string | null) => void } | null>(
@@ -33,6 +33,15 @@ export function useFolderPicker() {
   const pick = useCallback(async (title: string, start?: string): Promise<string | null> => {
     setBusy(true);
     try {
+      // Desktop app: Electron's own dialog through the preload bridge.
+      const desk = (
+        window as { tuantuan?: { pickFolder?: (o: { title: string; start?: string }) => Promise<PickResult> } }
+      ).tuantuan;
+      if (desk?.pickFolder) {
+        const d = await desk.pickFolder({ title, start }).catch(() => ({ unsupported: true }) as PickResult);
+        if ("path" in d) return d.path;
+        if ("cancelled" in d) return null;
+      }
       const r = await api<PickResult>("POST", "/api/fs/pick", { title, start }).catch(
         () => ({ unsupported: true }) as PickResult,
       );

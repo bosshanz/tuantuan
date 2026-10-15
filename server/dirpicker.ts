@@ -7,7 +7,7 @@ import { loginShellEnv, which } from "./harness";
  * Choosing a folder. A browser page can't hand over absolute paths, so the server asks the OS:
  * macOS `choose folder` (osascript), Linux zenity / kdialog. When none is available (or disabled with
  * TUANTUAN_NATIVE_PICKER=0) the UI falls back to the in-app browser backed by listDirs(). A desktop
- * shell (Electrobun) can plug its own dialog in with setNativePicker().
+ * shell (Electron, via its preload bridge in the web UI) can plug its own dialog in with setNativePicker().
  */
 export type PickResult = { path: string } | { cancelled: true } | { unsupported: true };
 type NativePicker = (opts: { title: string; start: string }) => Promise<PickResult>;

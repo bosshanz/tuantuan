@@ -1,0 +1,64 @@
+name: Desktop
+# Builds the Electron app for macOS (arm64 + x64), Windows (x64) and Linux (x64 AppImage).
+# Artifacts are uploaded to the run. Nothing is published unless TUANTUAN_PUBLISH is set
+# (repository variable) — then electron-builder uploads to a GitHub release with GITHUB_TOKEN.
+# Signing / notarization use secrets when present and are skipped otherwise.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64,x64
+          - os: windows-latest
+            arch: x64
+          - os: ubuntu-latest
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      TUANTUAN_PUBLISH: ${{ vars.TUANTUAN_PUBLISH }}
+      GH_TOKEN: ${{ vars.TUANTUAN_PUBLISH && secrets.GITHUB_TOKEN || '' }}
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.MAC_CSC_LINK && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: node node_modules/electron/install.js
+        working-directory: desktop
+      - run: bun run build
+      - run: bun desktop/scripts/dist.ts --arch ${{ matrix.arch }}
+      - name: Smoke test (Linux, headless)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb libfuse2
+          xvfb-run -a bun desktop/scripts/smoke.ts
+        env:
+          SHOTS_DIR: ${{ runner.temp }}/shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tuantuan-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+            desktop/release/latest*.yml

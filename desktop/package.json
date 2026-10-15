@@ -1,0 +1,30 @@
+{
+  "name": "tuantuan-desktop",
+  "productName": "团团",
+  "description": "团团 Tuantuan — 多 Agent 群聊工作台",
+  "author": "Tuantuan",
+  "homepage": "https://github.com/bosshanz/tuantuan",
+  "private": true,
+  "main": "dist/main.cjs",
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "@types/node": "^26.6.5",
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "playwright-core": "^1.64.1"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "trustedDependencies": [
+    "electron"
+  ],
+  "version": "0.1.0",
+  "scripts": {
+    "compile": "bun scripts/compile.ts",
+    "stage": "bun scripts/stage.ts",
+    "dev": "bun scripts/compile.ts && electron .",
+    "dist": "bun scripts/dist.ts"
+  },
+  "desktopName": "tuantuan.desktop"
+}

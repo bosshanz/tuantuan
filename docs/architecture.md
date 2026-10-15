@@ -2,7 +2,7 @@
 
 ## 背景与约束
 
-- 本机使用：一个 Bun 进程 + 一个 SQLite 文件，无鉴权、无多实例。桌面壳（Electrobun，主进程即 Bun）在 M3。
+- 本机使用：一个 Bun 进程 + 一个 SQLite 文件，无鉴权、无多实例。桌面版（`desktop/`）是 Electron 壳：主进程把同一个 Bun 服务端作为子进程跑在随包 Bun 上，窗口加载它的本机地址。
 - 团团不调用模型。每个 Agent 绑定一个编码 Harness，通过 ACP（JSON-RPC over stdio，`@agentclientprotocol/sdk` 1.8.0）驱动；模型、Key、登录归 Harness。
 - 没有任何账号也必须可测试 → `server/mock-agent.ts` 是一个确定性的 ACP agent（`TUANTUAN_MOCK_HARNESS=1` 时可选）。
 

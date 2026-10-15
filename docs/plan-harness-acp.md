@@ -3,7 +3,7 @@
 > 状态：已评审（2026-10-14）。**2026-10-14 Andy 决定移除桌面机器人功能**：下文涉及机器人的条目（决策 4、§3.3、机器人 MCP 工具）已作废，仅保留作历史记录。M1 已完成主体（见 §8 M1 状态）。凡标「未核实」的条目需要实测。
 
 ## 0. Andy 的决定（2026-10-14）
-1. 桌面框架：**Electrobun**。
+1. 桌面框架：~~Electrobun~~ → **Electron**（2026-10-15 Andy 改定，见 §2.3 末尾）。
 2. 群聊不 @ 时：每个群指定一个**主 Agent**，由它回复。
 3. 工作目录**属于会话**（群聊或私聊），不属于 Agent；群内所有 Agent 共用它。
 4. 机器人房间绑定一个**编码 Harness** Agent。
@@ -54,12 +54,14 @@
 | Tauri v2 + Bun sidecar（`bun build --compile`） | 成熟，签名公证流程清楚（[sidecar 文档](https://v2.tauri.app/develop/sidecar/)） | 包小、更新器成熟 | 两套运行时（Rust 壳 + Bun sidecar）；sidecar 嵌套签名在 macOS 公证上有已知坑（[issue #11992](https://github.com/tauri-apps/tauri/issues/11992)）；进程管理多一层 |
 | Electron | 最稳 | 生态最大、Chromium 一致性 | 包体 100MB+；Node 而非 Bun（服务端要改或再嵌 Bun） |
 
+**2026-10-15 决定改用 Electron**：Chromium 渲染与开发时一致、electron-builder 的 dmg / nsis / AppImage、签名公证、electron-updater 都成熟，Windows / Linux 不用赌。代价用「Bun 子进程」消化：Electron 主进程只管窗口，服务端原样跑在随包附带的 Bun 上（`resources/bin/bun` + `resources/server`，不进 asar），所以服务端代码零改动。实测 Linux AppImage 431 MB（Codex 引擎 427 MB 解压后、Claude 引擎 273 MB、Bun 76 MB 占大头）。
+
 **共同难点：macOS GUI 应用的 PATH**。从 Dock 启动时继承的是 launchd 的精简 PATH，找不到 `npm -g`、Homebrew、nvm、`~/.opencode/bin` 下的 CLI。方案：启动时用用户登录 shell 解析一次环境（`$SHELL -ilc 'env -0'`，带超时），缓存后用于所有子进程；设置页允许为每个 Harness 填绝对路径；「检测」按钮显示解析到的路径和版本。
 
 ## 3. 架构
 
 ```
-桌面壳（Electrobun 主进程 = Bun）
+桌面壳（Electron 主进程：窗口 / 菜单 / 文件夹对话框）→ 子进程 Bun 服务端
 ├─ HarnessRegistry      已知 Harness 定义：检测命令、启动命令/参数、安装提示、认证提示、默认 env
 ├─ AcpHost              每个 Agent 一个 Harness 子进程（按 Agent 复用，多会话复用同一进程）
 │   ├─ AcpConnection    @agentclientprotocol/sdk client：initialize / authenticate / session/* / 处理 Agent→Client 请求
@@ -150,7 +152,8 @@
   - **M1 状态（2026-10-14）**：已完成 SDK 在 Bun 下验证、注册表与检测、每 Agent 进程、会话映射与恢复、cwd 限制、权限弹窗、私聊完整能力 UI、Agent 编辑字段、基础新手引导、删除 Auto 路由、mock ACP agent + e2e、迁移 6。握手实测：Claude Code（claude-agent-acp 0.90.0）与 OpenCode 1.19.0 无账号可建会话；Codex（codex-acp 2.2.2）与 Grok 1.0.52 初始化成功、建会话需登录。未完成：ACP `authenticate` 流程（目前只显示登录提示）、session/load 回放显示、机器人 Agent 按 Harness 过滤、新建群时直接设主 Agent / cwd。
 - **M2：群聊 + 交接 MCP**
   - **M2 状态（2026-10-14）**：已完成 `tuantuan` MCP 服务器（HTTP `/mcp/<token>` + stdio 中转，按 `mcpCapabilities.http` 选择）、`handoff` / `list_members`（成员校验、去重、跳数上限、打断语义、交接卡片）、群聊转述（上次发言后的新消息，8000 字上限）、机器人 MCP 工具（已随机器人功能移除）、引导页 ACP `authenticate` + 终端命令复制 + 重新检测、session/load 回放只读显示（按用户消息去重）、建群时选主 Agent 和工作目录、机器人只列 Harness 已安装的 Agent、README 截图更新。实测：OpenCode 1.19.0（免费模型，无账号）在 HTTP 和 stdio 两种传输下都完成了真实交接；Claude Code 未登录时 prompt 报需要登录；Codex / Grok 未登录无法建会话。：成员 session 管理、转述上下文、@ 路由、默认回复人（按决策）、handoff MCP、跳数与打断、机器人房间改走 ACP。
-- **M3：桌面打包**：Electrobun 壳、登录 shell 环境解析、钥匙串、签名公证、自动更新、首次运行引导（检测并提示安装 Harness）。
+- **M3：桌面打包**：Electron 壳、登录 shell 环境解析、钥匙串、签名公证、自动更新、首次运行引导（检测并提示安装 Harness）。
+  - **M3 状态（2026-10-15）**：`desktop/` 已完成：Electron 主进程拉起随包 Bun 服务端（随机本机端口、等 `/api/health`、退出时杀整个进程组）、单实例、macOS hiddenInset 标题栏（红绿灯居中在侧栏上方）、中文菜单、可选托盘、窗口位置记忆、登录 shell 环境导入、preload 桥接原生文件夹对话框（contextIsolation + sandbox，无 nodeIntegration）、图标、electron-builder（mac dmg+zip arm64/x64、win nsis、linux AppImage）、签名公证按环境变量开启、electron-updater 仅在配置发布时启用、GitHub Actions 打包。Linux AppImage 在 Xvfb 下端到端冒烟通过（`desktop/scripts/smoke.ts`）。未实测：macOS / Windows 包、签名公证、自动更新、钥匙串。
 - **M4：更多 Harness 与扩展**：Gemini CLI、Goose / Kimi / Qwen Code；私有扩展（Claude 子 Agent / goal、Grok `x.ai/*` 回退、OpenCode fork）；视情况评估 ACP v2。
 
 ## 9. 风险
@@ -162,7 +165,7 @@
 - 机器人语音与编码 Harness 的输出形态不匹配。
 
 ## 10. 需要 Andy 决定（已在 §0 决定，保留原问题供追溯）
-1. **桌面框架**：Electrobun（推荐，主进程就是 Bun）还是 Tauri + Bun sidecar？
+1. **桌面框架**：Electrobun（推荐，主进程就是 Bun）还是 Tauri + Bun sidecar？（最终：Electron + Bun 子进程）
 2. **群聊不 @ 时谁回复**：默认回复人 / 上一位继续 / 无人回复。
 3. **群里多个 Agent 共用一个工作目录，还是每个 Agent 自动建 git worktree**？
 4. **机器人房间**：继续绑定编码 Harness（只读模式 + 语音念摘要），还是加一个轻量对话型 Harness 专门给机器人？

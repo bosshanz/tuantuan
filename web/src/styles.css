@@ -1189,3 +1189,13 @@ fieldset.prov-pick, fieldset.preset-grid { border: 0; margin: 0; padding: 0; min
 .skill-group-title { display: block; padding: 4px 10px; font-size: var(--fs-xs, 11px); font-weight: 600; color: var(--text-3); }
 .skill-group > .skill-list { padding: 0; border: 0; border-radius: 0; max-height: none; overflow: visible; }
 .skill-lock { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none; color: var(--text-3); }
+
+/* Desktop app (Electron, macOS hiddenInset title bar): traffic lights sit centered in the rail
+   above the logo; the rail and header bars drag the window, their controls stay clickable. */
+html[data-desktop="darwin"] .rail { padding-top: 40px; }
+html[data-desktop] .rail,
+html[data-desktop] .pane-head,
+html[data-desktop] .main-head { -webkit-app-region: drag; }
+html[data-desktop] .rail :is(button, a, input, select, textarea, [role]),
+html[data-desktop] .pane-head :is(button, a, input, select, textarea, [role]),
+html[data-desktop] .main-head :is(button, a, input, select, textarea, [role]) { -webkit-app-region: no-drag; }

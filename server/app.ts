@@ -494,6 +494,8 @@ export function createApp(deps: AppDeps) {
       return json({ onboarded: true });
     }
 
+    if (resource === "health" && method === "GET") return json({ ok: true, pid: process.pid });
+
     if (resource === "meta" && method === "GET")
       return json({
         onboarded: store.getSetting("onboarded", false),
@@ -912,10 +914,11 @@ export function createApp(deps: AppDeps) {
   };
 }
 
-export function serve(deps: AppDeps, port: number) {
+export function serve(deps: AppDeps, port: number, hostname?: string) {
   const app = createApp(deps);
   const server = Bun.serve<WsData>({
     port,
+    ...(hostname ? { hostname } : {}),
     fetch: (req, srv) => app.fetch(req, srv),
     websocket: app.websocket,
   });
