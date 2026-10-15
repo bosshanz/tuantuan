@@ -296,6 +296,8 @@ export interface Room {
   createdAt: number;
   /** Sidebar preview: last message (list endpoint only). sender null = the user. */
   last?: { sender: string | null; text: string; at: number };
+  /** List endpoint only: an agent chain is running in this room. */
+  busy?: boolean;
 }
 
 export type MessageStatus = "streaming" | "done" | "error" | "cancelled" | "interrupted";

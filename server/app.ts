@@ -5,6 +5,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import { methods as acpMethods } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
+import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
 import { replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
@@ -143,8 +144,25 @@ export function createApp(deps: AppDeps) {
   const dataDir =
     deps.dbPath === ":memory:" ? join(tmpdir(), `tuantuan-data-${process.pid}`) : dirname(resolve(deps.dbPath));
   let server: Server<WsData> | null = null;
+  const publishAll = (e: GlobalEvent) => server?.publish("all", JSON.stringify(e));
   const publish = (roomId: string, event: RoomEvent) => {
     server?.publish(`room:${roomId}`, JSON.stringify(event));
+    if (event.type === "room.state") publishAll({ type: "activity", roomId, busy: !!event.state.activeRunId });
+    else if (event.type === "message") {
+      const n = notifyForMessage(roomId, event.message);
+      if (n) publishAll(n);
+    } else if (event.type === "permission" && event.ask) {
+      const agent = store.getAgent(event.ask.agentId);
+      publishAll({
+        type: "notify",
+        kind: "permission",
+        roomId,
+        agentId: event.ask.agentId,
+        agentName: agent?.name ?? "Agent",
+        text: preview(`想要：${event.ask.toolCall.title ?? "执行操作"}`),
+        id: event.ask.id,
+      });
+    }
   };
   const mcp = new TuantuanMcp();
   const host = new HarnessHost(
@@ -1053,7 +1071,8 @@ export function createApp(deps: AppDeps) {
     }
 
     if (resource === "rooms") {
-      if (!id && method === "GET") return json(store.listRooms());
+      if (!id && method === "GET")
+        return json(store.listRooms().map((r) => ({ ...r, busy: !!orchestrator.state(r.id).activeRunId })));
       if (!id && method === "POST") {
         const r = RoomInputSchema.parse(await body());
         const projectId = r.projectId || ensureDrafts(store).id;
@@ -1177,6 +1196,9 @@ export function createApp(deps: AppDeps) {
       return new Response("Not found", { status: 404 });
     },
     websocket: {
+      open(ws: ServerWebSocket<WsData>) {
+        if (ws.data.kind === "ui") ws.subscribe("all");
+      },
       message(ws: ServerWebSocket<WsData>, raw: string | Buffer) {
         const data = ws.data;
         let msg: { type?: string; roomId?: string };

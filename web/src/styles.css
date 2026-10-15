@@ -1562,3 +1562,51 @@ fieldset.segmented { padding: 2px; min-inline-size: 0; }
    positioned, so .main must be its containing block or it spans the sidebar's search / + buttons. */
 .main, .pane { position: relative; }
 html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region: no-drag; }
+
+/* Tool cards: one quiet row, collapsed by default; consecutive calls sit as a tight stack */
+:root { interpolate-size: allow-keywords; }
+.tool > summary, .tool-row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 10px; color: var(--text-2); }
+.tool .tool-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool .tool-status { margin-left: auto; flex: none; white-space: nowrap; }
+.tool .chev-pad { width: 14px; flex: none; }
+.tool-flat { background: transparent; }
+.tool::details-content { height: 0; overflow: clip; transition: height 180ms var(--ease-out), content-visibility 180ms allow-discrete; }
+.tool[open]::details-content { height: auto; }
+.timeline .tool + .tool { margin-top: -5px; border-top-left-radius: 0; border-top-right-radius: 0; }
+.timeline .tool:has(+ .tool) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+@media (prefers-reduced-motion: reduce) { .tool::details-content { transition: none; } }
+/* Sidebar: working avatar, breathing status dot, unread count */
+.side-room-icon { position: relative; flex: none; display: inline-grid; }
+.busy-dot { position: absolute; right: -1px; bottom: -1px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok, #2a9d63); box-shadow: 0 0 0 2px var(--bg); animation: dot-breathe 1.8s ease-in-out infinite; }
+@keyframes dot-breathe { 0%, 100% { opacity: 0.55; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+.unread { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 650; display: inline-grid; place-items: center; }
+/* Avatar states: thinking glances side to side, working looks down and bobs, done hops once */
+.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-root { animation: none; }
+.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-look { animation: ba-glance-lr 2.6s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="working"] .ba-root { animation: ba-bob 1.3s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="working"] .ba-eyes { animation: none; }
+@keyframes ba-glance-lr { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 60% { transform: translateX(4px); } }
+@keyframes ba-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3%); } }
+/* Notifications page */
+.notify-list { display: grid; gap: 2px; }
+.notify-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.notify-row:last-of-type { border-bottom: none; }
+.notify-row[data-off] { opacity: 0.5; }
+.notify-row .grow { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.notify-row .muted { font-size: 12px; }
+.notify-ico { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--surface-2); color: var(--text-2); flex: none; }
+.notify-foot { display: flex; align-items: center; gap: 12px; padding-top: 12px; flex-wrap: wrap; }
+.tg { appearance: none; flex: none; width: 36px; height: 20px; border-radius: 10px; background: var(--border-strong, #ccc); position: relative; cursor: pointer; transition: background-color 150ms var(--ease-out); margin: 0; }
+.tg::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.2); transition: transform 150ms var(--ease-out); }
+.tg:checked { background: var(--text); }
+.tg:checked::after { transform: translateX(16px); }
+.tg:disabled { cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .busy-dot { animation: none; } .tg, .tg::after { transition: none; } }
+/* Message list: soft fade under the floating title pill and above the composer, only when there is more to see */
+.messages-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.messages-wrap > .messages { flex: 1; min-height: 0; padding-bottom: 24px; }
+.msg-fade { position: absolute; left: 0; right: 8px; pointer-events: none; opacity: 0; transition: opacity 150ms var(--ease-out); z-index: 3; }
+.msg-fade-top { top: 0; height: 56px; background: linear-gradient(var(--surface) 30%, color-mix(in srgb, var(--surface) 0%, transparent)); }
+.msg-fade-bottom { bottom: 0; height: 40px; background: linear-gradient(color-mix(in srgb, var(--surface) 0%, transparent), var(--surface)); }
+.messages-wrap[data-scrolled] .msg-fade-top, .messages-wrap[data-more-below] .msg-fade-bottom { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .msg-fade { transition: none; } }

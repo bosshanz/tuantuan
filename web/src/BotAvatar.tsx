@@ -169,6 +169,16 @@ function Face({ e, x, y }: { e: Expression; x: number; y: number }) {
           <line x1={R - 5} y1={y + 3} x2={R + 5} y2={y + 3} />
         </g>
       );
+    case "working":
+      // Focused: eyes lowered to the work, slightly narrowed.
+      return (
+        <g className="ba-look">
+          <g className="ba-eyes">
+            <line x1={L - 3} y1={y + 3} x2={L + 3} y2={y + 4} />
+            <line x1={R - 3} y1={y + 4} x2={R + 3} y2={y + 3} />
+          </g>
+        </g>
+      );
     case "thinking":
       return (
         <g className="ba-look">
@@ -224,17 +234,23 @@ export function BotAvatar({
   const [shown, setShown] = useState<Expression>(expression);
   const [hop, setHop] = useState(animate && pulse !== undefined ? 1 : 0);
   const prev = useRef(expression);
+  // Remember whether the reply was live, so the finishing smile plays even though animate drops now.
+  const wasLive = useRef(animate);
+  useEffect(() => {
+    if (animate) wasLive.current = true;
+  }, [animate]);
   useEffect(() => {
     // Finishing a reply earns a brief smile before settling back to the target expression.
     const was = prev.current;
     prev.current = expression;
-    if (animate && was === "speaking" && expression === "idle") {
+    if ((was === "speaking" || was === "working" || was === "thinking") && expression === "idle" && wasLive.current) {
       setShown("happy");
+      wasLive.current = false;
       const t = setTimeout(() => setShown("idle"), 1600);
       return () => clearTimeout(t);
     }
     setShown(expression);
-  }, [expression, animate]);
+  }, [expression]);
   const first = useRef(true);
   useEffect(() => {
     if (first.current) {
@@ -260,7 +276,7 @@ export function BotAvatar({
       width={size}
       height={size}
       data-expr={shown}
-      data-anim={animate ? (size >= 32 ? "full" : "blink") : undefined}
+      data-anim={animate || shown === "happy" ? (size >= 24 ? "full" : "blink") : undefined}
       style={{ ["--c" as string]: color, ["--blink-delay" as string]: `${offset}s` }}
       aria-hidden
     >

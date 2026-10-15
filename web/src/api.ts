@@ -13,6 +13,7 @@ import type {
   Project,
   Room,
 } from "../../server/store";
+import type { GlobalEvent } from "../../shared/notify";
 
 export type {
   Agent,
@@ -70,7 +71,8 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
 export type WsEvent =
   | RoomEvent
   | { type: "subscribed"; roomId: string; state: RoomState }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string }
+  | GlobalEvent;
 
 /** One reconnecting WebSocket for the app; re-subscribes the current room after reconnect. */
 export function connectWs(onEvent: (e: WsEvent) => void, onStatus: (connected: boolean) => void) {

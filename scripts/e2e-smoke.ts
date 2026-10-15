@@ -4,7 +4,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { chromium } from "playwright-core";
+import { chromium, type Page } from "playwright-core";
 import { serve } from "../server/app";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
 
@@ -147,11 +147,35 @@ if (shotsDir) mkdirSync(shotsDir, { recursive: true });
 const registry = mockRegistry();
 process.env.TUANTUAN_REGISTRY_URL = registry.url;
 process.env.TUANTUAN_HARNESS_DIR = mkdtempSync(join(tmpdir(), "tuantuan-e2e-harnesses-"));
-const { server, app } = serve({ dbPath, staticDir: "web/dist" }, 0);
+const { server, app } = serve({ dbPath, staticDir: process.env.E2E_DIST ?? "web/dist" }, 0);
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH ?? "/usr/bin/google-chrome" });
 let failed = false;
+let diagPage: Page | undefined;
+const consoleLog: string[] = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  diagPage = page;
+  await page.context().grantPermissions(["notifications"]);
+  await page.addInitScript(() => {
+    // Record Web Notifications (browser fallback) so the test can assert on them.
+    const sent: { title: string; body?: string }[] = [];
+    (window as unknown as { __notes: typeof sent }).__notes = sent;
+    const Real = window.Notification;
+    if (Real) {
+      class Spy extends Real {
+        constructor(title: string, o?: NotificationOptions) {
+          super(title, o);
+          sent.push({ title, body: o?.body });
+        }
+      }
+      Object.defineProperty(Spy, "permission", { get: () => Real.permission });
+      window.Notification = Spy as unknown as typeof Notification;
+    }
+    const t0 = performance.now();
+    addEventListener("hashchange", () => console.log(`hash ${Math.round(performance.now() - t0)}ms ${location.hash}`));
+  });
+  page.on("console", (m) => consoleLog.push(`[${m.type()}] ${m.text()}`));
+  page.on("pageerror", (e) => consoleLog.push(`[pageerror] ${e.message}`));
   const shot = async (name: string) => {
     if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}.png`) });
   };
@@ -547,8 +571,17 @@ try {
 
   await input.fill("/run");
   await input.press("Enter");
-  await page.locator(".term", { hasText: "hello from terminal" }).waitFor();
   await page.getByText("命令跑完了。").waitFor();
+  {
+    // Tool calls are one collapsed row; the output opens on click.
+    const card = page.locator("details.tool", { hasText: "echo hello" }).last();
+    if (await card.evaluate((d) => (d as HTMLDetailsElement).open)) throw new Error("tool card should start collapsed");
+    if (await page.locator("pre.term:not(.term-wrap pre)", { hasText: "终端输出不可用" }).count())
+      throw new Error("empty terminal box rendered");
+    await card.locator("summary").click();
+    await card.locator(".term", { hasText: "hello from terminal" }).waitFor();
+    await card.locator("summary").click();
+  }
 
   // Already switched to Mock Smart via the composer picker above; sending confirms the preference stuck.
   await input.fill("换模型了");
@@ -879,7 +912,7 @@ try {
       ["Skills 与插件", "#/library"],
     ] as const) {
       await page.goto(`http://localhost:${server.port}/${hash}`);
-      await page.locator(".main .main-head").first().waitFor();
+      await page.locator(".main .main-head, .main > .pane > .empty").first().waitFor();
       await page.waitForTimeout(400);
       const bad = await page.evaluate(() => {
         const out: string[] = [];
@@ -974,6 +1007,79 @@ try {
   if (shotsDir) await page.locator(".side").screenshot({ path: join(shotsDir, "sidebar-collapse-60ms.png") });
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // Chat: soft fade edges never take clicks; long tool output stays collapsed.
+  {
+    const dm = app.store.listRooms().find((r) => r.agentIds.length === 1 && r.name.includes("Bob"));
+    if (!dm) throw new Error("no Bob DM");
+    await page.goto(`http://localhost:${server.port}/#/c/${dm.id}`);
+    await page.locator(".messages-wrap").waitFor();
+    const fades = await page.$$eval(".msg-fade", (els) => els.map((e) => getComputedStyle(e).pointerEvents));
+    if (fades.length !== 2 || fades.some((p) => p !== "none")) throw new Error(`fade overlays: ${fades}`);
+    await page.locator(".messages").evaluate((el) => el.scrollTo({ top: 0 }));
+    await page.waitForTimeout(200);
+    if ((await page.locator(".messages-wrap[data-more-below] .msg-fade-bottom").count()) !== 1)
+      throw new Error("bottom fade should show when scrolled up");
+    await shot("chat-fade");
+
+    // Notifications: settings page, test notification, and a real reply in another conversation.
+    await nav("通知");
+    await page.getByRole("heading", { name: "通知", exact: true }).waitFor();
+    await page.getByRole("checkbox", { name: "回复完成" }).waitFor();
+    await page.getByRole("button", { name: "发送测试通知" }).click();
+    await page.getByRole("status").filter({ hasText: "已发送" }).waitFor();
+    await shot("notifications");
+    const notes = () =>
+      page.evaluate(() => (window as unknown as { __notes: { title: string; body?: string }[] }).__notes);
+    if (!(await notes()).some((n) => n.title === "团团")) throw new Error("test notification not shown");
+    const r = await fetch(`http://localhost:${server.port}/api/rooms/${dm.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ senderName: "我", content: "通知测试" }),
+    });
+    if (!r.ok) throw new Error(`send: ${r.status}`);
+    await page.waitForFunction(() =>
+      (window as unknown as { __notes: { title: string; body?: string }[] }).__notes.some((n) =>
+        n.body?.includes("通知测试"),
+      ),
+    );
+    const note = (await notes()).find((n) => n.body?.includes("通知测试"));
+    if (note?.title !== "Bob") throw new Error(`notification title: ${note?.title}`);
+    await page.locator(".side-back").click();
+    await page.locator(".side-room", { hasText: dm.name }).first().locator(".unread").waitFor();
+    // Opening the conversation clears its unread count.
+    await page.locator(".side-room", { hasText: dm.name }).first().click();
+    await page.locator(".side-room[aria-current] .unread").waitFor({ state: "detached" });
+    // Off switch: no notification for the next reply.
+    await page.evaluate(() =>
+      localStorage.setItem(
+        "tuantuan:notify",
+        JSON.stringify({ enabled: true, reply: false, permission: true, error: true, auth: true }),
+      ),
+    );
+    await nav("Harness");
+    const before = (await notes()).length;
+    await fetch(`http://localhost:${server.port}/api/rooms/${dm.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ senderName: "我", content: "静音测试" }),
+    });
+    await page.waitForTimeout(1500);
+    if ((await notes()).length !== before) throw new Error("reply notification should be off");
+    await page.evaluate(() => localStorage.removeItem("tuantuan:notify"));
+  }
+
+  // Avatar states (thinking / working / done / idle) on every shape.
+  if (shotsDir) {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.goto(`http://localhost:${server.port}/#/dev/avatars`);
+    await page.locator(".showcase-grid").waitFor();
+    for (const t of [0, 450, 900]) {
+      await page.waitForTimeout(t ? 450 : 50);
+      await page.locator(".showcase-grid").screenshot({ path: join(shotsDir, `avatar-states-${t}ms.png`) });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+
   // Dev setup (`bun dev`): the UI must reach the API and its WebSocket through the Vite proxy.
   // Spawn vite's own entry (not `bunx`), so kill() stops the server itself: an orphaned vite from a
   // previous run would keep the port and proxy to a dead API, failing every other run.
@@ -1010,6 +1116,17 @@ try {
   );
 } catch (e) {
   failed = true;
+  if (diagPage) {
+    const dir = process.env.E2E_DIAG_DIR ?? "/tmp";
+    await diagPage.screenshot({ path: join(dir, "e2e-failure.png") }).catch(() => {});
+    const state = await diagPage
+      .evaluate(() => ({
+        hash: location.hash,
+        main: (document.querySelector(".main") as HTMLElement | null)?.innerText.slice(0, 600),
+      }))
+      .catch(() => null);
+    console.error("e2e diag:", JSON.stringify(state), "\n", consoleLog.slice(-30).join("\n"));
+  }
   if (shotsDir)
     await browser
       .contexts()[0]

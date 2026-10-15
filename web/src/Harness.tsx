@@ -76,31 +76,49 @@ const KIND_ICON: Record<string, typeof Wrench> = {
   think: Brain,
 };
 
-export function ToolCard(props: { tool: ToolState; terminals: Record<string, TerminalSnapshot> }) {
+export function ToolCard(props: {
+  tool: ToolState;
+  terminals: Record<string, TerminalSnapshot>;
+  /** Permission prompts show what is being approved. */
+  defaultOpen?: boolean;
+}) {
   const { tool } = props;
   const Icon = KIND_ICON[tool.kind] ?? Wrench;
-  const hasBody = tool.content.length > 0 || tool.rawInput !== undefined;
+  // Only content we can actually show; a terminal we have no snapshot for is dropped, never a black box.
+  const body = tool.content.filter((c) => c.type !== "terminal" || props.terminals[c.terminalId]);
+  const hasBody = body.length > 0 || (tool.content.length === 0 && tool.rawInput !== undefined);
   const live = tool.status === "pending" || tool.status === "in_progress";
+  const args = tool.locations.map((l) => shortPath(l.path)).join(", ");
+  const full = [tool.title, args].filter(Boolean).join("  ");
+  const head = (
+    <>
+      {hasBody ? <ChevronRight size={14} className="chev" /> : <span className="chev-pad" />}
+      <Icon size={13} />
+      <span className="tool-name" title={full}>
+        {tool.title}
+      </span>
+      {args && <span className="tool-args">{args}</span>}
+      <ToolStatus status={tool.status} live={live} />
+    </>
+  );
+  if (!hasBody)
+    return (
+      <div className="tool tool-flat" data-kind={tool.kind}>
+        <div className="tool-row">{head}</div>
+      </div>
+    );
   return (
-    <details className="tool" data-kind={tool.kind} open={tool.content.some((c) => c.type !== "content") || undefined}>
-      <summary>
-        <ChevronRight size={14} className="chev" />
-        <Icon size={13} />
-        <span className="tool-name">{tool.title}</span>
-        <span className="tool-args">{tool.locations.map((l) => shortPath(l.path)).join(", ")}</span>
-        <ToolStatus status={tool.status} live={live} />
-      </summary>
-      {hasBody && (
-        <div className="tool-body">
-          {tool.content.map((c, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: content order is stable per update
-            <ToolContent key={i} c={c} terminals={props.terminals} />
-          ))}
-          {tool.content.length === 0 && tool.rawInput !== undefined && (
-            <pre>{JSON.stringify(tool.rawInput, null, 2)}</pre>
-          )}
-        </div>
-      )}
+    <details className="tool" data-kind={tool.kind} open={props.defaultOpen || undefined}>
+      <summary>{head}</summary>
+      <div className="tool-body">
+        {body.map((c, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: content order is stable per update
+          <ToolContent key={i} c={c} terminals={props.terminals} />
+        ))}
+        {tool.content.length === 0 && tool.rawInput !== undefined && (
+          <pre>{JSON.stringify(tool.rawInput, null, 2)}</pre>
+        )}
+      </div>
     </details>
   );
 }
@@ -299,7 +317,7 @@ export function PermissionDialog(props: {
         </div>
         <div className="perm-body">
           {tool.content.length > 0 || tool.rawInput !== undefined ? (
-            <ToolCard tool={tool} terminals={props.terminals} />
+            <ToolCard tool={tool} terminals={props.terminals} defaultOpen />
           ) : null}
         </div>
         <div className="perm-actions">

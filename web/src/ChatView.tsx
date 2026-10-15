@@ -290,70 +290,84 @@ export function ChatView(props: {
           </div>
         )}
 
-        <div className="messages" ref={listRef}>
-          {messages.length === 0 && replay.length === 0 && !loadError && (
-            <div className="empty">
-              <RoomIcon room={room} agents={agents} />
-              <h2 style={{ fontSize: 17 }}>
-                {members.length > 1 ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
-              </h2>
-              {primary && !primary.harness && (
-                <p className="muted">
-                  {primary.name} 还没有绑定 Harness，<a href={`#/a/${primary.id}`}>去设置</a>或
-                  <a href="#/harness">管理 Harness</a>。
-                </p>
-              )}
-              {members.length > 1 && (
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-                  {members.map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      className="chip-btn"
-                      onClick={() => setDraft((d) => `${d}@${a.name} `)}
-                    >
-                      <AgentAvatar agent={a} size={16} />
-                      <span>@{a.name}</span>
-                    </button>
+        <div className="messages-wrap">
+          <div
+            className="messages"
+            ref={listRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const wrap = el.parentElement;
+              if (!wrap) return;
+              wrap.toggleAttribute("data-scrolled", el.scrollTop > 4);
+              wrap.toggleAttribute("data-more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+            }}
+          >
+            {messages.length === 0 && replay.length === 0 && !loadError && (
+              <div className="empty">
+                <RoomIcon room={room} agents={agents} />
+                <h2 style={{ fontSize: 17 }}>
+                  {members.length > 1 ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
+                </h2>
+                {primary && !primary.harness && (
+                  <p className="muted">
+                    {primary.name} 还没有绑定 Harness，<a href={`#/a/${primary.id}`}>去设置</a>或
+                    <a href="#/harness">管理 Harness</a>。
+                  </p>
+                )}
+                {members.length > 1 && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                    {members.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        className="chip-btn"
+                        onClick={() => setDraft((d) => `${d}@${a.name} `)}
+                      >
+                        <AgentAvatar agent={a} size={16} />
+                        <span>@{a.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {replay.length > 0 && primary && (
+              <ReplayHistory turns={replay} agentName={primary.name} terminals={terminals} />
+            )}
+            {groups.map((g) =>
+              g.kind === "system" ? (
+                <div key={g.messages[0]?.id} className="system-line" role="note">
+                  <span>{g.messages[0]?.content}</span>
+                </div>
+              ) : (
+                <div key={g.messages[0]?.id} className="msg-group" data-kind={g.kind}>
+                  {g.kind === "agent" ? (
+                    <LiveAvatar agent={agentById.get(g.senderId ?? "")} name={g.senderName} last={g.messages.at(-1)} />
+                  ) : (
+                    <HumanAvatar name={g.senderName} size={36} />
+                  )}
+                  <div className="msg-head">
+                    <span className="name">{g.senderName}</span>
+                    {g.kind === "agent" && !agentById.has(g.senderId ?? "") && <span className="badge">已删除</span>}
+                    <span className="time">{formatTime(g.messages[0]?.createdAt ?? 0)}</span>
+                  </div>
+                  {g.messages.map((m) => (
+                    <MessageItem
+                      key={m.id}
+                      m={m}
+                      terminals={terminals}
+                      mentionNames={mentionNames}
+                      selected={selected === m.id && panel}
+                      onDetails={() => openDetails(m.id)}
+                      harnessId={agentById.get(m.senderId ?? "")?.harness}
+                    />
                   ))}
                 </div>
-              )}
-            </div>
-          )}
-          {replay.length > 0 && primary && (
-            <ReplayHistory turns={replay} agentName={primary.name} terminals={terminals} />
-          )}
-          {groups.map((g) =>
-            g.kind === "system" ? (
-              <div key={g.messages[0]?.id} className="system-line" role="note">
-                <span>{g.messages[0]?.content}</span>
-              </div>
-            ) : (
-              <div key={g.messages[0]?.id} className="msg-group" data-kind={g.kind}>
-                {g.kind === "agent" ? (
-                  <LiveAvatar agent={agentById.get(g.senderId ?? "")} name={g.senderName} last={g.messages.at(-1)} />
-                ) : (
-                  <HumanAvatar name={g.senderName} size={36} />
-                )}
-                <div className="msg-head">
-                  <span className="name">{g.senderName}</span>
-                  {g.kind === "agent" && !agentById.has(g.senderId ?? "") && <span className="badge">已删除</span>}
-                  <span className="time">{formatTime(g.messages[0]?.createdAt ?? 0)}</span>
-                </div>
-                {g.messages.map((m) => (
-                  <MessageItem
-                    key={m.id}
-                    m={m}
-                    terminals={terminals}
-                    mentionNames={mentionNames}
-                    selected={selected === m.id && panel}
-                    onDetails={() => openDetails(m.id)}
-                    harnessId={agentById.get(m.senderId ?? "")?.harness}
-                  />
-                ))}
-              </div>
-            ),
-          )}
+              ),
+            )}
+          </div>
+          <div className="msg-fade msg-fade-top" aria-hidden />
+          <div className="msg-fade msg-fade-bottom" aria-hidden />
         </div>
 
         <footer className="composer">

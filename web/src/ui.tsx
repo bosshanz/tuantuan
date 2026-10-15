@@ -70,9 +70,20 @@ export function HumanAvatar({ name, size = 32 }: { name: string; size?: number }
   );
 }
 
-export function RoomIcon({ room, agents, size = 32 }: { room: Room; agents: Agent[]; size?: number }) {
+export function RoomIcon({
+  room,
+  agents,
+  size = 32,
+  busy = false,
+}: {
+  room: Room;
+  agents: Agent[];
+  size?: number;
+  busy?: boolean;
+}) {
   const members = room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
-  if (members.length === 1 && members[0]) return <AgentAvatar agent={members[0]} size={size} />;
+  if (members.length === 1 && members[0])
+    return <AgentAvatar agent={members[0]} size={size} expression={busy ? "thinking" : "idle"} animate={busy} />;
   if (members.length === 0)
     return (
       <span className="room-icon" style={{ ["--size" as string]: `${size}px` }} aria-hidden>
@@ -83,7 +94,7 @@ export function RoomIcon({ room, agents, size = 32 }: { room: Room; agents: Agen
   return (
     <span className="room-stack" style={{ ["--size" as string]: `${size}px` }} aria-hidden>
       {members.slice(0, 2).map((a) => (
-        <AgentAvatar key={a.id} agent={a} size={mini} />
+        <AgentAvatar key={a.id} agent={a} size={mini} expression={busy ? "thinking" : "idle"} animate={busy} />
       ))}
       {members.length > 2 && <span className="room-stack-more">+{members.length - 2}</span>}
     </span>

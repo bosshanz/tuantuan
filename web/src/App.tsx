@@ -1,4 +1,5 @@
 import {
+  Bell,
   Blocks,
   Bot,
   ChevronLeft,
@@ -26,6 +27,7 @@ import { agentSubtitle, defaultsSummary } from "./config";
 import { LibraryPage } from "./Library";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
+import { NotificationsPage, useNotifications } from "./NotifyCenter";
 import { Onboarding } from "./Onboarding";
 import { NewProject, ProjectSettings } from "./Projects";
 import { ProvidersPage } from "./Providers";
@@ -112,13 +114,19 @@ export function App() {
             ? "providers"
             : route[0] === "library"
               ? "library"
-              : "rooms";
+              : route[0] === "notify"
+                ? "notify"
+                : "rooms";
   // 新手引导 opens by itself on first launch only; once finished or skipped it is gone for good.
   const onboarded = meta?.onboarded;
   const finishing = useRef(false);
   useEffect(() => {
     if (onboarded === false && route[0] !== "setup" && !finishing.current) go("setup");
-    if (onboarded && route[0] === "setup") go("harness");
+    // While onboarding finishes, its own go(...) wins: the hash change lands a tick after
+    // onboarded flips (POST → WS/meta reload), and redirecting then raced it to Harness 管理.
+    if (onboarded && route[0] === "setup" && !finishing.current) go("harness");
+    // Finished and landed elsewhere: from now on #/setup redirects as usual.
+    if (onboarded && route[0] !== "setup") finishing.current = false;
   }, [onboarded, route, go]);
   const detailId = route[1] ?? null;
   const roomId = route[0] !== "p" && section === "rooms" && detailId && detailId !== "new" ? detailId : null;
@@ -135,6 +143,13 @@ export function App() {
       listeners.current.delete(fn);
     };
   }, []);
+  const unread = useNotifications({
+    subscribe: subscribeEvents,
+    agents,
+    openRoomId: roomId,
+    open: (id) => go(`c/${id}`),
+    setRooms,
+  });
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
   const fullPage = section === "setup" || section === "harness" || section === "providers" || section === "library";
@@ -185,7 +200,14 @@ export function App() {
                 .filter((r) => r.projectId === "drafts" || !projects.some((p) => p.id === r.projectId))
                 .sort((x, y) => (y.last?.at ?? y.createdAt) - (x.last?.at ?? x.createdAt))
                 .map((r) => (
-                  <RoomRow key={r.id} r={r} agents={agents} current={roomId === r.id} onOpen={() => go(`c/${r.id}`)} />
+                  <RoomRow
+                    key={r.id}
+                    r={r}
+                    agents={agents}
+                    current={roomId === r.id}
+                    unread={unread[r.id] ?? 0}
+                    onOpen={() => go(`c/${r.id}`)}
+                  />
                 ))}
               <div className="side-section-head">
                 <span>项目</span>
@@ -251,6 +273,7 @@ export function App() {
                               r={r}
                               agents={agents}
                               current={roomId === r.id}
+                              unread={unread[r.id] ?? 0}
                               onOpen={() => go(`c/${r.id}`)}
                             />
                           ))}
@@ -333,6 +356,12 @@ export function App() {
                 label="服务商与用量"
                 current={section === "providers"}
                 onClick={() => go("providers")}
+              />
+              <SideNav
+                icon={<Bell size={17} />}
+                label="通知"
+                current={section === "notify"}
+                onClick={() => go("notify")}
               />
             </>
           )}
@@ -439,6 +468,7 @@ export function App() {
           )}
           {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
           {section === "library" && meta && <LibraryPage meta={meta} />}
+          {section === "notify" && <NotificationsPage />}
           {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
           {section === "agents" && !detailId && loaded && (
             <div className="empty">
@@ -525,7 +555,7 @@ function SideNav(props: { icon: React.ReactNode; label: string; current: boolean
 }
 
 /** Conversation row: big avatar, title, last message. */
-function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; onOpen: () => void }) {
+function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; unread: number; onOpen: () => void }) {
   const { r } = props;
   const preview = r.last
     ? `${r.last.sender && r.agentIds.length > 1 ? `${r.last.sender}：` : ""}${r.last.text}`
@@ -535,13 +565,22 @@ function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; onOpen: ()
       type="button"
       className="side-room"
       aria-current={props.current ? "page" : undefined}
+      data-busy={r.busy ? "" : undefined}
       onClick={props.onOpen}
     >
-      <RoomIcon room={r} agents={props.agents} size={40} />
+      <span className="side-room-icon">
+        <RoomIcon room={r} agents={props.agents} size={40} busy={!!r.busy} />
+        {r.busy && <span className="busy-dot" title="正在回复" />}
+      </span>
       <span className="li-body">
         <span className="li-title">{r.name}</span>
         <span className="li-sub">{preview}</span>
       </span>
+      {props.unread > 0 && !props.current && (
+        <span className="unread" title={`${props.unread} 条未读`}>
+          {props.unread > 99 ? "99+" : props.unread}
+        </span>
+      )}
     </button>
   );
 }

@@ -12,6 +12,7 @@ import {
   shell,
   Tray,
 } from "electron";
+import { registerNotifications } from "./notify";
 import { serverLayout } from "./paths";
 import { type RunningServer, startServer } from "./server";
 import { loginShellEnv } from "./shell-env";
@@ -209,6 +210,7 @@ async function updates() {
 
 async function boot() {
   menu();
+  registerNotifications(() => win);
   ipcMain.handle("tuantuan:pick-folder", async (e, o: { title?: string; start?: string }) => {
     const owner = BrowserWindow.fromWebContents(e.sender) ?? undefined;
     const opts: Electron.OpenDialogOptions = {
