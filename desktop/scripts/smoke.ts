@@ -105,19 +105,43 @@ try {
   console.log("preload bridge", bridge);
   if (bridge.picker !== "function" || bridge.node !== "undefined") throw new Error("preload bridge wrong");
 
-  // Packaged mode: the bundled adapters run on the bundled Bun, from resources/.
-  const hs = (await api("GET", "/api/harnesses")) as any;
-  const list: any[] = Array.isArray(hs) ? hs : (hs.items ?? hs.harnesses ?? []);
+  // Packaged mode: Claude/Codex are not bundled (unless built with TUANTUAN_BUNDLE_ADAPTERS=1);
+  // install Codex from the ACP registry on the packaged Bun, then handshake.
+  const harnesses = async () => {
+    const hs = (await api("GET", "/api/harnesses")) as any;
+    return (Array.isArray(hs) ? hs : (hs.items ?? hs.harnesses ?? [])) as any[];
+  };
+  const bundled = process.env.TUANTUAN_BUNDLE_ADAPTERS === "1";
   for (const id of ["claude-code", "codex"]) {
-    const h = list.find((x) => x.id === id);
-    console.log(id, h?.source, h?.command, h?.version);
-    if (h?.source !== "bundled" || !String(h.command).includes("resources/bin/bun"))
-      throw new Error(`${id} not bundled`);
-    // ACP handshake through the packaged adapter (codex-acp also execs its native engine).
-    const t = await api("POST", `/api/harnesses/${id}/test`);
-    console.log(`${id} handshake:`, JSON.stringify(t).slice(0, 160));
-    if (t.ok !== true) throw new Error(`${id} handshake failed`);
+    const h = (await harnesses()).find((x) => x.id === id);
+    console.log(
+      id,
+      h?.source ?? "missing",
+      h?.command ?? "",
+      h?.installers?.map((i: any) => i.id),
+    );
+    if (bundled ? h?.source !== "bundled" : h?.command || h?.installers?.[0]?.id !== "registry")
+      throw new Error(`${id}: unexpected ${JSON.stringify(h).slice(0, 200)}`);
   }
+  if (!bundled) {
+    const t0 = Date.now();
+    await api("POST", "/api/harnesses/codex/install", { installerId: "registry" });
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const j = await api("GET", "/api/harnesses/codex/install");
+      if (j?.state === "running") continue;
+      if (j?.state !== "done") throw new Error(`codex install: ${JSON.stringify(j).slice(-400)}`);
+      break;
+    }
+    console.log(`codex installed from registry in ${Math.round((Date.now() - t0) / 1000)}s`);
+  }
+  const codex = (await harnesses()).find((x) => x.id === "codex");
+  console.log("codex", codex?.source, codex?.command, codex?.managedVersion);
+  if (!bundled && (codex?.source !== "managed" || !String(codex.command).includes("resources/bin/bun")))
+    throw new Error("codex not managed on bundled bun");
+  const t = await api("POST", "/api/harnesses/codex/test");
+  console.log("codex handshake:", JSON.stringify(t).slice(0, 160));
+  if (t.ok !== true) throw new Error("codex handshake failed");
   await api("POST", "/api/onboarding");
   const agent = await api("POST", "/api/agents", {
     name: "小团",

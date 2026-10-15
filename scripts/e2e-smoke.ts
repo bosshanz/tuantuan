@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { chromium } from "playwright-core";
 import { serve } from "../server/app";
+import { mockRegistry } from "../tests/fixtures/mock-registry";
 
 process.env.TUANTUAN_MOCK_HARNESS = "1";
 // The mock harness starts logged out; onboarding logs in through ACP `authenticate`, which creates this file.
@@ -109,6 +110,10 @@ const balanceSrv = Bun.serve({
 });
 const shotsDir = process.env.SHOTS_DIR;
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+// ACP registry: a local mock CDN; agents install into a throwaway managed dir.
+const registry = mockRegistry();
+process.env.TUANTUAN_REGISTRY_URL = registry.url;
+process.env.TUANTUAN_HARNESS_DIR = mkdtempSync(join(tmpdir(), "tuantuan-e2e-harnesses-"));
 const { server, app } = serve({ dbPath, staticDir: "web/dist" }, 0);
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH ?? "/usr/bin/google-chrome" });
 let failed = false;
@@ -148,6 +153,23 @@ try {
   await page.setViewportSize({ width: 1440, height: 1500 });
   await page.locator(".harness-row", { hasText: "Claude Code" }).scrollIntoViewIfNeeded();
   await shot("harness");
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // 更多 Agent: the registry list (mock CDN), search, one-click binary install (checksum), handshake.
+  const more = page.locator("section", { has: page.getByRole("heading", { name: "更多 Agent" }) });
+  await more.getByRole("button", { name: "刷新 Registry" }).click();
+  await more.getByLabel("搜索 Agent").fill("Mock 二进制");
+  const item = more.getByRole("article", { name: "Mock 二进制" });
+  await item.getByRole("button", { name: "安装", exact: true }).click();
+  await item.getByText(/已安装 1\.0\.0/).waitFor({ timeout: 60_000 });
+  await item.getByRole("button", { name: "握手" }).click();
+  await item.getByRole("status").getByText(/ACP/).waitFor();
+  await item.scrollIntoViewIfNeeded();
+  await shot("harness-registry");
+  await more.getByLabel("搜索 Agent").fill("");
+  await page.setViewportSize({ width: 1440, height: 1500 });
+  await more.scrollIntoViewIfNeeded();
+  await shot("harness-registry-list");
   await page.setViewportSize({ width: 1440, height: 900 });
   // Finishing is remembered server-side: after a reload it never opens again; Harness 管理 stays in the rail.
   await page.getByRole("button", { name: "完成", exact: true }).click();
@@ -684,7 +706,7 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake + login → bundled adapters + one-click install → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → providers: usage cards, add/test/balance, CC Switch import, agent switch → UI via Vite proxy)",
+    "e2e smoke: PASS (setup handshake + login → bundled adapters + one-click install → ACP registry install + handshake → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → providers: usage cards, add/test/balance, CC Switch import, agent switch → UI via Vite proxy)",
   );
 } catch (e) {
   failed = true;
@@ -693,6 +715,7 @@ try {
   await browser.close();
   app.host.shutdown();
   server.stop(true);
+  registry.stop();
   rmSync(cwd, { recursive: true, force: true });
   rmSync(workspaces, { recursive: true, force: true });
   rmSync(fakeHome, { recursive: true, force: true });

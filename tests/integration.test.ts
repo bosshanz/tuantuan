@@ -454,7 +454,16 @@ describe("ACP harness integration (mock ACP agent)", () => {
 
   test("harness registry: detection, path override and handshake for the mock harness", async () => {
     const list = (await api<{ id: string; path: string | null }[]>("GET", "/api/harnesses")).data;
-    expect(list.map((h) => h.id)).toEqual(["claude-code", "codex", "grok", "opencode", "mock", "mock-cli"]);
+    expect(list.map((h) => h.id)).toEqual([
+      "claude-code",
+      "codex",
+      "grok",
+      "opencode",
+      "pi",
+      "minimax",
+      "mock",
+      "mock-cli",
+    ]);
     expect(list.find((h) => h.id === "mock")?.path).toBeTruthy();
     const t = (await api<{ ok: boolean; agentInfo: { name: string } }>("POST", "/api/harnesses/mock/test")).data;
     expect(t).toMatchObject({ ok: true, agentInfo: { name: "mock-agent" } });

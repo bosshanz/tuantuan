@@ -86,9 +86,9 @@ describe("bundled ACP adapters", () => {
     expect(env.PATH).toContain(`${home}/.bun/bin`);
     const grok = await detectHarness(harnessSpec("grok") as never, null);
     expect(grok.command).toBeNull();
-    expect(grok.installers.map((i) => i.id)).toEqual(["script"]);
+    expect(grok.installers.map((i) => i.id)).toEqual(["registry", "script"]);
     const oc = await detectHarness(harnessSpec("opencode") as never, null);
-    expect(oc.installers.map((i) => i.id)).toEqual(["script", "bun", "brew", "npm"]);
+    expect(oc.installers.map((i) => i.id)).toEqual(["registry", "script", "bun", "brew", "npm"]);
     expect(oc.installers.find((i) => i.id === "bun")).toMatchObject({
       available: true,
       command: "bun add -g opencode-ai",

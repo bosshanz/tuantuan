@@ -41,12 +41,15 @@ cpSync(join(root, "web", "dist"), join(srv, "web", "dist"), { recursive: true })
 
 // Only what the server imports or spawns; the web UI is prebuilt.
 const rootPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+// Claude Code / Codex engines are downloaded from the ACP registry on first use;
+// TUANTUAN_BUNDLE_ADAPTERS=1 ships them inside the package instead (≈+300 MB).
+const bundleAdapters = process.env.TUANTUAN_BUNDLE_ADAPTERS === "1";
 const keep = [
   "@agentclientprotocol/sdk",
-  "@agentclientprotocol/claude-agent-acp",
-  "@agentclientprotocol/codex-acp",
+  ...(bundleAdapters ? ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp"] : []),
   "zod",
 ];
+console.log(bundleAdapters ? "bundling Claude/Codex adapters" : "Claude/Codex: download on first use");
 writeFileSync(
   join(srv, "package.json"),
   JSON.stringify(

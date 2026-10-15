@@ -143,6 +143,8 @@ export class HarnessHost {
     // Keep the user's CC Switch / Codex config: inherit ANTHROPIC_* / OPENAI_*, never isolate
     // CLAUDE_CONFIG_DIR or CODEX_HOME; only merge developer_instructions into CODEX_CONFIG.
     const env = harnessProcessEnv(base, mat.env, agent.env, spec, identity);
+    // Registry entries may ask for env (e.g. a default model); the agent's own env still wins.
+    for (const [k, v] of Object.entries(status.env)) if (!(k in agent.env)) env[k] = v;
     // 服务商: only this child process's env changes; ~/.claude / ~/.codex are never touched.
     const prov = agent.providerId ? this.store.getProvider(agent.providerId) : null;
     if (prov && providerSupports(prov, agent.harness)) {
@@ -676,6 +678,11 @@ export class HarnessHost {
       this.wantLoad.add(slotKey);
     } else this.store.clearAcpSession(room.id, agent.id);
     return (await this.session(room, agent, identity)).slot.view;
+  }
+
+  /** Stop every process of one harness (before uninstalling it). */
+  dropHarness(harnessId: string) {
+    for (const p of [...this.procs.values()]) if (p.spec.id === harnessId) this.dropProc(p);
   }
 
   shutdown() {

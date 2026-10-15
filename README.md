@@ -39,7 +39,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-下载 Releases 里的安装包（macOS `.dmg`、Windows `.exe`、Linux `.AppImage`），打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 的 ACP 适配器（含 Codex 引擎）已内置；你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+下载 Releases 里的安装包（macOS `.dmg`、Windows `.exe`、Linux `.AppImage`），打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包（AppImage 约 157 MB），第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置（约 +300 MB）。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](docs/screenshots/desktop-linux.png)
 
@@ -70,7 +70,20 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 
 一键安装只在你点按钮后运行官方安装命令：后台执行，日志实时显示，可取消，失败时显示最后一行错误，完成后自动重新检测。不会用 sudo；某种方式在这台机器上不可用（没有 curl / brew，npm 全局目录需要 sudo）时按钮置灰并说明原因。都不可用时显示手动安装命令。
 
-内置适配器体积：每个平台约 250 MB（Claude Code）+ 330–400 MB（Codex），`bun install` 只下载当前平台的那一份。
+### ACP Registry 与「更多 Agent」
+
+团团直接读取官方 [ACP Registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)：启动时用本地缓存（没有缓存时用随包的快照，离线也能看），后台每 6 小时更新一次，「刷新」按钮立即更新；数据先过 schema 校验，坏条目跳过，更新失败保留旧数据并显示原因。图标从 Registry 下载后缓存在本地。
+
+- 常用列表：Claude Code、Codex、Grok Build、OpenCode、Pi、MiniMax Code。「更多 Agent」列出 Registry 里所有 Agent（图标、名称、简介、版本、协议、平台），可搜索。
+- 一键安装只在点按钮后执行，装到团团自己的目录（`<数据目录>/harnesses/agents/<id>/<版本>`，可用 `TUANTUAN_HARNESS_DIR` 改），固定版本，不用 sudo，不装全局：npx 包用团团自带的 Bun 安装运行；需要 Node ≥ 22 的（如 MiniMax Code）自动下载团团专用的 Node 22（校验 SHASUMS256）；uvx 包用你的 uv，没有就下载一份；二进制包按平台下载，带 sha256 时校验。
+- Registry 版本变了显示「更新到 x」；可卸载团团装的版本。你自己装的版本始终优先（`TUANTUAN_PREFER_MANAGED=1` 反过来）。
+- 装好的 Agent 可在新建 Agent 时选择；「握手」会显示它支持的登录方式（Harness 自带登录、终端命令、环境变量）。
+- 实验性：ZCode（社区桥接 `zcode-acp-server`，不在官方 Registry 里）。
+- `TUANTUAN_REGISTRY_URL` 换 Registry 地址，`TUANTUAN_REGISTRY_OFFLINE=1` 不联网。
+
+![更多 Agent：从 Registry 安装并握手](docs/screenshots/harness-registry.png)
+
+源码运行时的内置适配器体积：每个平台约 250 MB（Claude Code）+ 330–400 MB（Codex），`bun install` 只下载当前平台的那一份。
 
 「Harness」页的「握手测试」会报告是否已登录。未登录时，如果 Harness 通过 ACP 声明了自带的登录流程（如 Codex 的 ChatGPT / API Key、Grok 的 grok.com、OpenCode 的 opencode-login），点「用「…」登录」由 Harness 自己完成（可能会打开浏览器），完成后自动重新检测；否则复制旁边的登录命令到终端执行，再点「重新检测」。所有 Agent 共用同一份 Harness 登录。
 

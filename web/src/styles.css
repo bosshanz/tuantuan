@@ -1199,3 +1199,24 @@ html[data-desktop] .main-head { -webkit-app-region: drag; }
 html[data-desktop] .rail :is(button, a, input, select, textarea, [role]),
 html[data-desktop] .pane-head :is(button, a, input, select, textarea, [role]),
 html[data-desktop] .main-head :is(button, a, input, select, textarea, [role]) { -webkit-app-region: no-drag; }
+
+/* ACP registry */
+.reg-icon { display: inline-block; flex: none; background: currentColor; mask-size: contain; mask-repeat: no-repeat; mask-position: center; -webkit-mask-size: contain; -webkit-mask-repeat: no-repeat; -webkit-mask-position: center; }
+.reg-icon-letter { display: inline-grid; place-items: center; background: var(--surface-2); color: var(--text-2); border-radius: 6px; font-size: 11px; font-weight: 650; }
+.reg-search { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--text-3); }
+.reg-search .input { flex: 1; }
+.reg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.reg-item { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); transition: border-color 0.15s, box-shadow 0.15s; min-width: 0; }
+.reg-item:hover { border-color: var(--border-strong); }
+.reg-item[data-installed] { border-color: color-mix(in srgb, var(--ok, #2e9d5b) 40%, var(--border)); }
+.reg-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.reg-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.reg-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reg-title .muted { font-size: var(--fs-xs); }
+.reg-desc { margin: 0; font-size: var(--fs-sm); color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.8em; }
+.reg-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.reg-tags .tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); }
+.reg-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: auto; min-height: 28px; font-size: var(--fs-sm); }
+.reg-actions .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.warn-badge { display: inline-flex; align-items: center; gap: 3px; color: #b26a00; background: color-mix(in srgb, #f5a524 16%, transparent); }
+.harness-name .reg-icon { color: var(--text); }

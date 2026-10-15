@@ -27,7 +27,10 @@ const TIMEOUT_MS = 15 * 60_000;
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07/g;
 
 export class Installer {
-  private jobs = new Map<string, { job: InstallJob; proc: ReturnType<typeof Bun.spawn> | null }>();
+  private jobs = new Map<
+    string,
+    { job: InstallJob; proc: ReturnType<typeof Bun.spawn> | null; abort?: AbortController }
+  >();
 
   constructor(private onFinish: (job: InstallJob) => void = () => {}) {}
 
@@ -81,6 +84,54 @@ export class Installer {
     return job;
   }
 
+  /**
+   * Same job tracking for an in-process install (registry downloads): `task` gets a line logger and
+   * an abort signal; cancelling aborts it.
+   */
+  startTask(
+    harnessId: string,
+    installerId: string,
+    label: string,
+    task: (log: (line: string) => void, signal: AbortSignal) => Promise<void>,
+  ): InstallJob {
+    const cur = this.jobs.get(harnessId);
+    if (cur?.job.state === "running") return cur.job;
+    const job: InstallJob = {
+      harnessId,
+      installerId,
+      command: label,
+      state: "running",
+      log: [label],
+      lines: 1,
+      error: null,
+      startedAt: Date.now(),
+      endedAt: null,
+    };
+    const ac = new AbortController();
+    const entry = { job, proc: null as ReturnType<typeof Bun.spawn> | null, abort: ac };
+    this.jobs.set(harnessId, entry);
+    const timer = setTimeout(() => this.stop(harnessId, "error", "安装超时（15 分钟）"), TIMEOUT_MS);
+    void task((l) => this.push(job, l), ac.signal).then(
+      () => {
+        clearTimeout(timer);
+        if (job.state !== "running") return;
+        job.state = "done";
+        job.endedAt = Date.now();
+        this.onFinish(job);
+      },
+      (e) => {
+        clearTimeout(timer);
+        if (job.state !== "running") return;
+        job.state = "error";
+        job.error = (e as Error).message;
+        this.push(job, job.error);
+        job.endedAt = Date.now();
+        this.onFinish(job);
+      },
+    );
+    return job;
+  }
+
   /** The job, with only the log lines after `since` (total-line index). */
   get(harnessId: string, since = 0): (InstallJob & { from: number }) | null {
     const cur = this.jobs.get(harnessId);
@@ -108,6 +159,7 @@ export class Installer {
     if (pid) Bun.spawnSync(["pkill", "-TERM", "-P", String(pid)], { stdout: "ignore", stderr: "ignore" });
     cur.proc?.kill();
     cur.proc = null;
+    cur.abort?.abort();
     cur.job.state = state;
     cur.job.error = error;
     cur.job.endedAt = Date.now();

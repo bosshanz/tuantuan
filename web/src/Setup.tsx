@@ -1,6 +1,7 @@
 import { Check, Copy, Download, ExternalLink, Loader2, PlugZap, RefreshCw, Square, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Agent, api, type HarnessStatus, type Meta } from "./api";
+import { RegistryIcon, RegistrySection } from "./Registry";
 import { AgentAvatar } from "./ui";
 
 interface TestResult {
@@ -12,8 +13,9 @@ interface TestResult {
     id: string;
     name: string;
     description: string | null;
-    type: "agent" | "terminal";
+    type: "agent" | "terminal" | "env";
     command: string | null;
+    vars?: string[] | null;
   }[];
   /** null: couldn't tell (session/new failed for another reason, see sessionError). */
   loggedIn?: boolean | null;
@@ -84,6 +86,11 @@ export function SetupPage(props: {
   };
 
   const installed = (list ?? []).filter((h) => h.command);
+  const curated = (list ?? []).filter((h) => h.curated);
+  const changed = async () => {
+    await refresh();
+    await props.onAgentsChange();
+  };
   return (
     <>
       <header className="main-head">
@@ -108,11 +115,14 @@ export function SetupPage(props: {
           <section className="card">
             <div className="card-head">
               <h3>1 · 安装与登录</h3>
-              <p>Claude Code、Codex 已内置；其他可一键安装。登录优先用 Harness 自带流程，不支持时复制命令到终端。</p>
+              <p>
+                你本机装的版本优先；没有时一键装到团团自己的目录，不需要管理员权限。登录优先用 Harness
+                自带流程，不支持时复制命令到终端。
+              </p>
             </div>
             <div className="card-body harness-list">
               {!list && <Loader2 size={16} className="spin" />}
-              {list?.map((h) => {
+              {curated.map((h) => {
                 const t = tests[h.id];
                 return (
                   <div key={h.id} className="harness-row" data-ok={h.path ? "" : undefined}>
@@ -123,6 +133,7 @@ export function SetupPage(props: {
                         ) : (
                           <TriangleAlert size={14} className="warn-text" />
                         )}
+                        <RegistryIcon id={h.registryId} name={h.name} size={16} />
                         <b>{h.name}</b>
                         {h.version && <span className="badge">{h.version}</span>}
                         {h.source && (
@@ -153,7 +164,8 @@ export function SetupPage(props: {
                         )}
                       </div>
                       <div className="harness-sub muted">{h.path ?? h.error}</div>
-                      {(!h.command || h.installers.length > 0) && <InstallPanel h={h} onInstalled={refresh} />}
+                      {(!h.command || h.installers.length > 0) && <InstallPanel h={h} onInstalled={changed} />}
+                      {(h.updateAvailable || h.source === "managed") && <ManagedActions h={h} onChanged={changed} />}
                       <div className="harness-sub">登录：{h.auth}</div>
                       {h.path && h.login && <CopyLine label="登录" text={h.login} />}
                       {t &&
@@ -161,6 +173,15 @@ export function SetupPage(props: {
                         t.authMethods
                           ?.filter((m) => m.type === "terminal" && m.command)
                           .map((m) => <CopyLine key={m.id} label={m.name} text={m.command as string} />)}
+                      {t &&
+                        t !== "running" &&
+                        t.authMethods
+                          ?.filter((m) => m.type === "env" && m.vars?.length)
+                          .map((m) => (
+                            <div key={m.id} className="harness-sub">
+                              {m.name}：在 Agent 的「环境变量」里填 <code>{m.vars?.join("、")}</code>
+                            </div>
+                          ))}
                       <PathOverride h={h} onSaved={setList} />
                     </div>
                     <div className="harness-side">
@@ -215,6 +236,8 @@ export function SetupPage(props: {
             </div>
           </section>
 
+          <RegistrySection onChanged={changed} />
+
           <section className="card">
             <div className="card-head">
               <h3>2 · 绑定到 Agent</h3>
@@ -264,6 +287,57 @@ export function SetupPage(props: {
         </div>
       </div>
     </>
+  );
+}
+
+/** Update / uninstall a harness Tuantuan installed from the ACP registry. */
+function ManagedActions({ h, onChanged }: { h: HarnessStatus; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState<"update" | "remove" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const update = async () => {
+    setBusy("update");
+    setError(null);
+    try {
+      await api("POST", `/api/harnesses/${h.id}/install`, { installerId: "registry" });
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 500));
+        const j = await api<InstallJob | null>("GET", `/api/harnesses/${h.id}/install`);
+        if (!j || j.state === "running") continue;
+        if (j.state === "error") setError(j.error);
+        break;
+      }
+      await onChanged();
+    } finally {
+      setBusy(null);
+    }
+  };
+  const remove = async () => {
+    setBusy("remove");
+    setError(null);
+    try {
+      await api("DELETE", `/api/harnesses/${h.id}/managed`);
+      await onChanged();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="install-actions">
+      {h.updateAvailable && (
+        <button type="button" className="btn sm primary" disabled={!!busy} onClick={() => void update()}>
+          {busy === "update" ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
+          更新到 {h.latestVersion}
+        </button>
+      )}
+      {h.source === "managed" && (
+        <button type="button" className="btn ghost sm" disabled={!!busy} onClick={() => void remove()}>
+          卸载团团安装的版本
+        </button>
+      )}
+      {error && <span className="error-text">{error}</span>}
+    </div>
   );
 }
 
@@ -332,6 +406,7 @@ const SOURCE_LABEL: Record<NonNullable<HarnessStatus["source"]>, string> = {
   bundled: "内置",
   path: "本机",
   override: "自定义路径",
+  managed: "团团安装",
 };
 
 interface InstallJob {

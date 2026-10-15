@@ -12,6 +12,8 @@ writeFileSync(MOCK_AUTH_FILE, "ok");
 // Auto-created room folders go to a throwaway root, never ~/Tuantuan.
 export const WORKSPACES = mkdtempSync(join(tmpdir(), "tuantuan-ws-"));
 process.env.TUANTUAN_WORKSPACES = WORKSPACES;
+// No background fetch of the real ACP registry from unit tests (the shipped snapshot is used).
+process.env.TUANTUAN_REGISTRY_OFFLINE ??= "1";
 
 /** Agent bound to the mock ACP harness. */
 export function agentInput(name: string, extra: Partial<AgentInput> = {}): AgentInput {

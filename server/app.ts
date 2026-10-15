@@ -15,11 +15,16 @@ import {
   harnessSpec,
   installerStatuses,
   loginShellEnv,
+  REG_PREFIX,
+  registryInstallable,
   resetLoginShellEnv,
+  setRegistry,
+  specForRegistryAgent,
   visibleHarnesses,
 } from "./harness";
 import { HarnessHost, withProviderMeta } from "./host";
 import { Installer } from "./installer";
+import { installManaged, readManifest, setManagedRoot, uninstallManaged } from "./managed";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import {
@@ -33,6 +38,7 @@ import {
   readCcSwitch,
   testProvider,
 } from "./providers";
+import { platformKey, Registry } from "./registry";
 import * as skills from "./skills";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 import { TuantuanMcp } from "./tuantuan-mcp";
@@ -181,6 +187,69 @@ export function createApp(deps: AppDeps) {
   }
 
   const installer = new Installer(() => resetLoginShellEnv());
+  // ACP registry: harnesses Tuantuan installs into <data>/harnesses on click.
+  setManagedRoot(join(dataDir, "harnesses"));
+  const registry = new Registry(join(dataDir, "registry"));
+  setRegistry(registry);
+  registry.start();
+
+  function registryView() {
+    const st = registry.get();
+    const plat = platformKey();
+    return {
+      source: st.source,
+      fetchedAt: st.fetchedAt,
+      error: st.error,
+      invalid: st.invalid,
+      platform: plat,
+      agents: st.agents.map((a) => {
+        const spec = specForRegistryAgent(a.id);
+        const m = readManifest(a.id);
+        const kinds = [
+          a.distribution.npx && "npx",
+          a.distribution.uvx && "uvx",
+          a.distribution.binary && "binary",
+        ].filter(Boolean);
+        return {
+          id: a.id,
+          name: a.name,
+          version: a.version,
+          description: a.description,
+          license: a.license,
+          authors: a.authors,
+          website: a.website ?? null,
+          repository: a.repository ?? null,
+          hasIcon: !!a.icon,
+          kinds,
+          platforms: a.distribution.binary ? Object.keys(a.distribution.binary) : ["all"],
+          installable: registryInstallable(a),
+          harnessId: spec?.id ?? `${REG_PREFIX}${a.id}`,
+          curated: !!spec?.curated,
+          installedVersion: m?.version ?? null,
+          updateAvailable: !!(m && m.version !== a.version),
+          experimental: "experimental" in a ? !!a.experimental : false,
+          note: "note" in a ? (a.note as string) : null,
+        };
+      }),
+    };
+  }
+
+  /** One-click install / update of a harness from its registry entry, as an install job. */
+  function startRegistryInstall(harnessId: string, regId: string) {
+    const a = registry.agent(regId);
+    if (!a) throw new ValidationError(`Registry 里没有 ${regId}`, 404);
+    if (!registryInstallable(a)) throw new ValidationError(`${a.name} 没有适合这台电脑（${platformKey()}）的安装包`);
+    const spec = harnessSpec(harnessId);
+    return installer.startTask(
+      harnessId,
+      "registry",
+      `安装 ${a.name} ${a.version}（ACP Registry）`,
+      async (log, signal) => {
+        const env = await loginShellEnv();
+        await installManaged(a, { log, signal, env, runtime: spec?.runtime });
+      },
+    );
+  }
 
   async function harnessStatuses() {
     const overrides = store.getSetting<Record<string, string>>("harnessPaths", {});
@@ -379,7 +448,7 @@ export function createApp(deps: AppDeps) {
     const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
     const command = status.command;
     if (!command) return { ok: false, error: status.error, install: spec.install, login: status.login };
-    const env = { ...(await loginShellEnv()) };
+    const env = { ...(await loginShellEnv()), ...status.env };
     // With a 服务商, probe exactly as the agent will run: same env, routing and settings tier.
     const prov = providerId ? store.getProvider(providerId) : null;
     const useProv = prov && providerSupports(prov, id) ? prov : null;
@@ -396,20 +465,32 @@ export function createApp(deps: AppDeps) {
     );
     try {
       const init = await p.initialize(30_000);
-      const authMethods = (init.authMethods ?? []).map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description ?? null,
-        type: "type" in m && m.type === "terminal" ? ("terminal" as const) : ("agent" as const),
-        command:
-          "type" in m && m.type === "terminal"
-            ? [command, ...status.args, ...(m.args ?? [])].map(shellQuote).join(" ")
-            : null,
-      }));
+      const authMethods = (init.authMethods ?? []).map((m) => {
+        const raw = m as { type?: string; vars?: { name: string }[] };
+        return {
+          id: m.id,
+          name: m.name,
+          description: m.description ?? null,
+          type:
+            "type" in m && m.type === "terminal"
+              ? ("terminal" as const)
+              : raw.type === "env_var"
+                ? ("env" as const)
+                : ("agent" as const),
+          /** env_var methods: which variables to set (in the agent's 环境变量). */
+          vars: raw.type === "env_var" && Array.isArray(raw.vars) ? raw.vars.map((v) => v.name) : null,
+          command:
+            "type" in m && m.type === "terminal"
+              ? [command, ...status.args, ...(m.args ?? [])].map(shellQuote).join(" ")
+              : null,
+        };
+      });
       let authError: string | null = null;
       if (methodId) {
         const m = authMethods.find((x) => x.id === methodId);
         if (!m) throw new ValidationError(`${spec.name} 没有登录方式 ${methodId}`);
+        if (m.type === "env")
+          throw new ValidationError(`「${m.name}」要在 Agent 的环境变量里设置 ${m.vars?.join("、") ?? ""}`);
         if (m.type !== "agent") throw new ValidationError(`「${m.name}」需要在终端里运行：${m.command}`);
         try {
           // Agent-driven login may open a browser and wait for the user: allow a long time.
@@ -483,7 +564,17 @@ export function createApp(deps: AppDeps) {
   }
 
   async function handleApi(req: Request, url: URL): Promise<Response> {
-    const parts = url.pathname.split("/").filter(Boolean).slice(1); // drop "api"
+    const parts = url.pathname
+      .split("/")
+      .filter(Boolean)
+      .slice(1) // drop "api"
+      .map((p) => {
+        try {
+          return decodeURIComponent(p);
+        } catch {
+          return p;
+        }
+      });
     const [resource, id, sub, subId, action] = parts;
     const method = req.method;
     const body = async () => (method === "GET" || method === "DELETE" ? undefined : await req.json());
@@ -631,8 +722,39 @@ export function createApp(deps: AppDeps) {
       if (id === "places" && method === "GET") return json(places(store.listProjects().map((x) => x.cwd)));
     }
 
+    if (resource === "registry") {
+      if (!id && method === "GET") return json(registryView());
+      if (id === "refresh" && method === "POST") {
+        await registry.refresh();
+        return json(registryView());
+      }
+      if (id === "icon" && sub && method === "GET") {
+        const svg = await registry.icon(sub);
+        if (!svg) return new Response("not found", { status: 404 });
+        return new Response(svg, {
+          headers: {
+            "content-type": "image/svg+xml",
+            "cache-control": "public, max-age=86400",
+            "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+          },
+        });
+      }
+      if (id === "install" && sub && method === "POST") {
+        const spec = specForRegistryAgent(sub);
+        return json(startRegistryInstall(spec?.id ?? `${REG_PREFIX}${sub}`, sub), 202);
+      }
+    }
+
     if (resource === "harnesses") {
       if (!id && method === "GET") return json(await harnessStatuses());
+      if (id && sub === "managed" && method === "DELETE") {
+        const spec = harnessSpec(id);
+        if (!spec?.registry) throw new ValidationError(`${id} 不是团团安装的`, 404);
+        if (installer.get(id)?.state === "running") throw new ValidationError("正在安装，先取消");
+        host.dropHarness(id);
+        uninstallManaged(spec.registry);
+        return json(await harnessStatuses());
+      }
       if (id && sub === "path" && method === "PUT") {
         const { path } = z.object({ path: z.string().max(1024).nullable() }).parse(await body());
         const overrides = store.getSetting<Record<string, string>>("harnessPaths", {});
@@ -658,6 +780,10 @@ export function createApp(deps: AppDeps) {
         if (method === "DELETE") return json(installer.cancel(id));
         if (method === "POST") {
           const { installerId } = z.object({ installerId: z.string() }).parse(await body());
+          if (installerId === "registry") {
+            if (!spec.registry) throw new ValidationError(`${spec.name} 不在 ACP Registry 里`);
+            return json(startRegistryInstall(id, spec.registry), 202);
+          }
           const inst = spec.installers?.find((i) => i.id === installerId);
           if (!inst) throw new ValidationError(`${spec.name} 没有安装方式 ${installerId}`);
           const env = await loginShellEnv();
@@ -856,6 +982,7 @@ export function createApp(deps: AppDeps) {
     host,
     mcp,
     installer,
+    registry,
     attach(s: Server<WsData>) {
       server = s;
       mcp.baseUrl = `http://127.0.0.1:${s.port}`;
