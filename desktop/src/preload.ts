@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("tuantuan", {
   notify: (p: { title: string; body: string; roomId: string; icon?: string }) =>
     ipcRenderer.invoke("tuantuan:notify", p),
   setBadge: (count: number) => ipcRenderer.invoke("tuantuan:badge", count),
+  notifyStatus: () => ipcRenderer.invoke("tuantuan:notify-status"),
+  openNotificationSettings: () => ipcRenderer.invoke("tuantuan:open-notification-settings"),
   onOpenRoom: (cb: (roomId: string) => void) => {
     const h = (_e: unknown, roomId: string) => cb(roomId);
     ipcRenderer.on("tuantuan:open-room", h);

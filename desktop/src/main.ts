@@ -12,7 +12,7 @@ import {
   shell,
   Tray,
 } from "electron";
-import { registerNotifications } from "./notify";
+import { registerNotifications, registerOnFirstLaunch } from "./notify";
 import { serverLayout } from "./paths";
 import { type RunningServer, startServer } from "./server";
 import { loginShellEnv } from "./shell-env";
@@ -84,7 +84,10 @@ function createWindow() {
       spellcheck: false,
     },
   });
-  win.once("ready-to-show", () => win?.show());
+  win.once("ready-to-show", () => {
+    win?.show();
+    registerOnFirstLaunch();
+  });
   // Full screen hides the traffic lights: the UI drops the space it kept for them.
   const sendFullscreen = () => win?.webContents.send("tuantuan:fullscreen", win.isFullScreen());
   win.on("enter-full-screen", sendFullscreen);

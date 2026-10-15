@@ -34,8 +34,23 @@ export function totalUnread(unread: Record<string, number>): number {
   return Object.values(unread).reduce((a, b) => a + b, 0);
 }
 
+export type DesktopStatus = {
+  supported: boolean;
+  platform: string;
+  packaged: boolean;
+  bundleId: string;
+  signature: string;
+  last: { at: number; result: { ok: boolean; shown?: boolean; reason?: string } } | null;
+};
 type Bridge = {
-  notify?: (p: { title: string; body: string; roomId: string; icon?: string }) => Promise<unknown>;
+  notify?: (p: {
+    title: string;
+    body: string;
+    roomId: string;
+    icon?: string;
+  }) => Promise<{ ok: boolean; shown?: boolean; reason?: string } | undefined>;
+  notifyStatus?: () => Promise<DesktopStatus>;
+  openNotificationSettings?: () => Promise<unknown>;
   setBadge?: (n: number) => Promise<unknown>;
   onOpenRoom?: (cb: (roomId: string) => void) => () => void;
 };
@@ -50,11 +65,13 @@ export function notifySupport(): "desktop" | "web" | "none" {
 export async function showNotification(
   p: { title: string; body: string; roomId: string; icon?: string },
   open: (roomId: string) => void,
-): Promise<"shown" | "denied" | "unsupported"> {
+): Promise<"shown" | "not-shown" | "denied" | "unsupported"> {
   const b = bridge();
   if (b?.notify) {
-    await b.notify(p);
-    return "shown";
+    const r = await b.notify(p);
+    if (!r) return "shown";
+    if (!r.ok) return r.reason === "unsupported" ? "unsupported" : "denied";
+    return r.shown ? "shown" : "not-shown";
   }
   if (typeof Notification === "undefined") return "unsupported";
   if (Notification.permission === "default") await Notification.requestPermission();

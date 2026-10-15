@@ -62,5 +62,7 @@ test("profile: 关于我 block for agents; empty profile adds nothing", async ()
   expect(t).toContain("称呼：Andy");
   expect(t).toContain("先给结论");
   expect(t).toContain("Asia/Shanghai");
+  expect(t).not.toContain("语言");
+  expect(profileInstructions(readProfile({ language: "en" }))).toBe("");
   expect(readProfile({ theme: "neon" }).theme).toBe("system");
 });

@@ -42,7 +42,12 @@ module.exports = {
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
     notarize,
-    identity: env.CSC_LINK || env.CSC_NAME ? undefined : null,
+    // Notification Center: banners by default; CFBundleIdentifier comes from appId above.
+    extendInfo: { NSUserNotificationAlertStyle: "banner" },
+    // No Developer ID: ad-hoc sign the whole bundle ("-") instead of leaving it unsigned. An unsigned
+    // (or partially signed) app gets no entry in System Settings › Notifications and macOS drops its
+    // notifications silently; ad-hoc keeps the bundle id app.tuantuan.desktop valid for Notification Center.
+    identity: env.CSC_LINK || env.CSC_NAME ? undefined : "-",
   },
   dmg: { title: "团团 ${version}" },
   win: { icon: "build/icon.ico", target: ["nsis"] },

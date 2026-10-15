@@ -1662,9 +1662,17 @@ html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region:
 .profile-optin { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; cursor: pointer; }
 .profile-optin > span { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .profile-state { margin-left: auto; font-size: 12px; }
-.side-me { border: none; background: none; padding: 0; border-radius: 50%; line-height: 0; cursor: pointer; flex: none; }
+.side-me { width: 34px; height: 34px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: 50%; display: inline-grid; place-items: center; cursor: pointer; flex: none; transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out); }
+.side-me:hover { color: var(--text); }
 .side-me:hover { box-shadow: 0 0 0 3px var(--surface-hover); }
 @media (prefers-reduced-motion: reduce) { .accent-dot { transition: none; } }
 /* @mentions sit on the text baseline: plain inline, same font metrics, colour/weight only */
 .mention { display: inline; font-size: inherit; line-height: inherit; vertical-align: baseline; padding: 0; margin: 0; background: none; border-radius: 0; color: var(--accent-text); font-weight: 600; }
 .msg[data-sender="human"] .mention { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 2px; }
+.notify-diag { display: grid; gap: 8px; margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.notify-diag-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.notify-diag-row b[data-state="ok"] { color: var(--ok); }
+.notify-diag-row b[data-state="bad"] { color: var(--danger); }
+.notify-diag-hint { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--text-2); }
+.profile-input { max-width: 360px; }
+.page-inner.profile .profile-grid { grid-template-columns: 64px minmax(0, 1fr); }

@@ -1027,6 +1027,7 @@ try {
     await nav("通知");
     await page.getByRole("heading", { name: "通知", exact: true }).waitFor();
     await page.getByRole("checkbox", { name: "回复完成" }).waitFor();
+    await page.locator(".notify-diag b", { hasText: "已允许" }).waitFor();
     await page.getByRole("button", { name: "发送测试通知" }).click();
     await page.getByRole("status").filter({ hasText: "已发送" }).waitFor();
     await shot("notifications");
@@ -1095,6 +1096,9 @@ try {
   {
     await page.locator(".side-me").click();
     await page.waitForFunction(() => location.hash === "#/profile");
+    if (await page.getByLabel("语言").count()) throw new Error("language setting should be hidden");
+    if (await page.locator(".page .avatar, .page .user-avatar").count())
+      throw new Error("profile should have no avatar");
     await page.getByLabel("显示名").fill("Andy");
     await page.getByLabel("关于我").fill("我是前端工程师，回答先给结论。");
     await page.getByRole("button", { name: "深色", exact: true }).click();

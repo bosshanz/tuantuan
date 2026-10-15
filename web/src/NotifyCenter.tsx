@@ -10,6 +10,7 @@ import {
   avatarIcon,
   bridge,
   bumpUnread,
+  type DesktopStatus,
   loadNotifySettings,
   type NotifySettings,
   notifySupport,
@@ -115,19 +116,46 @@ export function NotificationsPage() {
       return next;
     });
   }, []);
+  const [status, setStatus] = useState<DesktopStatus | null>(null);
+  const [webPerm, setWebPerm] = useState(() =>
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+  );
+  const refresh = useCallback(() => {
+    void bridge()
+      ?.notifyStatus?.()
+      .then(setStatus)
+      .catch(() => {});
+    if (typeof Notification !== "undefined") setWebPerm(Notification.permission);
+  }, []);
+  useEffect(refresh, [refresh]);
   const sendTest = async () => {
     setTest(null);
     const r = await showNotification({ title: "团团", body: "这是一条测试通知", roomId: "" }, () => {}).catch(
       () => "unsupported" as const,
     );
+    refresh();
     setTest(
       r === "shown"
-        ? "已发送。没看到的话，检查系统设置里团团的通知权限。"
-        : r === "denied"
-          ? "浏览器拒绝了通知权限，可在地址栏左侧的站点设置里打开。"
-          : "这个环境不支持系统通知。",
+        ? "已发送。"
+        : r === "not-shown"
+          ? "系统没有显示这条通知，多半是通知权限被关了。"
+          : r === "denied"
+            ? support === "desktop"
+              ? "系统拒绝了通知。"
+              : "浏览器拒绝了通知权限，可在地址栏左侧的站点设置里打开。"
+            : "这个环境不支持系统通知。",
     );
   };
+  const blocked =
+    support === "desktop"
+      ? !!status?.last && (!status.last.result.ok || status.last.result.shown === false)
+      : webPerm === "denied";
+  const sigHint =
+    status?.platform === "darwin" &&
+    status.packaged &&
+    (status.signature === "unsigned" || status.signature === "invalid")
+      ? "这个安装包没有有效签名，macOS 会直接丢掉它的通知。请安装新版团团。"
+      : null;
   return (
     <>
       <header className="main-head">
@@ -183,6 +211,50 @@ export function NotificationsPage() {
                   />
                 </label>
               ))}
+              <div className="notify-diag" role="note">
+                <span className="notify-diag-row">
+                  <span className="muted">状态</span>
+                  <b data-state={blocked || sigHint ? "bad" : "ok"}>
+                    {support === "none"
+                      ? "不支持"
+                      : sigHint
+                        ? "无法发送"
+                        : blocked
+                          ? "被系统拦截"
+                          : support === "web"
+                            ? webPerm === "granted"
+                              ? "已允许"
+                              : "未询问"
+                            : status?.last
+                              ? "正常"
+                              : "未测试"}
+                  </b>
+                  {status && (
+                    <span className="muted" title={`bundle id ${status.bundleId}`}>
+                      {status.packaged ? `签名：${status.signature}` : "开发版"}
+                    </span>
+                  )}
+                  {support === "desktop" && status?.platform === "darwin" && (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      style={{ marginLeft: "auto" }}
+                      title="没收到通知时，到这里确认「团团」已允许通知"
+                      onClick={() => void bridge()?.openNotificationSettings?.()}
+                    >
+                      打开系统通知设置
+                    </button>
+                  )}
+                </span>
+                {(sigHint || blocked) && (
+                  <span className="notify-diag-hint">
+                    {sigHint ??
+                      (support === "desktop"
+                        ? "到「系统设置 › 通知」里找到「团团」，打开「允许通知」，样式选「横幅」或「提醒」。"
+                        : "在浏览器的站点设置里允许通知。")}
+                  </span>
+                )}
+              </div>
               <div className="notify-foot">
                 <button type="button" className="btn" disabled={support === "none"} onClick={() => void sendTest()}>
                   发送测试通知

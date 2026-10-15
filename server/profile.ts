@@ -4,6 +4,7 @@ import { AVATAR_SHAPES } from "./avatars";
 /** 个人资料: who the user is. Stored server-side (settings table) so every window and agent sees it. */
 export const ProfileSchema = z.object({
   name: z.string().trim().max(32).default(""),
+  /** Reserved; the UI no longer shows a user avatar. */
   avatar: z
     .discriminatedUnion("kind", [
       z.object({
@@ -30,6 +31,7 @@ export const ProfileSchema = z.object({
     .nullable()
     .default(null),
   timezone: z.string().max(64).default(""),
+  /** Reserved for UI i18n later; not shown and not sent to agents. */
   language: z.enum(["zh-CN", "en"]).default("zh-CN"),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
@@ -46,8 +48,7 @@ export function profileInstructions(p: Profile): string {
   const lines: string[] = [];
   if (p.name.trim()) lines.push(`称呼：${p.name.trim()}`);
   if (p.timezone) lines.push(`时区：${p.timezone}`);
-  lines.push(`偏好语言：${p.language === "en" ? "English" : "简体中文"}`);
   if (p.about.trim()) lines.push(p.about.trim());
-  if (!p.name.trim() && !p.about.trim() && !p.timezone && p.language === "zh-CN") return "";
+  if (!lines.length) return "";
   return `关于用户（来自团团的个人资料，供你参考，不必复述）：\n${lines.join("\n")}`;
 }

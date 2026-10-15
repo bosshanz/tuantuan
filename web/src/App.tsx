@@ -29,7 +29,7 @@ import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
 import { NotificationsPage, useNotifications } from "./NotifyCenter";
 import { Onboarding } from "./Onboarding";
-import { applyAppearance, EMPTY_PROFILE, type Profile, ProfilePage, UserAvatar } from "./Profile";
+import { applyAppearance, EMPTY_PROFILE, type Profile, ProfilePage } from "./Profile";
 import { NewProject, ProjectSettings } from "./Projects";
 import { ProvidersPage } from "./Providers";
 import { SetupPage } from "./Setup";
@@ -391,7 +391,7 @@ export function App() {
             aria-label="个人资料"
             onClick={() => go("profile")}
           >
-            <UserAvatar profile={{ ...profile, name: userName }} size={28} />
+            <UserRound size={17} />
           </button>
           <button
             type="button"
