@@ -181,6 +181,14 @@ try {
   if (!linked.includes("pdf-tools")) throw new Error("skill link not saved");
   await page.waitForTimeout(250);
   await shot("skills");
+  // Agent defaults read from the harness's own options.
+  await page.getByRole("button", { name: "默认推理" }).click();
+  await page.getByRole("option", { name: /^高/ }).click();
+  await page.getByRole("button", { name: "默认推理" }).filter({ hasText: "高" }).waitFor();
+  await page.getByRole("button", { name: "默认推理" }).scrollIntoViewIfNeeded();
+  await shot("agent-defaults");
+  await page.getByRole("button", { name: "保存修改" }).click();
+  await page.locator(".list-item", { hasText: "Alice" }).filter({ hasText: "推理 高" }).waitFor();
 
   await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
   await page.locator(".pane-head").getByRole("button", { name: "会话" }).click();
@@ -201,6 +209,13 @@ try {
     throw new Error("new conversation lost main / project");
   await page.waitForTimeout(600);
   await shot("sidebar");
+  // Multi-agent: one summary chip, per-agent settings inside.
+  await page.locator(".chip-summary").click();
+  await page.locator(".pop-menu .opt-group-head", { hasText: "Alice" }).waitFor();
+  await page.locator(".pop-menu .opt-group-head", { hasText: "Bob" }).waitFor();
+  await page.waitForTimeout(250);
+  await shot("chips-group");
+  await page.keyboard.press("Escape");
 
   // Group: no @ -> the main agent (Bob) answers; @Alice -> Alice.
   const input = page.getByLabel("消息输入框");
@@ -231,6 +246,48 @@ try {
   await shot("model-picker");
   await page.getByRole("option", { name: "Mock Smart" }).click();
   await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
+  // Settings live in the composer as chips (no floating select row); danger values are tinted.
+  if (await page.locator(".session-bar select, .sess-select").count()) throw new Error("legacy select row still shown");
+  await page.locator(".chip-opt", { hasText: "权限" }).click();
+  await page.getByRole("option", { name: /全部允许/ }).click();
+  await page.locator(".chip-opt[data-danger]", { hasText: "全部允许" }).waitFor();
+  await page.locator(".chip-opt", { hasText: "权限" }).click();
+  await page.getByRole("option", { name: /询问/ }).click();
+  await page.locator(".chip-opt:not([data-danger])", { hasText: "询问" }).waitFor();
+  // A model the harness rejects: readable error, current model kept.
+  await page.locator(".model-trigger").click();
+  await page.getByRole("option", { name: "Mock Broken" }).click();
+  await page.getByText(/Invalid model: mock-broken/).waitFor();
+  await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
+  // Narrow window: popover stays inside the viewport and above the trigger, nothing clipped.
+  await page.setViewportSize({ width: 420, height: 760 });
+  await page.waitForTimeout(200);
+  await page.locator(".model-trigger").click();
+  await page.locator(".pop-menu").waitFor();
+  await page.waitForTimeout(250);
+  const popIssues = await page.evaluate(() => {
+    const pop = document.querySelector(".pop-menu")?.getBoundingClientRect();
+    const trig = document.querySelector(".model-trigger")?.getBoundingClientRect();
+    if (!pop || !trig) return ["missing"];
+    const out: string[] = [];
+    if (pop.left < 0 || pop.right > innerWidth || pop.top < 0 || pop.bottom > innerHeight)
+      out.push(`off-screen ${JSON.stringify(pop)}`);
+    if (pop.bottom > trig.top + 1) out.push("not above trigger");
+    const logo = document.querySelector(".pop-menu .brand-logo")?.getBoundingClientRect();
+    if (!logo || logo.left < pop.left) out.push("logo clipped");
+    const hit = document.elementFromPoint(pop.left + 20, pop.top + 20);
+    if (!hit?.closest(".pop-menu")) out.push("popover under other content");
+    return out;
+  });
+  await shot("chips-narrow");
+  if (popIssues.length) throw new Error(`popover: ${popIssues.join("; ")}`);
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(200);
+  await page.locator(".chip-opt", { hasText: "推理" }).click();
+  await page.waitForTimeout(250);
+  await shot("chips");
+  await page.keyboard.press("Escape");
   await input.fill("/pl");
   await page.locator(".slash-pop").getByText("/plan").waitFor();
   await input.press("Tab");
@@ -263,6 +320,19 @@ try {
   await input.press("Enter");
   await page.getByRole("button", { name: "停止" }).click();
   await page.locator(".state-tag", { hasText: "已停止" }).waitFor();
+
+  // A harness that never answers and ignores session/cancel: 停止 still ends the turn.
+  await page.locator(".model-trigger").click();
+  await page.getByRole("option", { name: "Mock Stuck" }).click();
+  await page.locator(".model-trigger", { hasText: "Mock Stuck" }).waitFor();
+  await input.fill("卡住了吗");
+  await input.press("Enter");
+  await page.locator(".run-bar").waitFor();
+  await page.getByRole("button", { name: "停止" }).click();
+  await page.locator(".run-bar").waitFor({ state: "detached", timeout: 10_000 });
+  await page.locator(".model-trigger").click();
+  await page.getByRole("option", { name: "Mock Smart" }).click();
+  await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
 
   await page.locator('[data-shot="expand"]').last().click();
   await page.getByRole("heading", { name: "回复详情" }).waitFor();
@@ -306,7 +376,12 @@ try {
     const edge = r(document.querySelector(".pane-head h1"))?.left ?? Number.NaN;
     near(r(document.querySelector(".pane-search .input"))?.left ?? Number.NaN, edge, "search box left edge");
     near(left(document.querySelector(".project-toggle")), edge, "project label left edge");
-    near(left(document.querySelector(".list-item")), edge, "list item left edge");
+    // conversations are indented under their project: avatar column lines up with the project name
+    near(
+      left(document.querySelector(".room-item")),
+      r(document.querySelector(".project-name"))?.left ?? Number.NaN,
+      "conversation vs project name",
+    );
     for (const g of document.querySelectorAll(".msg-group")) {
       const text = r(g.querySelector(".msg"))?.left ?? Number.NaN;
       near(r(g.querySelector(".msg-head"))?.left ?? text, text, "message name vs body");

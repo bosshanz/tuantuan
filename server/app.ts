@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type * as acp from "@agentclientprotocol/sdk";
 import { methods as acpMethods } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
@@ -70,6 +71,7 @@ const AgentInputSchema = z.object({
     .default({}),
   mcpServerIds: z.array(z.string()).max(32).default([]),
   permissionPolicy: z.enum(PERMISSION_POLICIES).default("ask"),
+  configDefaults: z.record(z.string().max(64), z.string().max(200)).default({}),
   custom: CustomSchema.nullable().optional(),
 });
 
@@ -163,6 +165,39 @@ export function createApp(deps: AppDeps) {
    * Spawns the harness once and runs the ACP handshake, optionally `authenticate` with one of its
    * agent-driven auth methods, then tries session/new to tell whether it is logged in.
    */
+  /** Config options a harness offers on a fresh session (for agent defaults), cached per harness. */
+  const harnessOptions = new Map<
+    string,
+    { at: number; configOptions: acp.SessionConfigOption[]; modes: acp.SessionModeState | null; error: string | null }
+  >();
+  const optionsInflight = new Map<string, Promise<unknown>>();
+  async function harnessOptionsFor(id: string, refresh: boolean) {
+    const hit = harnessOptions.get(id);
+    if (hit && !refresh && !hit.error && Date.now() - hit.at < 30 * 60_000) return hit;
+    let job = optionsInflight.get(id);
+    if (!job) {
+      job = probeHarness(id)
+        .then((r) => {
+          const res = r as { ok: boolean; error?: string; sessionError?: string | null; loggedIn?: boolean | null };
+          if (!harnessOptions.has(id) || harnessOptions.get(id)?.error || refresh) {
+            const err = !res.ok
+              ? (res.error ?? "无法启动")
+              : res.loggedIn === false
+                ? "需要先登录"
+                : (res.sessionError ?? null);
+            if (err) harnessOptions.set(id, { at: Date.now(), configOptions: [], modes: null, error: err });
+          }
+        })
+        .catch((e) =>
+          harnessOptions.set(id, { at: Date.now(), configOptions: [], modes: null, error: (e as Error).message }),
+        )
+        .finally(() => optionsInflight.delete(id));
+      optionsInflight.set(id, job);
+    }
+    await job;
+    return harnessOptions.get(id) ?? { at: Date.now(), configOptions: [], modes: null, error: "无法读取" };
+  }
+
   async function probeHarness(id: string, methodId?: string) {
     const spec = harnessSpec(id);
     if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
@@ -205,12 +240,17 @@ export function createApp(deps: AppDeps) {
       }
       let loggedIn: boolean | null = null;
       let sessionError: string | null = null;
+      let configOptions: acp.SessionConfigOption[] = [];
+      let modes: acp.SessionModeState | null = null;
       try {
-        await withTimeout(
+        const created = await withTimeout(
           p.agent.request(acpMethods.agent.session.new, { cwd: scratch, mcpServers: [] }),
           60_000,
           "session/new 超时",
         );
+        configOptions = created.configOptions ?? [];
+        modes = created.modes ?? null;
+        harnessOptions.set(id, { at: Date.now(), configOptions, modes, error: null });
         loggedIn = true;
       } catch (e) {
         const msg = (e as { message?: string }).message ?? String(e);
@@ -228,6 +268,7 @@ export function createApp(deps: AppDeps) {
         loggedIn,
         sessionError,
         authError,
+        configOptions,
       };
     } catch (e) {
       if (e instanceof ValidationError) throw e;
@@ -314,6 +355,11 @@ export function createApp(deps: AppDeps) {
         return json(await harnessStatuses());
       }
       if (id && sub === "test" && method === "POST") return json(await probeHarness(id));
+      if (id && sub === "options" && method === "GET") {
+        if (id === "custom") return json({ configOptions: [], modes: null, error: null });
+        const r = await harnessOptionsFor(id, url.searchParams.get("refresh") === "1");
+        return json({ configOptions: r.configOptions, modes: r.modes, error: r.error });
+      }
       if (id && sub === "install") {
         const spec = harnessSpec(id);
         if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);

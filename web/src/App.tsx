@@ -1,7 +1,8 @@
 import {
   Bot,
-  ChevronRight,
   Command,
+  Folder,
+  FolderOpen,
   FolderPlus,
   MessagesSquare,
   PlugZap,
@@ -18,6 +19,7 @@ import { type Agent, api, connectWs, type McpServer, type Meta, type Project, ty
 import { BrandMark } from "./BrandMark";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
+import { defaultsSummary } from "./config";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
 import { NewProject, ProjectSettings } from "./Projects";
@@ -206,7 +208,11 @@ export function App() {
                     onClick={() => setCollapsed((c) => (open ? [...c, p.id] : c.filter((x) => x !== p.id)))}
                     title={p.cwd}
                   >
-                    <ChevronRight size={14} className="chev" />
+                    {open ? (
+                      <FolderOpen size={15} className="project-icon" />
+                    ) : (
+                      <Folder size={15} className="project-icon" />
+                    )}
                     <span className="project-name">{p.name}</span>
                     <span className="project-count">{list.length || ""}</span>
                   </button>
@@ -229,16 +235,16 @@ export function App() {
                   </button>
                 </div>
                 <div className="collapse">
-                  <div>
+                  <div className="project-rooms">
                     {list.map((r) => (
                       <button
                         type="button"
                         key={r.id}
-                        className="list-item"
+                        className="list-item room-item"
                         aria-current={roomId === r.id ? "page" : undefined}
                         onClick={() => go(`c/${r.id}`)}
                       >
-                        <RoomIcon room={r} agents={agents} />
+                        <RoomIcon room={r} agents={agents} size={28} />
                         <span className="li-body">
                           <span className="li-title">{r.name}</span>
                           <span className="li-sub">{roomSubtitle(r, agents)}</span>
@@ -284,7 +290,11 @@ export function App() {
               <span className="li-body">
                 <span className="li-title">{a.name}</span>
                 <span className="li-sub">
-                  {a.harness ? harnessName(a.harness) : <span className="warn-text">未绑定 Harness</span>}
+                  {a.harness ? (
+                    [harnessName(a.harness), ...defaultsSummary(a.configDefaults)].join(" · ")
+                  ) : (
+                    <span className="warn-text">未绑定 Harness</span>
+                  )}
                 </span>
               </span>
             </button>

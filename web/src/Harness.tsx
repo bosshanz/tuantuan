@@ -320,72 +320,22 @@ export function PermissionDialog(props: {
   );
 }
 
-/** Mode / model / reasoning pickers and context usage for one agent's session. */
-export function SessionBar(props: {
-  view: SessionView;
-  onConfig: (configId: string, value: string | boolean) => void;
-  onMode: (modeId: string) => void;
-}) {
-  const { view } = props;
-  // The model option lives in the composer's ModelPicker.
-  const selects = view.configOptions.filter((o) => o.type === "select" && o.category !== "model" && o.id !== "model");
-  const hasModeOption = view.configOptions.some((o) => o.category === "mode");
+/** Context window usage (and cost) of one agent's session, as a compact meter. */
+export function CtxUsage({ view }: { view: SessionView }) {
   const pct = view.usage && view.usage.size > 0 ? Math.min(100, (view.usage.used / view.usage.size) * 100) : null;
+  if (pct === null || !view.usage) return null;
   return (
-    <div className="session-bar">
-      {view.modes && !hasModeOption && (
-        <label className="sess-select">
-          <span className="sr-only">模式</span>
-          <select value={view.modes.currentModeId} onChange={(e) => props.onMode(e.target.value)} aria-label="模式">
-            {view.modes.availableModes.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {selects.map((o) => (
-        <label key={o.id} className="sess-select" title={o.description ?? o.name}>
-          <select
-            aria-label={o.name}
-            value={o.type === "select" ? o.currentValue : ""}
-            onChange={(e) => props.onConfig(o.id, e.target.value)}
-          >
-            {flatOptions(o).map((v) => (
-              <option key={v.value} value={v.value}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      ))}
-      {view.configOptions
-        .filter((o) => o.type === "boolean")
-        .map((o) => (
-          <label key={o.id} className="sess-toggle">
-            <input
-              type="checkbox"
-              checked={o.type === "boolean" && o.currentValue}
-              onChange={(e) => props.onConfig(o.id, e.target.checked)}
-            />
-            {o.name}
-          </label>
-        ))}
-      <span className="grow" />
-      {pct !== null && view.usage && (
-        <span
-          className="ctx-usage"
-          title={`上下文 ${view.usage.used.toLocaleString()} / ${view.usage.size.toLocaleString()} token`}
-        >
-          <span className="ctx-bar">
-            <i style={{ width: `${pct}%` }} />
-          </span>
-          {Math.round(pct)}%
-          {view.usage.cost && ` · ${view.usage.cost.currency === "USD" ? "$" : ""}${view.usage.cost.amount.toFixed(3)}`}
-        </span>
-      )}
-    </div>
+    <span
+      className="ctx-usage"
+      title={`上下文 ${view.usage.used.toLocaleString()} / ${view.usage.size.toLocaleString()} token${
+        view.usage.cost ? ` · ${view.usage.cost.currency === "USD" ? "$" : ""}${view.usage.cost.amount.toFixed(3)}` : ""
+      }`}
+    >
+      <span className="ctx-bar">
+        <i style={{ width: `${pct}%` }} />
+      </span>
+      {Math.round(pct)}%
+    </span>
   );
 }
 

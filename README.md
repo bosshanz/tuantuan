@@ -126,6 +126,16 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 - 团团内置的轻量 harness，只做对话：SSE 流式、身份文档作系统提示、会话转述；多 Agent 时 `handoff` / `list_members` 以原生 function/tool call 提供（与 MCP 走同一处理逻辑）。**没有文件读写和终端。**
 - API Key 只存服务端（SQLite），接口只返回掩码（如 `sk-••••abcd`），不写日志；编辑时留空即保持原 Key。
 
+## 会话设置（模型 / 权限 / 推理…）
+
+Harness 通过 ACP `configOptions`（及旧的 `modes`）提供的设置，显示在输入框底栏里的小标签上：图标、简短中文名和当前值，比如 `权限 询问`、`推理 高`。点开后是和模型选择器一样的弹层，列出选项名和 Harness 自己的说明。已知的 id/category（mode、model、effort/thought_level、thinking）会翻译成中文，其余沿用 Harness 给的名称。危险选项（Bypass permissions、full-access 等）用浅橙色标出。窗口较窄时，次要设置收进「…」。多 Agent 会话只显示一个「各自设置」标签，点开后按 Agent 分组。
+
+弹层渲染在 `<body>` 下，跟随触发按钮定位：默认向上展开，空间不够时向下，不超出窗口。
+
+**Agent 默认设置**：在 Agent 页选好 Harness 后，团团会在临时目录开一个一次性 ACP 会话来读取可用选项（按 Harness 缓存 30 分钟）。读不到时（例如未登录）会显示原因和「重试」按钮。新会话按「会话里改过的 > Agent 默认 > Harness 默认」依次生效。
+
+**卡住与停止**：`session/resume` / `load` 超过 45 秒会改开新会话；切换设置超过 20 秒算失败，Harness 拒绝时会直接显示它返回的原因。点「停止」后，如果 Harness 4 秒内没有结束这一轮，团团会自己结束。回复 15 秒还没有任何输出时，会显示等了多久。
+
 ## 选择文件夹
 
 浏览器拿不到绝对路径，所以由服务端弹系统对话框：macOS 用 `osascript choose folder`，Linux 桌面用 `zenity` / `kdialog`。都不可用时（或 `TUANTUAN_NATIVE_PICKER=0`）改用应用内的文件夹浏览器（面包屑、常用目录、最近项目、git 仓库标记）。接口统一为 `POST /api/fs/pick`、`GET /api/fs/dirs`、`GET /api/fs/places`；桌面壳可通过 `setNativePicker()` 换成自己的原生对话框。新建项目、项目设置、Skill 导入都用它。

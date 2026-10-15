@@ -30,8 +30,9 @@ import {
   type WsEvent,
 } from "./api";
 import { agentActivity, messageExpression } from "./avatarState";
-import { PermissionDialog, SessionBar, TimelineView } from "./Harness";
-import { ModelPicker, modelEntry } from "./ModelPicker";
+import { SessionChips } from "./ConfigChips";
+import type { Opt } from "./config";
+import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
 import { mergeMessages, upsertMessage } from "./messageMerge";
 import { usePresence } from "./motion";
 import { PickList } from "./PickList";
@@ -217,28 +218,20 @@ export function ChatView(props: {
     await api("POST", `/api/permissions/${askId}`, { optionId }).catch(() => {});
   }, []);
 
-  const sessionCall = async (path: string, body: unknown) => {
-    if (!primary) return;
+  const pickOption = async (agentId: string, opt: Opt, value: string) => {
     try {
-      const v = await api<SessionView>("POST", `/api/rooms/${room.id}/agents/${primary.id}/${path}`, body);
-      setSessions((s) => ({ ...s, [primary.id]: v }));
-    } catch (e) {
-      setSendError((e as Error).message);
-    }
-  };
-
-  const pickModel = async (agentId: string, configId: string, value: string) => {
-    try {
-      const v = await api<SessionView>("POST", `/api/rooms/${room.id}/agents/${agentId}/config`, { configId, value });
+      const v =
+        opt.id === "__mode"
+          ? await api<SessionView>("POST", `/api/rooms/${room.id}/agents/${agentId}/mode`, { modeId: value })
+          : await api<SessionView>("POST", `/api/rooms/${room.id}/agents/${agentId}/config`, {
+              configId: opt.id,
+              value: opt.type === "boolean" ? value === "true" : value,
+            });
       setSessions((s) => ({ ...s, [agentId]: v }));
     } catch (e) {
       setSendError((e as Error).message);
     }
   };
-  const modelEntries = members.flatMap((a) => {
-    const e = modelEntry(a, sessions[a.id]);
-    return e ? [e] : [];
-  });
 
   const openDetails = (id: string) => {
     setSelected((cur) => (cur === id && panel ? null : id));
@@ -382,13 +375,6 @@ export function ChatView(props: {
               {sendError}
             </div>
           )}
-          {primaryView && (
-            <SessionBar
-              view={primaryView}
-              onConfig={(configId, value) => void sessionCall("config", { configId, value })}
-              onMode={(modeId) => void sessionCall("mode", { modeId })}
-            />
-          )}
           <Composer
             value={draft}
             onChange={setDraft}
@@ -403,7 +389,12 @@ export function ChatView(props: {
             images={images}
             onImages={setImages}
             imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
-            modelPicker={<ModelPicker entries={modelEntries} primaryId={primary?.id ?? null} onPick={pickModel} />}
+            modelPicker={
+              <>
+                {primaryView && members.length === 1 && <CtxUsage view={primaryView} />}
+                <SessionChips members={members} sessions={sessions} onPick={pickOption} />
+              </>
+            }
           />
         </footer>
       </div>
@@ -550,6 +541,7 @@ function MessageItem(props: {
           <i />
           <i />
           正在思考
+          <Waited since={m.createdAt} />
         </span>
       )}
       {m.senderKind === "agent" && empty && !m.content && m.status === "done" && (
@@ -591,6 +583,18 @@ function MessageItem(props: {
       )}
     </div>
   );
+}
+
+/** After a while with no output, say so (a harness can sit silently while it retries upstream). */
+function Waited({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const s = Math.floor((now - since) / 1000);
+  if (s < 15) return null;
+  return <span className="waited">· {s} 秒无响应，可停止后重试</span>;
 }
 
 /** The handoff tool call is shown as a hand-off card instead of a generic tool card. */

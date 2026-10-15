@@ -6,7 +6,7 @@ import json from "highlight.js/lib/languages/json";
 import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
-import { Hash, User } from "lucide-react";
+import { User, Users } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -73,9 +73,19 @@ export function HumanAvatar({ name, size = 32 }: { name: string; size?: number }
 export function RoomIcon({ room, agents, size = 32 }: { room: Room; agents: Agent[]; size?: number }) {
   const members = room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
   if (members.length === 1 && members[0]) return <AgentAvatar agent={members[0]} size={size} />;
+  if (members.length === 0)
+    return (
+      <span className="room-icon" style={{ ["--size" as string]: `${size}px` }} aria-hidden>
+        <Users size={size * 0.5} />
+      </span>
+    );
+  const mini = Math.round(size * 0.64);
   return (
-    <span className="room-icon" aria-hidden>
-      <Hash size={16} />
+    <span className="room-stack" style={{ ["--size" as string]: `${size}px` }} aria-hidden>
+      {members.slice(0, 2).map((a) => (
+        <AgentAvatar key={a.id} agent={a} size={mini} />
+      ))}
+      {members.length > 2 && <span className="room-stack-more">+{members.length - 2}</span>}
     </span>
   );
 }

@@ -2,6 +2,11 @@ import { homedir } from "node:os";
 import type * as acp from "@agentclientprotocol/sdk";
 import { methods } from "@agentclientprotocol/sdk";
 import { AcpProcess, type TerminalSnapshot, withTimeout } from "./acp";
+
+const CANCEL_GRACE_MS = Number(process.env.TUANTUAN_CANCEL_GRACE_MS) || 4000;
+const RESUME_TIMEOUT_MS = 45_000;
+const CONFIG_TIMEOUT_MS = 20_000;
+
 import { CUSTOM_HARNESS, type Item, runTurn } from "./custom";
 import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./harness";
 import { harnessProcessEnv } from "./harness-env";
@@ -294,18 +299,26 @@ export class HarnessHost {
       try {
         res =
           view.capabilities.resume && !(preferLoad && view.capabilities.loadSession)
-            ? await proc.acp.agent.request(methods.agent.session.resume, {
-                sessionId: saved.sessionId,
-                cwd,
-                mcpServers,
-                _meta: meta,
-              })
-            : await proc.acp.agent.request(methods.agent.session.load, {
-                sessionId: saved.sessionId,
-                cwd,
-                mcpServers,
-                _meta: meta,
-              });
+            ? await withTimeout(
+                proc.acp.agent.request(methods.agent.session.resume, {
+                  sessionId: saved.sessionId,
+                  cwd,
+                  mcpServers,
+                  _meta: meta,
+                }),
+                RESUME_TIMEOUT_MS,
+                "session/resume 超时",
+              )
+            : await withTimeout(
+                proc.acp.agent.request(methods.agent.session.load, {
+                  sessionId: saved.sessionId,
+                  cwd,
+                  mcpServers,
+                  _meta: meta,
+                }),
+                RESUME_TIMEOUT_MS,
+                "session/load 超时",
+              );
       } catch {
         proc.sessions.delete(saved.sessionId);
         view.sessionId = null;
@@ -335,20 +348,36 @@ export class HarnessHost {
     }
     view.configOptions = res?.configOptions ?? [];
     view.modes = res?.modes ?? null;
-    // Conversation preference is applied on a brand-new session (ACP has no model field on session/new).
+    // Preferences are applied on a brand-new session (ACP has no config on session/new):
+    // conversation override > agent default > harness default. Unknown / rejected values are skipped.
     if (fresh) {
-      const want = this.store.getRoomModel(room.id, agent.id);
-      const opt = modelOption(view.configOptions);
-      if (want && opt && opt.currentValue !== want && selectValues(opt).includes(want)) {
-        try {
-          const set = (await proc.acp.agent.request(methods.agent.session.setConfigOption, {
+      const want = { ...agent.configDefaults, ...this.store.getRoomConfig(room.id, agent.id) };
+      for (const [configId, value] of Object.entries(want)) {
+        const opt = view.configOptions.find((o) => o.id === configId);
+        if (!opt) continue;
+        let params: acp.SetSessionConfigOptionRequest;
+        if (opt.type === "select") {
+          if (opt.currentValue === value || !selectValues(opt).includes(value)) continue;
+          params = { sessionId: view.sessionId as string, configId, value } as acp.SetSessionConfigOptionRequest;
+        } else if (opt.type === "boolean") {
+          const v = value === "true";
+          if (opt.currentValue === v) continue;
+          params = {
             sessionId: view.sessionId as string,
-            configId: opt.id,
-            value: want,
-          } as acp.SetSessionConfigOptionRequest)) as acp.SetSessionConfigOptionResponse;
+            configId,
+            type: "boolean",
+            value: v,
+          } as acp.SetSessionConfigOptionRequest;
+        } else continue;
+        try {
+          const set = (await withTimeout(
+            proc.acp.agent.request(methods.agent.session.setConfigOption, params),
+            CONFIG_TIMEOUT_MS,
+            "设置超时",
+          )) as acp.SetSessionConfigOptionResponse;
           view.configOptions = set.configOptions;
         } catch {
-          // keep the harness default; the picker shows what is actually active
+          // keep the harness default; the chips show what is actually active
         }
       }
     }
@@ -399,8 +428,23 @@ export class HarnessHost {
         if (a.ask.roomId === room.id && a.ask.agentId === agent.id) this.answer(id, null);
     };
     signal.addEventListener("abort", onAbort);
+    // A harness stuck upstream (e.g. a proxy that never answers) may ignore session/cancel; don't let
+    // 停止 hang: give it a moment to wind down, then end the turn here.
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const abandoned = new Promise<never>((_, reject) => {
+      const go = () => {
+        graceTimer = setTimeout(
+          () => reject(signal.reason ?? new DOMException("用户取消", "AbortError")),
+          CANCEL_GRACE_MS,
+        );
+      };
+      if (signal.aborted) go();
+      else signal.addEventListener("abort", go, { once: true });
+    });
+    abandoned.catch(() => {});
     try {
       const res = await Promise.race([
+        abandoned,
         proc.acp.agent.request(methods.agent.session.prompt, { sessionId, prompt: blocks }),
         proc.acp.exited.then((code) => {
           throw new Error(
@@ -410,8 +454,10 @@ export class HarnessHost {
       ]);
       return { stopReason: res.stopReason };
     } catch (e) {
+      if (signal.aborted) throw signal.reason ?? e;
       throw harnessError(proc, e);
     } finally {
+      clearTimeout(graceTimer);
       signal.removeEventListener("abort", onAbort);
       slot.turn = null;
     }
@@ -539,13 +585,18 @@ export class HarnessHost {
       typeof value === "boolean"
         ? { sessionId: slot.view.sessionId as string, configId, type: "boolean" as const, value }
         : { sessionId: slot.view.sessionId as string, configId, value };
-    const res = (await proc.acp.agent.request(
-      methods.agent.session.setConfigOption,
-      params as acp.SetSessionConfigOptionRequest,
-    )) as acp.SetSessionConfigOptionResponse;
+    let res: acp.SetSessionConfigOptionResponse;
+    try {
+      res = (await withTimeout(
+        proc.acp.agent.request(methods.agent.session.setConfigOption, params as acp.SetSessionConfigOptionRequest),
+        CONFIG_TIMEOUT_MS,
+        "设置超时",
+      )) as acp.SetSessionConfigOptionResponse;
+    } catch (e) {
+      throw new ValidationError(`${proc.spec.name} 拒绝了这个设置：${harnessError(proc, e).message}`);
+    }
     slot.view.configOptions = res.configOptions;
-    const opt = modelOption(slot.view.configOptions);
-    if (opt && opt.id === configId && typeof value === "string") this.store.setRoomModel(room.id, agent.id, value);
+    this.store.setRoomConfig(room.id, agent.id, configId, String(value));
     this.events.session(room.id, agent.id, { ...slot.view });
     return slot.view;
   }

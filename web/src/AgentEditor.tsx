@@ -1,6 +1,8 @@
+import type * as acp from "@agentclientprotocol/sdk";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronLeft,
   FolderOpen,
   Link2,
@@ -9,7 +11,7 @@ import {
   Plug,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import { CUSTOM_FORMATS, DEFAULT_BASE_URL } from "../../server/custom";
 import { AvatarPicker } from "./AvatarPicker";
@@ -23,6 +25,8 @@ import {
   type Meta,
   type Project,
 } from "./api";
+import { ChoiceList, OptIcon, Popover } from "./ConfigChips";
+import { describeOptions, type Opt } from "./config";
 import { useFolderPicker } from "./FolderPicker";
 import { type PickItem, PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
@@ -44,6 +48,7 @@ function emptyAgent(seed: string): Form {
     env: {},
     mcpServerIds: [],
     permissionPolicy: "ask",
+    configDefaults: {},
     custom: null,
   };
 }
@@ -76,6 +81,7 @@ const comparable = (a: Form) =>
     a.env,
     [...a.mcpServerIds].sort(),
     a.permissionPolicy,
+    a.configDefaults ?? {},
     a.custom,
   ]);
 
@@ -228,6 +234,7 @@ export function AgentEditor(props: {
                   onChange={(e) => {
                     const v = e.target.value;
                     set("harness", v);
+                    set("configDefaults", {});
                     if (v === "custom" && !form.custom)
                       set("custom", { format: "openai-chat", baseUrl: "", model: "", apiKey: "" });
                     if (v !== "custom") set("custom", null);
@@ -270,6 +277,13 @@ export function AgentEditor(props: {
                     </button>
                   </fieldset>
                 </div>
+              )}
+              {form.harness && form.harness !== "custom" && (
+                <AgentDefaults
+                  harness={form.harness}
+                  value={form.configDefaults ?? {}}
+                  onChange={(v) => set("configDefaults", v)}
+                />
               )}
             </div>
           </section>
@@ -796,5 +810,123 @@ function SkillsCard({ agentId }: { agentId: string }) {
       </div>
       {folder.dialog}
     </section>
+  );
+}
+
+/** Default model / effort / mode… for new conversations, from the harness's own options. */
+function AgentDefaults(props: {
+  harness: string;
+  value: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+}) {
+  const [state, setState] = useState<{ opts: Opt[] | null; error: string | null }>({ opts: null, error: null });
+  const [tick, setTick] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tick = retry
+  useEffect(() => {
+    let off = false;
+    setState({ opts: null, error: null });
+    void api<{ configOptions: acp.SessionConfigOption[]; modes: acp.SessionModeState | null; error: string | null }>(
+      "GET",
+      `/api/harnesses/${props.harness}/options${tick ? "?refresh=1" : ""}`,
+    ).then(
+      (r) => !off && setState({ opts: r.error ? null : describeOptions(r.configOptions), error: r.error }),
+      (e) => !off && setState({ opts: null, error: (e as Error).message }),
+    );
+    return () => {
+      off = true;
+    };
+  }, [props.harness, tick]);
+  return (
+    <div className="field">
+      <span className="label">默认设置</span>
+      {state.error ? (
+        <div className="defaults-note">
+          <span className="muted">读取不到选项：{state.error}</span>
+          <button type="button" className="quiet-link" onClick={() => setTick((t) => t + 1)}>
+            重试
+          </button>
+        </div>
+      ) : !state.opts ? (
+        <div className="defaults-note muted">
+          <Loader2 size={13} className="spin" />
+          正在读取 Harness 选项…
+        </div>
+      ) : state.opts.length === 0 ? (
+        <div className="defaults-note muted">这个 Harness 没有可调的选项</div>
+      ) : (
+        <div className="defaults-grid">
+          {state.opts.map((o) => (
+            <DefaultRow
+              key={o.id}
+              opt={o}
+              harness={props.harness}
+              value={props.value[o.id] ?? null}
+              onChange={(v) => {
+                const next = { ...props.value };
+                if (v === null) delete next[o.id];
+                else next[o.id] = v;
+                props.onChange(next);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DefaultRow(props: { opt: Opt; harness: string; value: string | null; onChange: (v: string | null) => void }) {
+  const { opt } = props;
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const FOLLOW = "\u0000harness";
+  const harnessDefault = opt.choices.find((c) => c.value === opt.current);
+  const chosen = props.value !== null ? opt.choices.find((c) => c.value === props.value) : undefined;
+  const shown: Opt = {
+    ...opt,
+    current: props.value ?? FOLLOW,
+    choices: [
+      {
+        value: FOLLOW,
+        name: "Harness default",
+        label: "跟随 Harness",
+        description: harnessDefault ? `当前：${harnessDefault.label}` : null,
+        danger: false,
+        recommended: false,
+      },
+      ...opt.choices,
+    ],
+  };
+  return (
+    <>
+      <span className="defaults-label" title={opt.description ?? opt.name}>
+        {opt.label}
+      </span>
+      <button
+        ref={btn}
+        type="button"
+        className="chip-opt defaults-btn"
+        data-open={open || undefined}
+        data-danger={chosen?.danger || undefined}
+        aria-label={`默认${opt.label}`}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <OptIcon opt={opt} harness={props.harness} value={props.value ?? opt.current} />
+        <span className="chip-value">{chosen?.label ?? props.value ?? "跟随 Harness"}</span>
+        <ChevronDown size={12} className="model-chev" />
+      </button>
+      {open && (
+        <Popover anchor={btn.current} onClose={() => setOpen(false)} label={`默认${opt.label}`} align="start">
+          <ChoiceList
+            opt={shown}
+            harness={props.harness}
+            onPick={(v) => {
+              props.onChange(v === FOLLOW ? null : v);
+              setOpen(false);
+            }}
+          />
+        </Popover>
+      )}
+    </>
   );
 }

@@ -143,6 +143,18 @@ export const MIGRATIONS: string[] = [
      model TEXT NOT NULL,
      PRIMARY KEY (room_id, agent_id)
    );`,
+  // Agent-level default config (model / effort / mode…) + per-conversation overrides for any option;
+  // legacy DM titles "与 X 私聊" become just the agent name.
+  `ALTER TABLE agents ADD COLUMN config_defaults TEXT NOT NULL DEFAULT '{}';
+   CREATE TABLE room_config (
+     room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+     config_id TEXT NOT NULL,
+     value TEXT NOT NULL,
+     PRIMARY KEY (room_id, agent_id, config_id)
+   );
+   INSERT INTO room_config (room_id, agent_id, config_id, value) SELECT room_id, agent_id, 'model', model FROM room_models;
+   UPDATE rooms SET name = substr(name, 3, length(name) - 5) WHERE name LIKE '与 % 私聊' AND length(name) > 5;`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -163,6 +175,8 @@ export interface Agent {
   mcpServerIds: string[];
   /** "ask" shows the permission dialog; "allow" picks the agent's first allow option automatically. */
   permissionPolicy: PermissionPolicy;
+  /** Default session config for new conversations (configId → value, e.g. model / effort / mode). */
+  configDefaults: Record<string, string>;
   /** BYOK settings when harness is "custom"; the API key is only ever exposed masked. */
   custom: CustomPublic | null;
   createdAt: number;
@@ -185,7 +199,11 @@ export interface CustomInput {
   apiKey?: string;
 }
 
-export type AgentInput = Omit<Agent, "id" | "createdAt" | "updatedAt" | "avatarShape" | "color" | "custom"> & {
+export type AgentInput = Omit<
+  Agent,
+  "id" | "createdAt" | "updatedAt" | "avatarShape" | "color" | "custom" | "configDefaults"
+> & {
+  configDefaults?: Record<string, string>;
   custom?: CustomInput | null;
   /** Omitted or "" => deterministic default from the agent id. */
   color?: string;
@@ -338,6 +356,7 @@ export class Store {
       env: JSON.stringify(a.env),
       permission_policy: a.permissionPolicy,
       mcp_server_ids: JSON.stringify(a.mcpServerIds),
+      config_defaults: JSON.stringify(a.configDefaults ?? {}),
       tools: "[]",
       skills: "[]",
       model_mode: "auto",
@@ -346,10 +365,10 @@ export class Store {
     };
     const sql =
       op === "insert"
-        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,tools,skills,model_mode,created_at,updated_at,custom)
-             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$tools,$skills,$model_mode,$created_at,$updated_at,$custom)`
+        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,config_defaults,tools,skills,model_mode,created_at,updated_at,custom)
+             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$config_defaults,$tools,$skills,$model_mode,$created_at,$updated_at,$custom)`
         : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,identity=$identity,harness=$harness,env=$env,
-             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,custom=$custom,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
+             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,config_defaults=$config_defaults,custom=$custom,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
     try {
       this.db.query(sql).run(params);
     } catch (e) {
@@ -577,19 +596,33 @@ export class Store {
 
   // ---- Preferred model per (room, agent) ----
   getRoomModel(roomId: string, agentId: string): string | null {
-    const r = this.db
-      .query("SELECT model FROM room_models WHERE room_id = ? AND agent_id = ?")
-      .get(roomId, agentId) as Row | null;
-    return r ? (r.model as string) : null;
+    return this.getRoomConfig(roomId, agentId).model ?? null;
   }
 
   setRoomModel(roomId: string, agentId: string, model: string) {
-    this.db
-      .query(
-        `INSERT INTO room_models (room_id, agent_id, model) VALUES (?,?,?)
-         ON CONFLICT(room_id, agent_id) DO UPDATE SET model = excluded.model`,
-      )
-      .run(roomId, agentId, model);
+    this.setRoomConfig(roomId, agentId, "model", model);
+  }
+
+  /** Conversation-level overrides of an agent's session config (configId → value). */
+  getRoomConfig(roomId: string, agentId: string): Record<string, string> {
+    const rows = this.db
+      .query("SELECT config_id, value FROM room_config WHERE room_id = ? AND agent_id = ?")
+      .all(roomId, agentId) as Row[];
+    return Object.fromEntries(rows.map((r) => [r.config_id as string, r.value as string]));
+  }
+
+  setRoomConfig(roomId: string, agentId: string, configId: string, value: string | null) {
+    if (value === null)
+      this.db
+        .query("DELETE FROM room_config WHERE room_id = ? AND agent_id = ? AND config_id = ?")
+        .run(roomId, agentId, configId);
+    else
+      this.db
+        .query(
+          `INSERT INTO room_config (room_id, agent_id, config_id, value) VALUES (?,?,?,?)
+           ON CONFLICT(room_id, agent_id, config_id) DO UPDATE SET value = excluded.value`,
+        )
+        .run(roomId, agentId, configId, value);
   }
 
   // ---- ACP sessions: one per (room, agent) ----
@@ -650,6 +683,7 @@ function toAgent(r: Row): Agent {
     harness: r.harness as string,
     env: JSON.parse(r.env as string),
     mcpServerIds: JSON.parse(r.mcp_server_ids as string),
+    configDefaults: JSON.parse((r.config_defaults as string) || "{}"),
     permissionPolicy: r.permission_policy as PermissionPolicy,
     custom: r.custom ? publicCustom(JSON.parse(r.custom as string)) : null,
     createdAt: r.created_at as number,

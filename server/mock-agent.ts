@@ -49,6 +49,7 @@ function configOptions(s: Sess): acp.SessionConfigOption[] {
       options: [
         { value: "ask", name: "询问", description: "改动前征求同意" },
         { value: "auto", name: "自动", description: "直接执行" },
+        { value: "bypassPermissions", name: "Bypass permissions", description: "Accepts all permissions" },
       ],
     },
     {
@@ -60,6 +61,10 @@ function configOptions(s: Sess): acp.SessionConfigOption[] {
       options: [
         { value: "mock-fast", name: "Mock Fast" },
         { value: "mock-smart", name: "Mock Smart" },
+        // Simulates an upstream that never answers and ignores session/cancel.
+        { value: "mock-stuck", name: "Mock Stuck" },
+        // The harness rejects switching to this one.
+        { value: "mock-broken", name: "Mock Broken" },
       ],
     },
     {
@@ -256,6 +261,7 @@ acp
   .onRequest(acp.methods.agent.session.setConfigOption, (ctx) => {
     const s = sessions.get(ctx.params.sessionId);
     if (!s) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
+    if (ctx.params.value === "mock-broken") throw new acp.RequestError(-32602, "Invalid model: mock-broken");
     s.config[ctx.params.configId] = String(ctx.params.value);
     return { configOptions: configOptions(s) };
   })
@@ -266,6 +272,7 @@ acp
     const { sessionId } = ctx.params;
     const s = sessions.get(sessionId);
     if (!s) throw acp.RequestError.resourceNotFound(sessionId);
+    if (s.config.model === "mock-stuck") return await new Promise<never>(() => {});
     const abort = new AbortController();
     s.abort = abort;
     const send = async (update: acp.SessionUpdate) => {

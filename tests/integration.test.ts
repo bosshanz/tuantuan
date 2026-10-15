@@ -226,6 +226,35 @@ describe("projects", () => {
 });
 
 describe("preferred model", () => {
+  test("a rejected model switch is a readable error and keeps the current model", async () => {
+    const a = await createAgent("BrokenModel");
+    const r = await createRoom("bm", [a.id]);
+    const res = await api<{ error: string }>("POST", `/api/rooms/${r.id}/agents/${a.id}/config`, {
+      configId: "model",
+      value: "mock-broken",
+    });
+    expect(res.status).toBe(400);
+    expect(res.data.error).toContain("Invalid model");
+    expect(app.store.getRoomModel(r.id, a.id)).toBeNull();
+    const msg = await say(r.id, "hi");
+    expect(msg.at(-1)?.status).toBe("done");
+  });
+
+  test("停止 ends the turn even when the harness ignores session/cancel", async () => {
+    const a = await createAgent("Stuck");
+    const r = await createRoom("st", [a.id]);
+    await api("POST", `/api/rooms/${r.id}/agents/${a.id}/config`, { configId: "model", value: "mock-stuck" });
+    await api("POST", `/api/rooms/${r.id}/messages`, { senderName: "Andy", content: "hi" });
+    await Bun.sleep(300);
+    expect(app.orchestrator.state(r.id).activeRunId).not.toBeNull();
+    const t = Date.now();
+    expect((await api("POST", `/api/rooms/${r.id}/cancel`)).data).toEqual({ cancelled: true });
+    await app.orchestrator.idle(r.id);
+    expect(Date.now() - t).toBeLessThan(8000);
+    expect(app.orchestrator.state(r.id).activeRunId).toBeNull();
+    expect(app.store.recentMessages(r.id, 1)[0]?.status).toBe("cancelled");
+  }, 15000);
+
   test("session/new applies the conversation preference; setConfig persists it", async () => {
     const a = await createAgent("ModelBot");
     const r = await createRoom("m", [a.id]);
