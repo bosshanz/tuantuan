@@ -768,6 +768,39 @@ try {
   await shot("agent-provider");
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // Settings pages never scroll sideways and the sidebar never covers them (packaged mac window ≈1024px).
+  for (const width of [1440, 1024]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const [label, hash] of [
+      ["Agents", "#/a"],
+      ["Agent 编辑", `#/a/${ccAgent.id}`],
+      ["Harness", "#/harness"],
+      ["服务商与用量", "#/providers"],
+    ] as const) {
+      await page.goto(`http://localhost:${server.port}/${hash}`);
+      await page.locator(".main .main-head").first().waitFor();
+      await page.waitForTimeout(400);
+      const bad = await page.evaluate(() => {
+        const out: string[] = [];
+        const side = document.querySelector(".side")?.getBoundingClientRect();
+        const main = document.querySelector(".main")?.getBoundingClientRect();
+        if (!side || !main) return ["missing sidebar / main"];
+        if (Math.abs(main.left - side.right) > 0.5)
+          out.push(`main starts at ${main.left}, sidebar ends at ${side.right}`);
+        for (const sel of ["html", "body", ".shell", ".main", ".page", ".page-inner"])
+          for (const el of document.querySelectorAll(sel))
+            if (el.scrollWidth > el.clientWidth + 0.5)
+              out.push(`${sel} scrolls sideways: ${el.scrollWidth} > ${el.clientWidth}`);
+        const m = document.querySelector(".main") as HTMLElement;
+        if (m.scrollLeft !== 0) out.push(`main scrolled ${m.scrollLeft}`);
+        return out;
+      });
+      if (bad.length) throw new Error(`${label} @${width}: ${bad.join("; ")}`);
+      if (label === "Harness" && width === 1024) await shot("harness-1024");
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   // Dev setup (`bun dev`): the UI must reach the API and its WebSocket through the Vite proxy.
   // Spawn vite's own entry (not `bunx`), so kill() stops the server itself: an orphaned vite from a
   // previous run would keep the port and proxy to a dead API, failing every other run.

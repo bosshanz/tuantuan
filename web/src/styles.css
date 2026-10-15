@@ -1450,3 +1450,25 @@ html[data-desktop="darwin"]:not([data-fullscreen]) .side-brand { display: none; 
 @media (max-width: 900px) { .ud-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ud-row { grid-template-columns: 20px 28px minmax(80px, 1fr) 1fr 56px; } .ud-cost { display: none; } }
 .segmented button[role="tab"][aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow-1); font-weight: 550; }
 fieldset.segmented { padding: 2px; min-inline-size: 0; }
+
+/* Settings pages: never scroll sideways; header = floating title pill like conversations */
+.main { min-width: 0; overflow: hidden; }
+.page { overflow-x: hidden; min-width: 0; }
+.page-inner { box-sizing: border-box; width: 100%; min-width: 0; }
+.page-inner > *, .card, .card-body > *, .harness-row > *, .row > * { min-width: 0; }
+.row.wrap-sm { flex-wrap: wrap; }
+.copy-line code { overflow-wrap: anywhere; }
+.main-head:not(.chat-head) { position: relative; border-bottom: none; justify-content: flex-end; background: var(--surface); }
+.main-head:not(.chat-head) > svg { display: none; }
+.main-head:not(.chat-head) > .back-btn { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); }
+.main-head:not(.chat-head) > .title {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); flex: none;
+  display: inline-flex; flex-direction: row; align-items: center; gap: 8px; max-width: min(60%, 420px);
+  height: 38px; padding: 0 16px; box-sizing: border-box; border-radius: 19px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: 0 6px 20px -10px rgb(24 24 27 / 0.25), var(--shadow-1);
+}
+.main-head:not(.chat-head) > .title.preview-head { padding-left: 6px; }
+.main-head:not(.chat-head) > .title .avatar { --size: 24px !important; }
+.main-head:not(.chat-head) > .title h2 { font-size: 14.5px; line-height: 1; }
+.main-head:not(.chat-head) > .title .sub { display: none; }
+.harness-name { flex-wrap: wrap; min-width: 0; }
