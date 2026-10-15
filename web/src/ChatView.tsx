@@ -5,10 +5,12 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleSlash,
+  Clock3,
   History,
   PanelRight,
   Plus,
   Reply,
+  Square,
   SquareTerminal,
   Trash2,
   Users,
@@ -509,7 +511,14 @@ export function ChatView(props: {
           </div>
 
           <footer className="composer">
-            <TaskList tasks={tasks} cancellations={cancellations} onCancel={(id) => void cancel(id)} />
+            {tasks.length > 0 && (
+              <TaskList
+                tasks={tasks}
+                agents={agentById}
+                cancellations={cancellations}
+                onCancel={(id) => void cancel(id)}
+              />
+            )}
             {sendError && (
               <div className="error-text" role="alert" style={{ marginBottom: 6 }}>
                 {sendError}
@@ -785,6 +794,7 @@ function MessageItem(props: {
       )}
       {m.senderKind === "agent" && !streaming && (
         <div className="msg-meta">
+          {t?.reviewOf && <span className="muted">群主跟进 · 已收到 {t.reviewOf.length} 份成员结果</span>}
           {m.status === "cancelled" && (
             <span className="state-tag">
               <CircleSlash size={11} />
@@ -812,65 +822,154 @@ function MessageItem(props: {
 /** Room task state is shared by the list and the single-task composer shortcut. */
 function TaskList(props: {
   tasks: RoomState["tasks"];
+  agents: Map<string, Agent>;
   cancellations: Record<string, { pending: boolean; error: string | null }>;
   onCancel: (id: string) => void;
 }) {
-  if (!props.tasks.length) return null;
+  const [expanded, setExpanded] = useState(false);
+  const listId = useId();
+  const summaryId = useId();
   const queued = props.tasks.filter((task) => task.status === "queued").length;
-  const active = props.tasks.filter((task) => task.status === "running" || task.status === "cancelling").length;
+  const running = props.tasks.filter((task) => task.status === "running" && !props.cancellations[task.id]?.pending);
+  const stopping = props.tasks.filter((task) => task.status === "cancelling" || props.cancellations[task.id]?.pending);
+  const waiting = props.tasks.filter((task) => task.status === "waiting");
+  const current = running.length ? running : stopping.length ? stopping : waiting.length ? waiting : props.tasks;
+  const participants = [...new Map(current.map((task) => [task.agentId, task])).values()];
+  const status = running.length
+    ? running.every((task) => task.coordination === "review")
+      ? "正在跟进"
+      : running.some((task) => task.messageId)
+        ? "正在回复"
+        : "正在准备"
+    : stopping.length
+      ? "正在停止"
+      : waiting.length
+        ? waiting.some((task) => task.coordination === "lead" || task.coordination === "review")
+          ? "等待成员结果"
+          : "等待交接完成"
+        : "等待回复";
+  const single = props.tasks.length === 1 ? props.tasks[0] : undefined;
+  const singleStopping = !!single && (props.cancellations[single.id]?.pending || single.status === "cancelling");
   return (
-    <section className="chat-tasks" aria-label="会话任务">
-      <div className="chat-tasks-heading" aria-live="polite">
-        {active > 0 && `${active} 个处理中`}
-        {active > 0 && queued > 0 && " · "}
-        {queued > 0 && `${queued} 个排队中`}
-        {!active && !queued && "交接中"}
+    <section className="chat-tasks" aria-label="会话任务" data-expanded={expanded}>
+      <div className="chat-activity">
+        <button
+          type="button"
+          className="chat-activity-toggle"
+          aria-label={expanded ? "收起回复状态" : "展开回复状态"}
+          aria-expanded={expanded}
+          aria-controls={expanded ? listId : undefined}
+          aria-describedby={summaryId}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <span className="chat-activity-avatars" aria-hidden>
+            {participants.slice(0, 3).map((task) => (
+              <AgentAvatar key={task.agentId} agent={props.agents.get(task.agentId)} name={task.agentName} size={20} />
+            ))}
+          </span>
+          <span className="chat-activity-copy" id={summaryId} aria-live="polite" aria-atomic="true">
+            <span className="chat-activity-label">
+              <strong>
+                {participants.length === 1 ? participants[0]?.agentName : `${participants.length} 位 Agent`}
+              </strong>
+              <span> {status}</span>
+            </span>
+            {queued > 0 && (
+              <span className="chat-activity-count">
+                <Clock3 size={12} aria-hidden />
+                {queued} 项排队
+              </span>
+            )}
+            {props.tasks.length > current.length + queued && (
+              <span className="chat-activity-count">共 {props.tasks.length} 项</span>
+            )}
+          </span>
+          {running.length > 0 && (
+            <span className="chat-activity-dots" aria-hidden>
+              <i />
+              <i />
+              <i />
+            </span>
+          )}
+          <ChevronRight size={13} className="chat-activity-chevron" aria-hidden />
+        </button>
+        {single && !expanded && (
+          <button
+            type="button"
+            className="chat-activity-stop"
+            aria-label={single.status === "queued" ? "取消排队" : "停止任务"}
+            title={single.status === "queued" ? "取消排队" : "停止任务"}
+            aria-describedby={summaryId}
+            disabled={singleStopping}
+            onClick={() => props.onCancel(single.id)}
+          >
+            <Square size={10} fill="currentColor" aria-hidden />
+          </button>
+        )}
       </div>
-      <ul className="chat-task-list">
-        {props.tasks.map((task) => {
-          const cancellation = props.cancellations[task.id];
-          const status =
-            task.status === "queued"
-              ? "排队中"
-              : task.status === "cancelling"
-                ? "停止中"
-                : task.status === "waiting"
-                  ? "交接中"
-                  : task.messageId
-                    ? "回复中"
-                    : "准备中";
-          return (
-            <li className="chat-task" key={task.id} data-task-id={task.id} data-task-status={task.status}>
-              <div className="chat-task-content" id={`task-summary-${task.id}`}>
-                <div className="chat-task-title">
-                  <span>{task.agentName}</span>
-                  <span className="chat-task-state">{status}</span>
-                </div>
-                <div className="chat-task-summary">{task.text || "正在准备回复…"}</div>
-                {cancellation?.error && (
-                  <div className="chat-task-error" role="alert">
-                    {cancellation.error}
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                className="btn ghost sm chat-task-stop"
-                aria-label={task.status === "queued" ? "取消排队" : "停止任务"}
-                aria-describedby={`task-summary-${task.id}`}
-                disabled={cancellation?.pending || task.status === "cancelling"}
-                onClick={() => props.onCancel(task.id)}
-              >
-                {cancellation?.pending || task.status === "cancelling"
-                  ? "停止中…"
-                  : task.status === "queued"
-                    ? "取消排队"
-                    : "停止"}
-              </button>
-            </li>
-          );
+      {!expanded &&
+        props.tasks.map((task) => {
+          const error = props.cancellations[task.id]?.error;
+          return error ? (
+            <div key={task.id} className="chat-activity-error" role="alert">
+              <AlertTriangle size={13} aria-hidden />
+              <span>
+                未能停止 {task.agentName}：{error}
+              </span>
+            </div>
+          ) : null;
         })}
-      </ul>
+      {expanded && (
+        <ul className="chat-task-list" id={listId}>
+          {props.tasks.map((task) => {
+            const cancellation = props.cancellations[task.id];
+            const status =
+              task.status === "queued"
+                ? "排队中"
+                : task.status === "cancelling"
+                  ? "停止中"
+                  : task.status === "waiting"
+                    ? task.coordination === "lead" || task.coordination === "review"
+                      ? "统筹中"
+                      : "交接中"
+                    : task.coordination === "review"
+                      ? "跟进中"
+                      : task.messageId
+                        ? "回复中"
+                        : "准备中";
+            return (
+              <li className="chat-task" key={task.id} data-task-id={task.id} data-task-status={task.status}>
+                <div className="chat-task-content" id={`task-summary-${task.id}`}>
+                  <div className="chat-task-title">
+                    <span>{task.agentName}</span>
+                    <span className="chat-task-state">{status}</span>
+                  </div>
+                  <div className="chat-task-summary">{task.text || "正在准备回复…"}</div>
+                  {cancellation?.error && (
+                    <div className="chat-task-error" role="alert">
+                      {cancellation.error}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="btn ghost sm chat-task-stop"
+                  aria-label={task.status === "queued" ? "取消排队" : "停止任务"}
+                  aria-describedby={`task-summary-${task.id}`}
+                  disabled={cancellation?.pending || task.status === "cancelling"}
+                  onClick={() => props.onCancel(task.id)}
+                >
+                  {cancellation?.pending || task.status === "cancelling"
+                    ? "停止中…"
+                    : task.status === "queued"
+                      ? "取消排队"
+                      : "停止"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }

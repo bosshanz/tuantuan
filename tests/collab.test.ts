@@ -63,9 +63,29 @@ describe("handoff through Tuantuan's MCP server", () => {
       expect(rb?.timeline?.handoffFrom).toEqual({ agentId: a.id, agentName: a.name, task: "写个测试" });
       // B also gets the relay of what happened since it last spoke (it never did).
       expect(thought(rb)).toContain(`/handoff ${b.name} 写个测试`);
-      expect(ms).toHaveLength(3);
+      expect(ms).toHaveLength(4);
+      expect(ms[3]).toMatchObject({ senderName: a.name, status: "done", runId: ra?.runId });
+      expect(ms[3]?.content).toStartWith("群主汇总：");
+      expect(ms[3]?.content).toContain(rb?.content ?? "missing member result");
       expect(Date.now() - before).toBeLessThan(15000);
     });
+
+  test("the mock leader collects two real MCP handoffs in one final summary", async () => {
+    const lead = await agent("Coordinator");
+    const dev = await agent("Implementer");
+    const reviewer = await agent("Reviewer");
+    const g = await room("coordinated ACP", [lead.id, dev.id, reviewer.id], { mainAgentId: lead.id });
+    const ms = await say(g.id, `/coordinate ${dev.name} ${reviewer.name}`);
+    const replies = ms.filter((m) => m.senderKind === "agent");
+    expect(replies.map((m) => m.senderName)).toEqual([lead.name, dev.name, reviewer.name, lead.name]);
+    expect(replies.every((m) => m.status === "done" && m.runId === ms[0]?.id)).toBe(true);
+    expect(tools(replies[0]).map((t) => t.title)).toEqual(["tuantuan/handoff", "tuantuan/handoff"]);
+    const summary = replies[3];
+    expect(summary?.content).toStartWith("群主汇总：");
+    for (const result of replies.slice(1, 3)) {
+      expect(summary?.content).toContain(`${result.senderName} [done]：${result.content}`);
+    }
+  });
 
   test("only other members: unknown name and self are refused; nothing else triggers", async () => {
     const a = await agent("Solo");
@@ -94,7 +114,7 @@ describe("handoff through Tuantuan's MCP server", () => {
     const p = await agent("Ping", { identity: "[[handoff:Pong 该你了]]" });
     const q = await agent("Pong", { identity: "[[handoff:Ping 该你了]]" });
     const g = await room("loop", [p.id, q.id], { mainAgentId: p.id });
-    const ms = await say(g.id, "开始");
+    const ms = await say(g.id, "@Ping 开始");
     const replies = ms.filter((m) => m.senderKind === "agent");
     expect(replies).toHaveLength(1 + MAX_AGENT_HOPS);
     expect(replies.map((r) => r.senderName).slice(0, 3)).toEqual(["Ping", "Pong", "Ping"]);
@@ -225,6 +245,20 @@ describe("session/load replay", () => {
       // Back in r1 the same session's turns are already in the transcript: nothing extra.
       await api("POST", `/api/rooms/${r1.id}/agents/${a.id}/session`, { sessionId: s1 });
       expect((await api<ReplayTurn[]>("GET", `/api/rooms/${r1.id}/agents/${a.id}/replay`)).data).toEqual([]);
+      // Group follow-ups also survive session/load, without exposing their internal role/result prompts.
+      const member = await agent("HistoryMember");
+      await api("PUT", `/api/rooms/${r1.id}/agents`, { agentIds: [a.id, member.id] });
+      await say(r1.id, `/handoff ${member.name} 协作历史`);
+      await api("POST", `/api/rooms/${r2.id}/agents/${a.id}/session`, { sessionId: s1 });
+      const groupReplay = (await api<ReplayTurn[]>("GET", `/api/rooms/${r2.id}/agents/${a.id}/replay`)).data;
+      expect(groupReplay.some((turn) => turn.user.includes("协作历史"))).toBe(true);
+      expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-coordination"))).toBe(true);
+      expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-results"))).toBe(true);
+      expect(
+        groupReplay.some((turn) =>
+          turn.reply.parts.some((part) => part.kind === "text" && part.text.includes("群主汇总")),
+        ),
+      ).toBe(true);
     } finally {
       rmSync(sessionDir, { recursive: true, force: true });
     }

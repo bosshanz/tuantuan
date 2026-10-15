@@ -490,6 +490,8 @@ try {
   await terminalSmoke(browser, `http://localhost:${server.port}`, group.id, project.id, cwd, shotsDir);
   await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   await schedulingSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
+  // Auxiliary smoke pages use their own contexts; return focus before testing caret-driven completion.
+  await page.bringToFront();
   // Single-agent conversation in 草稿
 
   // No project chosen → 草稿.

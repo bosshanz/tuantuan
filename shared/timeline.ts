@@ -30,6 +30,8 @@ export interface Timeline {
   handoffs?: Handoff[];
   /** Set on a reply that was triggered by another agent's hand-off. */
   handoffFrom?: Handoff;
+  /** Member names whose results prompted a group leader's follow-up reply. */
+  reviewOf?: string[];
 }
 
 export interface Handoff {
@@ -129,6 +131,10 @@ export function replayTurns(updates: acp.SessionUpdate[]): ReplayTurn[] {
     }
     cur.reply = applyUpdate(cur.reply, u);
   }
-  for (const t of turns) t.user = t.user.replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "").trim();
+  for (const t of turns)
+    t.user = t.user
+      .replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "")
+      .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
+      .trim();
   return turns;
 }

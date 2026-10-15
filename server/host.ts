@@ -78,6 +78,8 @@ interface SessionSlot {
   /** Updates the harness replayed on session/load (history Tuantuan may not have); shown read-only. */
   replay: acp.SessionUpdate[];
   identityPending: boolean;
+  /** Whether this ACP session was attached to Tuantuan's room tools. */
+  tuantuanMcp: boolean;
   /** Session-cumulative cost known before any turn: 0 for a fresh session, null when resumed. */
   costBase: number | null;
   /** Model named by the harness in `_meta` (Claude Code's `_claude/model` on usage_update). */
@@ -317,10 +319,26 @@ export class HarnessHost {
    * Returns the session for this room and agent, creating, resuming or loading it as the harness allows.
    * `identity` is the Tuantuan identity + group context, delivered per the harness (plan §3.4).
    */
-  async session(room: Room, agent: Agent, identity: string): Promise<{ proc: Proc; slot: SessionSlot }> {
+  async session(
+    room: Room,
+    agent: Agent,
+    identity: string,
+    options: { startingTurn?: boolean } = {},
+  ): Promise<{ proc: Proc; slot: SessionSlot }> {
     const key = `${room.id}|${agent.id}`;
-    const signature = JSON.stringify([this.cwdFor(room), agent, identity]);
     const opening = this.opening.get(key);
+    // Inspectors may observe membership/config changes during a turn, but must not reattach its
+    // session or replace its process. The next prompt refreshes the idle attachment itself.
+    if (!options.startingTurn && this.activeTurns.has(key)) {
+      if (opening) return opening.pending;
+      const slot = this.slots.get(key);
+      const sessionId = slot?.view.sessionId;
+      const proc = sessionId ? [...this.procs.values()].find((p) => p.sessions.get(sessionId) === slot) : undefined;
+      if (slot && proc?.acp.proc.exitCode === null) return { proc, slot };
+    }
+    const hasMcp = () =>
+      !!(this.mcp?.baseUrl && this.mcp.provider?.tools({ roomId: room.id, agentId: agent.id }).length);
+    const signature = JSON.stringify([this.cwdFor(room), agent, identity, hasMcp()]);
     if (opening?.signature === signature) return opening.pending;
     // A cancelled caller can stop waiting while the shared warm-up finishes. A subsequent turn
     // must join that same initialization instead of racing it for the room's session mapping.
@@ -332,7 +350,7 @@ export class HarnessHost {
         this.opening.get(key)?.generation !== generation ||
         !currentRoom ||
         !currentAgent ||
-        JSON.stringify([this.cwdFor(currentRoom), currentAgent, identity]) !== signature
+        JSON.stringify([this.cwdFor(currentRoom), currentAgent, identity, hasMcp()]) !== signature
       )
         throw new ValidationError("会话配置已更改，请重试", 409);
     };
@@ -359,10 +377,13 @@ export class HarnessHost {
     const init = await proc.ready;
     assertCurrent();
     const slotKey = `${room.id}|${agent.id}`;
-    const cached = this.slots.get(slotKey);
-    if (cached?.view.sessionId && proc.sessions.get(cached.view.sessionId) === cached) return { proc, slot: cached };
-
     const caps = init.agentCapabilities ?? {};
+    const own = this.mcp?.serverEntry({ roomId: room.id, agentId: agent.id }, caps.mcpCapabilities);
+    const previous = this.slots.get(slotKey);
+    const cached =
+      previous?.view.sessionId && proc.sessions.get(previous.view.sessionId) === previous ? previous : undefined;
+    if (cached && (cached.turn || cached.tuantuanMcp === !!own)) return { proc, slot: cached };
+
     const plugins = pluginOverlay(this.dataDir, agent.id, agent.harness);
     const mat = materializeSkills(this.dataDir, agent.id, agent.harness, cwd, plugins.skills);
     const view: SessionView = {
@@ -390,6 +411,7 @@ export class HarnessHost {
       replaying: false,
       replay: [],
       identityPending: false,
+      tuantuanMcp: !!own,
       costBase: null,
       usageModel: null,
     };
@@ -403,7 +425,6 @@ export class HarnessHost {
       }
     };
     const mcpServers = [...this.mcpServers(agent), ...plugins.mcp];
-    const own = this.mcp?.serverEntry({ roomId: room.id, agentId: agent.id }, caps.mcpCapabilities);
     if (own) mcpServers.push(own);
     const preferLoad = this.wantLoad.delete(slotKey);
     const meta = withClaudePlugins(
@@ -448,6 +469,14 @@ export class HarnessHost {
       }
     }
     checkCurrent();
+    if (cached && view.sessionId === cached.view.sessionId) {
+      slot.identityPending = cached.identityPending;
+      slot.costBase = cached.costBase;
+      if (slot.replay.length === 0) slot.replay = [...cached.replay];
+      if (view.commands.length === 0) view.commands = cached.view.commands;
+      view.usage ??= cached.view.usage;
+      view.title ??= cached.view.title;
+    }
     let fresh = false;
     if (!view.sessionId) {
       let created: acp.NewSessionResponse;
@@ -560,7 +589,7 @@ export class HarnessHost {
     onUpdate: (u: acp.SessionUpdate) => void,
     signal: AbortSignal,
   ): Promise<{ stopReason: acp.StopReason }> {
-    const { proc, slot } = await waitForSession(this.session(room, agent, identity), signal);
+    const { proc, slot } = await waitForSession(this.session(room, agent, identity, { startingTurn: true }), signal);
     signal.throwIfAborted();
     const sessionId = slot.view.sessionId as string;
     if (slot.identityPending) {
@@ -670,6 +699,7 @@ export class HarnessHost {
         replaying: false,
         replay: [],
         identityPending: false,
+        tuantuanMcp: false,
         costBase: null,
         usageModel: null,
       };

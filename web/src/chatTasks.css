@@ -1,6 +1,26 @@
-.chat-tasks { margin: 0 4px 10px; font-size: 12px; }
-.chat-tasks-heading { color: var(--text-3); padding: 0 10px 5px; font-size: 11px; }
-.chat-task-list { list-style: none; padding: 0; margin: 0; max-height: min(24dvh, 220px); overflow-y: auto; overscroll-behavior: contain; }
+.chat-tasks { margin: 0 4px 8px; font-size: 12px; }
+.chat-activity { display: flex; align-items: center; gap: 6px; min-height: 32px; }
+.chat-activity-toggle { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: var(--r2); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--dur-1) var(--ease-out); }
+.chat-activity-toggle:hover, .chat-activity-stop:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.chat-activity-avatars { display: flex; align-items: center; flex: none; padding-right: 1px; }
+.chat-activity-avatars > .avatar + .avatar { margin-left: -6px; }
+.chat-activity-avatars > .avatar { border-radius: 50%; box-shadow: 0 0 0 2px var(--surface); }
+.chat-activity-copy { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.chat-activity-label { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.chat-activity-label strong { font-weight: 600; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-activity-label > span { flex: none; white-space: nowrap; }
+.chat-activity-count { display: inline-flex; align-items: center; gap: 4px; flex: none; padding: 2px 6px; border-radius: 5px; background: var(--surface-2); color: var(--text-2); font-size: 11px; white-space: nowrap; }
+.chat-activity-dots { display: inline-flex; align-items: center; gap: 3px; flex: none; padding: 0 2px; color: var(--text-3); }
+.chat-activity-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: chat-activity-pulse 1.4s ease-in-out infinite; }
+.chat-activity-dots i:nth-child(2) { animation-delay: 160ms; }
+.chat-activity-dots i:nth-child(3) { animation-delay: 320ms; }
+.chat-activity-chevron { flex: none; color: var(--text-3); transform: rotate(90deg); transition: transform var(--dur-1) var(--ease-out); }
+.chat-tasks[data-expanded="true"] .chat-activity-chevron { transform: rotate(-90deg); }
+.chat-activity-stop { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 1px solid var(--border); border-radius: var(--r2); background: transparent; color: var(--text-2); cursor: pointer; }
+.chat-activity-stop:disabled { cursor: default; opacity: 0.4; }
+.chat-activity-error { display: flex; align-items: flex-start; gap: 6px; padding: 4px 8px; color: var(--danger); overflow-wrap: anywhere; }
+.chat-activity-error svg { flex: none; margin-top: 2px; }
+.chat-task-list { list-style: none; padding: 0; margin: 4px 0 0; max-height: min(24dvh, 220px); overflow-y: auto; overscroll-behavior: contain; }
 .chat-task { display: flex; gap: 12px; align-items: flex-start; padding: 8px 10px; border-top: 1px solid var(--border); }
 .chat-task-content { flex: 1; min-width: 0; }
 .chat-task-title { display: flex; gap: 8px; align-items: baseline; }
@@ -9,4 +29,14 @@
 .chat-task-summary { color: var(--text-2); line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .chat-task-stop { flex: none; min-height: 30px; }
 .chat-task-error { color: var(--danger); margin-top: 3px; overflow-wrap: anywhere; }
-@media (max-width: 600px) { .chat-task { gap: 6px; padding: 7px 6px; } }
+@keyframes chat-activity-pulse { 0%, 70%, 100% { opacity: 0.3; } 35% { opacity: 1; } }
+@media (max-width: 600px) {
+  .chat-activity-toggle { gap: 6px; }
+  .chat-activity-copy { flex-wrap: wrap; gap: 3px 8px; }
+  .chat-activity-label { max-width: 100%; }
+  .chat-task { gap: 6px; padding: 7px 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-activity-toggle, .chat-activity-chevron { transition: none; }
+  .chat-activity-dots i { animation: none; opacity: 0.65; }
+}

@@ -6,7 +6,7 @@
  *   /plan  — plan checklist        /edit — diff tool call behind a permission prompt, then writes mock-edit.txt
  *   /run   — terminal tool call    /slow — streams for ~6s (to test cancel)
  * Tuantuan MCP tools (group rooms), called through whatever server session/new passed in:
- *   /handoff Name task   /members
+ *   /handoff Name task   /members   /coordinate NameA NameB
  * An identity doc containing [[handoff:Name task]] makes it hand off on every turn (loop tests).
  * Env: MOCK_AGENT_MCP_HTTP=1 advertises HTTP MCP support (default: stdio only, the ACP baseline);
  *      MOCK_AGENT_AUTH_FILE=path requires `authenticate` (method mock-login) before session/new works.
@@ -365,8 +365,15 @@ acp
     // The identity doc arrives wrapped in <tuantuan-identity>; the user's words follow it.
     const identity = fullText.match(/<tuantuan-identity>([\s\S]*?)<\/tuantuan-identity>/)?.[1];
     if (identity) s.identity = identity;
+    const coordination = [
+      ...fullText.matchAll(/<tuantuan-coordination\b([^>]*)>([\s\S]*?)<\/tuantuan-coordination>/g),
+    ].at(-1);
+    const reviewing = /\bphase="review"/.test(coordination?.[1] ?? "");
     const handoffTask = fullText.match(/<tuantuan-handoff from="([^"]*)">\n?([\s\S]*?)\n?<\/tuantuan-handoff>/);
-    const text = fullText.replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "").trim();
+    const text = fullText
+      .replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "")
+      .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
+      .trim();
     // A queued group turn carries its own request, even after newer messages have arrived.
     const taskBlock = text.match(/<tuantuan-task>\n([\s\S]*?)\n<\/tuantuan-task>/)?.[1];
     const taskText = taskBlock?.match(/(?:^|\n)\[[^\]\n]+\]: ([\s\S]*)$/)?.[1];
@@ -378,12 +385,26 @@ acp
     s.title ??= text.slice(0, 30);
     const chunk = (t: string) => send({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: t } });
     try {
+      let summary: string | null = null;
+      if (reviewing) {
+        const resultsText = coordination?.[2]?.match(/<tuantuan-results>\s*([\s\S]*?)\s*<\/tuantuan-results>/)?.[1];
+        if (!resultsText) throw new Error("mock coordination review is missing member results");
+        const results = JSON.parse(resultsText) as {
+          agentName: string;
+          status: string;
+          content: string;
+          error: string | null;
+        }[];
+        summary = `群主汇总：\n${results
+          .map((result) => `${result.agentName} [${result.status}]：${result.content || result.error || "（无输出）"}`)
+          .join("\n")}`;
+      }
       await send({
         sessionUpdate: "agent_thought_chunk",
         content: { type: "text", text: `用户说「${text}」，我来处理。` },
       });
       await sleep(60, abort.signal);
-      const cmd = latest.match(/^\/(\w+)/)?.[1];
+      const cmd = reviewing ? undefined : latest.match(/^\/(\w+)/)?.[1];
       const arg = latest.replace(/^\/\w+\s*/, "");
       let n = 0;
       const tool = async (name: string, args: Record<string, unknown>) => {
@@ -405,7 +426,7 @@ acp
         });
         return [ok, out] as const;
       };
-      const loop = s.identity.match(/\[\[handoff:(\S+) ([^\]]+)\]\]/);
+      const loop = reviewing ? null : s.identity.match(/\[\[handoff:(\S+) ([^\]]+)\]\]/);
       if (loop) {
         await tool("handoff", { agent: loop[1], task: loop[2] });
       } else if (cmd === "handoff") {
@@ -414,6 +435,14 @@ acp
       } else if (cmd === "members") {
         const [, out] = await tool("list_members", {});
         await chunk(`成员：${out.replaceAll("\n", "；")}。`);
+      } else if (cmd === "coordinate") {
+        const names = arg
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((name) => name.replace(/^@/, ""));
+        if (names.length !== 2) throw new Error("/coordinate needs two member names");
+        for (const name of names) await tool("handoff", { agent: name, task: `${name} 的协作任务` });
       } else if (cmd === "env") {
         const key = arg.trim() || "ANTHROPIC_BASE_URL";
         await chunk(`${key}=${process.env[key] ?? ""}`);
@@ -488,7 +517,7 @@ acp
         }
       }
       const what = handoffTask ? `接手 @${handoffTask[1]} 的任务「${handoffTask[2]}」` : `收到：「${latest || text}」`;
-      const reply = `${what}${images ? `，还有 ${images} 张图片` : ""}（${s.config.model ?? "mock-fast"}）`;
+      const reply = summary ?? `${what}${images ? `，还有 ${images} 张图片` : ""}（${s.config.model ?? "mock-fast"}）`;
       const size = reply.length > 200 ? 400 : 6;
       for (const part of reply.match(new RegExp(`.{1,${size}}`, "gsu")) ?? []) {
         await chunk(part);
