@@ -5,11 +5,19 @@ import { methods as acpMethods } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
 import { replayTurns } from "../shared/timeline";
-import { AcpProcess, withTimeout } from "./acp";
+import { AcpProcess, shellQuote, withTimeout } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
 import { CUSTOM_FORMATS, CUSTOM_HARNESS, testConnection } from "./custom";
-import { detectHarness, harnessSpec, loginShellEnv, visibleHarnesses } from "./harness";
+import {
+  detectHarness,
+  harnessSpec,
+  installerStatuses,
+  loginShellEnv,
+  resetLoginShellEnv,
+  visibleHarnesses,
+} from "./harness";
 import { HarnessHost } from "./host";
+import { Installer } from "./installer";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import * as skills from "./skills";
@@ -142,6 +150,8 @@ export function createApp(deps: AppDeps) {
     return { ...a, avatar: a.avatar ?? ([...a.name][0] as string) };
   }
 
+  const installer = new Installer(() => resetLoginShellEnv());
+
   async function harnessStatuses() {
     const overrides = store.getSetting<Record<string, string>>("harnessPaths", {});
     return Promise.all(visibleHarnesses().map((h) => detectHarness(h, overrides[h.id] ?? null)));
@@ -155,11 +165,12 @@ export function createApp(deps: AppDeps) {
     const spec = harnessSpec(id);
     if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
     const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
-    if (!status.path) return { ok: false, error: status.error, install: spec.install, login: spec.login };
+    const command = status.command;
+    if (!command) return { ok: false, error: status.error, install: spec.install, login: status.login };
     const env = await loginShellEnv();
     const scratch = mkdtempSync(join(tmpdir(), "tuantuan-probe-"));
     const p = new AcpProcess(
-      { command: status.path, args: spec.args, env, cwd: scratch },
+      { command, args: status.args, env, cwd: scratch },
       { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
     );
     try {
@@ -169,7 +180,10 @@ export function createApp(deps: AppDeps) {
         name: m.name,
         description: m.description ?? null,
         type: "type" in m && m.type === "terminal" ? ("terminal" as const) : ("agent" as const),
-        command: "type" in m && m.type === "terminal" ? [status.path, ...spec.args, ...(m.args ?? [])].join(" ") : null,
+        command:
+          "type" in m && m.type === "terminal"
+            ? [command, ...status.args, ...(m.args ?? [])].map(shellQuote).join(" ")
+            : null,
       }));
       let authError: string | null = null;
       if (methodId) {
@@ -286,6 +300,21 @@ export function createApp(deps: AppDeps) {
         return json(await harnessStatuses());
       }
       if (id && sub === "test" && method === "POST") return json(await probeHarness(id));
+      if (id && sub === "install") {
+        const spec = harnessSpec(id);
+        if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
+        if (method === "GET") return json(installer.get(id, Number(url.searchParams.get("since") ?? 0) || 0));
+        if (method === "DELETE") return json(installer.cancel(id));
+        if (method === "POST") {
+          const { installerId } = z.object({ installerId: z.string() }).parse(await body());
+          const inst = spec.installers?.find((i) => i.id === installerId);
+          if (!inst) throw new ValidationError(`${spec.name} 没有安装方式 ${installerId}`);
+          const env = await loginShellEnv();
+          const status = (await installerStatuses(spec, env)).find((i) => i.id === installerId);
+          if (!status?.available) throw new ValidationError(status?.reason ?? "这台机器上不能用这种方式安装");
+          return json(installer.start(id, inst, env), 202);
+        }
+      }
       if (id && sub === "authenticate" && method === "POST") {
         const { methodId } = z.object({ methodId: z.string().min(1) }).parse(await body());
         return json(await probeHarness(id, methodId));
@@ -458,6 +487,7 @@ export function createApp(deps: AppDeps) {
     orchestrator,
     host,
     mcp,
+    installer,
     attach(s: Server<WsData>) {
       server = s;
       mcp.baseUrl = `http://127.0.0.1:${s.port}`;

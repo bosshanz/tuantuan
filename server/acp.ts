@@ -232,7 +232,7 @@ function snapshot(t: Term): TerminalSnapshot {
   };
 }
 
-function shellQuote(s: string) {
+export function shellQuote(s: string) {
   return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 

@@ -125,8 +125,8 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
     expect(reply).toContain(`ANTHROPIC_BASE_URL=http://127.0.0.1:${mockPort}/v1`);
   });
 
-  test("claude-agent-acp + codex-acp hit local mocks via user-style env / CODEX_HOME", async () => {
-    const { detectHarness, harnessSpec, loginShellEnv } = await import("../server/harness");
+  test("bundled claude-agent-acp + codex-acp (run by bun) hit local mocks via user-style env / CODEX_HOME", async () => {
+    const { bundledAdapter, harnessSpec, loginShellEnv } = await import("../server/harness");
     const { AcpProcess, withTimeout } = await import("../server/acp");
     const { harnessProcessEnv } = await import("../server/harness-env");
     const { methods } = await import("@agentclientprotocol/sdk");
@@ -157,12 +157,15 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
 
     const report: Record<string, unknown> = {};
     try {
-      const claude = await detectHarness(harnessSpec("claude-code")!, null);
-      const codex = await detectHarness(harnessSpec("codex")!, null);
-      report.claudeInstalled = !!claude.path;
-      report.codexInstalled = !!codex.path;
+      // Tuantuan's own node_modules copies, launched with bun: no global install, no node on PATH needed.
+      const claude = bundledAdapter(harnessSpec("claude-code")!);
+      const codex = bundledAdapter(harnessSpec("codex")!);
+      expect(claude).not.toBeNull();
+      expect(codex).not.toBeNull();
+      report.claudeBundled = claude?.version;
+      report.codexBundled = codex?.version;
 
-      if (claude.path) {
+      if (claude) {
         const cwd = mkdtempSync(join(tmpdir(), "tt-claude-"));
         const login = await loginShellEnv();
         const env = harnessProcessEnv(
@@ -180,7 +183,7 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
         expect(env.ANTHROPIC_BASE_URL).toContain(String(claudeMock.port));
         expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
         const p = new AcpProcess(
-          { command: claude.path, args: harnessSpec("claude-code")!.args, env, cwd },
+          { command: process.execPath, args: [claude.script], env, cwd },
           { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
         );
         try {
@@ -204,7 +207,7 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
         report.claudeHits = claudeHits;
       }
 
-      if (codex.path) {
+      if (codex) {
         const cwd = mkdtempSync(join(tmpdir(), "tt-codex-"));
         const home = mkdtempSync(join(tmpdir(), "tt-codex-home-"));
         writeFileSync(
@@ -224,7 +227,7 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
         expect(JSON.parse(env.CODEX_CONFIG!).model_provider).toBeUndefined(); // from file, not CODEX_CONFIG
         expect(JSON.parse(env.CODEX_CONFIG!).developer_instructions).toBe("tuantuan-identity");
         const p = new AcpProcess(
-          { command: codex.path, args: harnessSpec("codex")!.args, env, cwd },
+          { command: process.execPath, args: [codex.script], env, cwd },
           { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
         );
         try {
@@ -254,7 +257,7 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
     }
     console.log(JSON.stringify(report));
     // At least one adapter should have talked to its mock if installed.
-    if (report.claudeInstalled) expect((report.claudeHits as string[]).length).toBeGreaterThan(0);
-    if (report.codexInstalled) expect((report.codexHits as string[]).length).toBeGreaterThan(0);
+    expect((report.claudeHits as string[]).length).toBeGreaterThan(0);
+    expect((report.codexHits as string[]).length).toBeGreaterThan(0);
   });
 });

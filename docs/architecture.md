@@ -69,3 +69,9 @@
 - **身份文档不落盘**：不改用户仓库；拒绝了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 方案，因为它们会把登录态也换掉，每个 Agent 要各自登录。
 - **fs / terminal 限制在 cwd**：只约束经过团团的请求；Harness 自己的内置工具按它自己的沙箱与权限运行。
 - **未做鉴权 / 多用户**：仅适合本机。
+
+## Harness 来源与一键安装
+
+- `server/harness.ts` 的 `detectHarness`：顺序是「Harness 页填的路径」→ 登录 shell 的 PATH → 团团内置（`bundled`）。内置的 Claude Code / Codex ACP 适配器从团团自己的 `node_modules` 解析（`createRequire`，先按源码位置、再按 `process.cwd()`），用 `process.execPath`（bun）启动，所以不依赖全局 npm 或 Node。打包（Electrobun）时需要把这两个包连同当前平台的可选依赖一起带上。
+- `server/installer.ts`：一键安装。命令只来自注册表（`installers`），不接受请求里的命令；`bash -c` 在登录 shell 环境里运行，`stdin` 关闭，日志去掉 ANSI 并折叠 `\r` 进度，最多保留 800 行；取消时连同子进程一起结束（`pkill -P`）；15 分钟超时。完成后清掉登录 shell 环境缓存，页面重新检测。
+- 测试用 `mock-cli` Harness（`TUANTUAN_MOCK_HARNESS=1`）配了一个本地安装脚本 `server/mock-installer.ts`，用于测试和 e2e。

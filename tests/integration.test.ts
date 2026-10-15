@@ -425,7 +425,7 @@ describe("ACP harness integration (mock ACP agent)", () => {
 
   test("harness registry: detection, path override and handshake for the mock harness", async () => {
     const list = (await api<{ id: string; path: string | null }[]>("GET", "/api/harnesses")).data;
-    expect(list.map((h) => h.id)).toEqual(["claude-code", "codex", "grok", "opencode", "mock"]);
+    expect(list.map((h) => h.id)).toEqual(["claude-code", "codex", "grok", "opencode", "mock", "mock-cli"]);
     expect(list.find((h) => h.id === "mock")?.path).toBeTruthy();
     const t = (await api<{ ok: boolean; agentInfo: { name: string } }>("POST", "/api/harnesses/mock/test")).data;
     expect(t).toMatchObject({ ok: true, agentInfo: { name: "mock-agent" } });
@@ -434,6 +434,33 @@ describe("ACP harness integration (mock ACP agent)", () => {
     ).data;
     expect(bad.find((h) => h.id === "mock")?.error).toContain("找不到");
     await api("PUT", "/api/harnesses/mock/path", { path: null });
+  });
+
+  test("one-click install API: registry commands only, streamed log, then detected", async () => {
+    process.env.TUANTUAN_MOCK_INSTALL_DIR = mkdtempSync(join(tmpdir(), "tt-api-install-"));
+    // The installer runs in the (cached) login-shell env; refresh it so it sees the dir above.
+    (await import("../server/harness")).resetLoginShellEnv();
+    expect((await api("POST", "/api/harnesses/mock-cli/install", { installerId: "rm -rf /" })).status).toBe(400);
+    expect((await api("POST", "/api/harnesses/mock/install", { installerId: "script" })).status).toBe(400);
+    expect((await api("GET", "/api/harnesses/mock-cli/install")).data).toBeNull();
+    const started = await api<{ state: string }>("POST", "/api/harnesses/mock-cli/install", { installerId: "script" });
+    expect(started.status).toBe(202);
+    type Job = { state: string; log: string[]; lines: number };
+    let job: Job | null = null;
+    for (let i = 0; i < 200 && !job; i++) {
+      const j = (await api<Job | null>("GET", "/api/harnesses/mock-cli/install")).data;
+      if (j && j.state !== "running") job = j;
+      else await Bun.sleep(25);
+    }
+    if (!job) throw new Error("install did not finish");
+    expect(job.state).toBe("done");
+    expect(job.log.at(-1)).toBe("安装完成");
+    const since = (await api<{ log: string[] }>("GET", `/api/harnesses/mock-cli/install?since=${job.lines - 1}`)).data;
+    expect(since.log).toEqual(["安装完成"]);
+    const list = (await api<{ id: string; source: string | null }[]>("GET", "/api/harnesses")).data;
+    expect(list.find((h) => h.id === "mock-cli")?.source).toBe("path");
+    delete process.env.TUANTUAN_MOCK_INSTALL_DIR;
+    (await import("../server/harness")).resetLoginShellEnv();
   });
 });
 

@@ -1,7 +1,7 @@
 // Browser smoke test against the built UI + real server + the mock ACP harness (server/mock-agent.ts).
 // Needs `bun run build` first and a Chrome/Chromium binary (CHROME_PATH, default /usr/bin/google-chrome).
 // SHOTS_DIR=<dir> also saves screenshots of the main screens.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
@@ -15,6 +15,14 @@ const dbPath = join(tmpdir(), `agent-hub-e2e-${Date.now()}.db`);
 const cwd = mkdtempSync(join(tmpdir(), "tuantuan-e2e-cwd-"));
 const workspaces = mkdtempSync(join(tmpdir(), "tuantuan-e2e-ws-"));
 process.env.TUANTUAN_WORKSPACES = workspaces;
+// A fresh machine: the login shell has no harness CLIs on PATH, so claude/codex fall back to the bundled
+// adapters and grok/opencode/mock-cli offer one-click installs (mock-cli's installer is a local script).
+const fakeHome = mkdtempSync(join(tmpdir(), "tuantuan-e2e-home-"));
+const fakeShell = join(fakeHome, "login-shell");
+writeFileSync(fakeShell, `#!/bin/sh\nprintf 'PATH=/usr/bin:/bin\\0HOME=${fakeHome}\\0'\n`);
+chmodSync(fakeShell, 0o755);
+process.env.SHELL = fakeShell;
+process.env.TUANTUAN_MOCK_INSTALL_DIR = join(fakeHome, "bin");
 writeFileSync(join(cwd, "mock-edit.txt"), "hello\n");
 const shotsDir = process.env.SHOTS_DIR;
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });
@@ -41,6 +49,23 @@ try {
   await mockRow.getByRole("button", { name: "用「Mock 登录」登录" }).click();
   await mockRow.getByText(/ACP v1 · Mock.*已登录/).waitFor();
   await shot("setup");
+
+  // Bundled adapters are used when nothing is on PATH; a missing CLI installs with one click.
+  await page
+    .locator(".harness-row", { hasText: "Claude Code" })
+    .locator(".source-badge", { hasText: "内置" })
+    .waitFor();
+  await page.locator(".harness-row", { hasText: "Codex" }).locator(".source-badge", { hasText: "内置" }).waitFor();
+  const cliRow = page.locator(".harness-row", { hasText: "Mock CLI" });
+  await cliRow.getByRole("button", { name: /^安装/ }).click();
+  await cliRow.getByRole("log").getByText("进度 100%").waitFor();
+  await cliRow.locator(".ok-text", { hasText: "安装完成" }).waitFor();
+  await cliRow.locator(".source-badge", { hasText: "本机" }).waitFor();
+  await page.locator(".harness-row", { hasText: "OpenCode" }).getByRole("button", { name: /^安装/ }).waitFor();
+  await page.setViewportSize({ width: 1440, height: 1500 });
+  await page.locator(".harness-row", { hasText: "Claude Code" }).scrollIntoViewIfNeeded();
+  await shot("harness");
+  await page.setViewportSize({ width: 1440, height: 900 });
   // Finishing is remembered server-side: after a reload it never opens again; Harness 管理 stays in the rail.
   await page.getByRole("button", { name: "完成", exact: true }).click();
   await page.locator(".rail").getByRole("button", { name: "会话", exact: true }).waitFor();
@@ -351,7 +376,7 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake + login → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
+    "e2e smoke: PASS (setup handshake + login → bundled adapters + one-click install → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
   );
 } catch (e) {
   failed = true;
@@ -362,6 +387,7 @@ try {
   server.stop(true);
   rmSync(cwd, { recursive: true, force: true });
   rmSync(workspaces, { recursive: true, force: true });
+  rmSync(fakeHome, { recursive: true, force: true });
   rmSync(dbPath, { force: true });
   rmSync(authFile, { force: true });
   rmSync(`${dbPath}-wal`, { force: true });

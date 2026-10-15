@@ -16,5 +16,6 @@ if (!staticDir) console.log("未找到 web/dist，前端请通过 Vite 开发服
 for (const sig of ["SIGINT", "SIGTERM"] as const)
   process.on(sig, () => {
     app.host.shutdown();
+    app.installer.shutdown();
     process.exit(0);
   });

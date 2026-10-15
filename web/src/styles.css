@@ -973,3 +973,13 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .model-free { padding: 4px 4px 2px; }
 .model-free .input { height: 30px; font-size: 12px; font-family: var(--mono); }
 @media (prefers-reduced-motion: reduce) { .model-menu { animation: none; } .model-chev { transition: none; } }
+
+/* Harness one-click install */
+.source-badge[data-source="bundled"] { background: var(--accent-soft); color: var(--accent-text); }
+.install-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.install-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.install-status { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-2); }
+.install-status .btn { margin-left: auto; }
+.install-log { margin: 0; max-height: 160px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; animation: t-pop-in 0.16s var(--ease); }
+.install-log[data-state="error"] { box-shadow: inset 2px 0 0 var(--danger, #d33); }
+.install-log[data-state="done"] { box-shadow: inset 2px 0 0 var(--ok, #2a9d63); }

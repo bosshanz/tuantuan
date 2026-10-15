@@ -131,14 +131,14 @@ export class HarnessHost {
     if (!spec) throw new ValidationError(`「${agent.name}」还没有绑定 Harness，请在 Agent 设置或新手引导里选择`);
     const overrides = this.store.getSetting<Record<string, string>>("harnessPaths", {});
     const status = await detectHarness(spec, overrides[spec.id] ?? null);
-    if (!status.path) throw new ValidationError(`${spec.name} 未安装：${status.error}。安装：${spec.install}`);
+    if (!status.command) throw new ValidationError(`${spec.name} 未安装：${status.error}。在「Harness」页安装`);
     const base = await loginShellEnv();
     const mat = materializeSkills(this.dataDir, agent.id, agent.harness, cwd);
     // Keep the user's CC Switch / Codex config: inherit ANTHROPIC_* / OPENAI_*, never isolate
     // CLAUDE_CONFIG_DIR or CODEX_HOME; only merge developer_instructions into CODEX_CONFIG.
     const env = harnessProcessEnv(base, mat.env, agent.env, spec, identity);
     const key = `${agent.id}|${cwd}`;
-    const signature = JSON.stringify([status.path, spec.args, env.CODEX_CONFIG ?? "", agent.env, mat.env]);
+    const signature = JSON.stringify([status.command, status.args, env.CODEX_CONFIG ?? "", agent.env, mat.env]);
     const existing = this.procs.get(key);
     if (existing && existing.signature === signature && existing.acp.proc.exitCode === null) return existing;
     if (existing) this.dropProc(existing);
@@ -152,7 +152,7 @@ export class HarnessHost {
       ready: null as never,
     };
     proc.acp = new AcpProcess(
-      { command: status.path, args: spec.args, env, cwd },
+      { command: status.command, args: status.args, env, cwd },
       {
         onUpdate: (n) => this.onUpdate(proc, n),
         requestPermission: (p) => this.requestPermission(proc, agent.id, p),

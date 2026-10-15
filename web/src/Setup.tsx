@@ -1,5 +1,5 @@
-import { Check, Copy, ExternalLink, Loader2, PlugZap, RefreshCw, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Check, Copy, Download, ExternalLink, Loader2, PlugZap, RefreshCw, Square, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type Agent, api, type HarnessStatus, type Meta } from "./api";
 import { AgentAvatar } from "./ui";
 
@@ -23,7 +23,7 @@ interface TestResult {
 
 /**
  * 新手引导 (first launch, with onFinish) and Harness 管理 (afterwards): find the harness CLIs on this machine, show how to install / log in, check the ACP
- * handshake, and bind harnesses to agents. Tuantuan never runs installers or logins itself.
+ * handshake, and bind harnesses to agents. Installers run only when the user clicks one (InstallPanel).
  */
 export function SetupPage(props: {
   meta: Meta;
@@ -83,7 +83,7 @@ export function SetupPage(props: {
     }
   };
 
-  const installed = (list ?? []).filter((h) => h.path);
+  const installed = (list ?? []).filter((h) => h.command);
   return (
     <>
       <header className="main-head">
@@ -108,7 +108,7 @@ export function SetupPage(props: {
           <section className="card">
             <div className="card-head">
               <h3>1 · 安装与登录</h3>
-              <p>安装命令在终端里执行；登录优先用 Harness 自带的登录流程，不支持时复制登录命令到终端。</p>
+              <p>Claude Code、Codex 已内置；其他可一键安装。登录优先用 Harness 自带流程，不支持时复制命令到终端。</p>
             </div>
             <div className="card-body harness-list">
               {!list && <Loader2 size={16} className="spin" />}
@@ -125,6 +125,21 @@ export function SetupPage(props: {
                         )}
                         <b>{h.name}</b>
                         {h.version && <span className="badge">{h.version}</span>}
+                        {h.source && (
+                          <span
+                            className="badge source-badge"
+                            data-source={h.source}
+                            title={
+                              h.source === "bundled"
+                                ? "团团内置的适配器"
+                                : h.bundledVersion
+                                  ? `用你本机的版本；内置 ${h.bundledVersion} 作后备`
+                                  : undefined
+                            }
+                          >
+                            {SOURCE_LABEL[h.source]}
+                          </span>
+                        )}
                         {h.docs && (
                           <a
                             href={h.docs}
@@ -138,7 +153,7 @@ export function SetupPage(props: {
                         )}
                       </div>
                       <div className="harness-sub muted">{h.path ?? h.error}</div>
-                      {!h.path && <CopyLine label="安装" text={h.install} />}
+                      {(!h.command || h.installers.length > 0) && <InstallPanel h={h} onInstalled={refresh} />}
                       <div className="harness-sub">登录：{h.auth}</div>
                       {h.path && h.login && <CopyLine label="登录" text={h.login} />}
                       {t &&
@@ -152,7 +167,7 @@ export function SetupPage(props: {
                       <button
                         type="button"
                         className="btn sm"
-                        disabled={!h.path || t === "running"}
+                        disabled={!h.command || t === "running"}
                         onClick={() => void test(h.id)}
                       >
                         {t === "running" ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
@@ -305,5 +320,127 @@ function PathOverride({ h, onSaved }: { h: HarnessStatus; onSaved: (l: HarnessSt
         保存
       </button>
     </form>
+  );
+}
+
+const SOURCE_LABEL: Record<NonNullable<HarnessStatus["source"]>, string> = {
+  bundled: "内置",
+  path: "本机",
+  override: "自定义路径",
+};
+
+interface InstallJob {
+  installerId: string;
+  command: string;
+  state: "running" | "done" | "error" | "cancelled";
+  log: string[];
+  lines: number;
+  from: number;
+  error: string | null;
+}
+
+/** One-click install: runs the harness's official installer on click, streams its log, re-detects when done. */
+function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled: () => Promise<void> }) {
+  const [job, setJob] = useState<InstallJob | null>(null);
+  const [log, setLog] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const seen = useRef(0);
+  const box = useRef<HTMLPreElement>(null);
+
+  const poll = useCallback(async () => {
+    const j = await api<InstallJob | null>("GET", `/api/harnesses/${h.id}/install?since=${seen.current}`).catch(
+      () => null,
+    );
+    if (!j) return null;
+    if (j.from < seen.current || seen.current === 0) setLog(j.log);
+    else setLog((l) => [...l, ...j.log].slice(-400));
+    seen.current = j.lines;
+    setJob(j);
+    return j;
+  }, [h.id]);
+
+  // Resume a running install (e.g. after a reload); finished ones from earlier are not shown again.
+  useEffect(() => {
+    void poll().then((j) => {
+      if (j && j.state !== "running") {
+        setJob(null);
+        setLog([]);
+      }
+    });
+  }, [poll]);
+  const running = job?.state === "running";
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(async () => {
+      const j = await poll();
+      if (j?.state === "done") await onInstalled();
+    }, 400);
+    return () => clearInterval(t);
+  }, [running, poll, onInstalled]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: follow the log as it grows
+  useEffect(() => {
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [log]);
+
+  const start = async (installerId: string) => {
+    setError(null);
+    seen.current = 0;
+    setLog([]);
+    try {
+      setJob({ ...(await api<InstallJob>("POST", `/api/harnesses/${h.id}/install`, { installerId })), from: 0 });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const cancel = () => void api("DELETE", `/api/harnesses/${h.id}/install`).then(() => poll());
+
+  const usable = h.installers.filter((i) => i.available);
+  // Installed: keep showing the finished job's log, otherwise nothing to offer.
+  if (h.command && !job) return null;
+  return (
+    <div className="install-panel">
+      {h.installers.length > 0 && !running && !h.command && (
+        <div className="install-actions">
+          {h.installers.map((i, n) => (
+            <button
+              key={i.id}
+              type="button"
+              className={`btn sm ${i.available && i.id === usable[0]?.id ? "primary" : ""}`}
+              disabled={!i.available}
+              title={i.reason ?? i.command}
+              onClick={() => void start(i.id)}
+            >
+              {n === 0 && <Download size={13} />}
+              {n === 0 ? `安装（${i.label}）` : i.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {running && (
+        <div className="install-status" role="status">
+          <Loader2 size={13} className="spin" />
+          <span>安装中…</span>
+          <button type="button" className="btn ghost sm" onClick={cancel}>
+            <Square size={11} />
+            取消
+          </button>
+        </div>
+      )}
+      {job && log.length > 0 && (
+        <pre ref={box} className="install-log" data-state={job.state} role="log" aria-label={`${h.name} 安装日志`}>
+          {log.join("\n")}
+        </pre>
+      )}
+      {job?.state === "done" && <div className="ok-text harness-sub">安装完成</div>}
+      {job?.state === "error" && <div className="error-text harness-sub">安装失败：{job.error}</div>}
+      {job?.state === "cancelled" && <div className="muted harness-sub">已取消</div>}
+      {error && <div className="error-text harness-sub">{error}</div>}
+      {h.command ? null : h.installers.length === 0 ? (
+        <CopyLine label="安装" text={h.install} />
+      ) : (
+        !running && usable.length === 0 && <CopyLine label="手动安装" text={h.install} />
+      )}
+    </div>
   );
 }

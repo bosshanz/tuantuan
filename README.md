@@ -39,14 +39,20 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 安装和登录 Harness
 
-团团从你的登录 shell 读取 PATH（桌面应用也能找到 npm / brew / curl 装的命令），也可以在「Harness」页给每个 Harness 填绝对路径。
+团团优先用你自己装的版本（登录 shell 的 PATH，或在「Harness」页填的绝对路径），这样会沿用你的版本和配置；找不到时才用团团内置的。「Harness」页会标出当前用的是「本机」「自定义路径」还是「内置」。
 
-| Harness | 安装 | 登录 |
-| --- | --- | --- |
-| Claude Code | `npm i -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp` | 运行 `claude` 完成 `/login`，或设置 `ANTHROPIC_API_KEY` |
-| Codex | `npm i -g @openai/codex @agentclientprotocol/codex-acp` | `codex login`（ChatGPT 账号），或设置 `OPENAI_API_KEY` |
-| Grok Build | `curl -fsSL https://x.ai/cli/install.sh \| bash` | `grok login`，或设置 `XAI_API_KEY` |
-| OpenCode | `npm i -g opencode-ai` 或 `brew install anomalyco/tap/opencode` | `opencode auth login`（自带免费模型时可不登录） |
+| Harness | 团团怎么提供 | 还需要什么 | 登录 |
+| --- | --- | --- | --- |
+| Claude Code | **内置**：`@agentclientprotocol/claude-agent-acp` 是团团的依赖，用团团自己的 bun 启动；它依赖的 Claude Agent SDK 按平台自带 Claude Code 可执行文件（macOS arm64/x64、Linux x64/arm64，含 musl） | 不需要另装 Claude Code 或 Node | 本机有 `claude` 就运行它完成 `/login`；没有时「Harness」页给出内置 Claude Code 的路径来登录；或设置 `ANTHROPIC_API_KEY`（CC Switch 写入的 `~/.claude/settings.json` 照常生效） |
+| Codex | **内置**：`@agentclientprotocol/codex-acp`，它依赖的 `@openai/codex` 按平台自带 codex 可执行文件（macOS arm64/x64、Linux x64/arm64） | 不需要另装 Codex 或 Node | ACP 登录（ChatGPT）；或 `codex login`（没有全局 `codex` 时页面给出内置命令）；或 `OPENAI_API_KEY`。`~/.codex/config.toml` 照常生效 |
+| Grok Build | **一键安装**：官方脚本 `curl -fsSL https://x.ai/cli/install.sh \| bash`（装到 `~/.grok/bin`，不需要 sudo） | curl、bash | `grok login`，或 `XAI_API_KEY` |
+| OpenCode | **一键安装**：官方脚本（`~/.opencode/bin`）、`bun add -g opencode-ai`（`~/.bun/bin`）、Homebrew，或 npm（仅当全局目录可写） | 对应工具 | `opencode auth login`（自带免费模型时可不登录） |
+
+![Harness 页：内置适配器与一键安装](docs/screenshots/harness.png)
+
+一键安装只在你点按钮后运行官方安装命令：后台执行，日志实时显示，可取消，失败时显示最后一行错误，完成后自动重新检测。不会用 sudo；某种方式在这台机器上不可用（没有 curl / brew，npm 全局目录需要 sudo）时按钮置灰并说明原因。都不可用时显示手动安装命令。
+
+内置适配器体积：每个平台约 250 MB（Claude Code）+ 330–400 MB（Codex），`bun install` 只下载当前平台的那一份。
 
 「Harness」页的「握手测试」会报告是否已登录。未登录时，如果 Harness 通过 ACP 声明了自带的登录流程（如 Codex 的 ChatGPT / API Key、Grok 的 grok.com、OpenCode 的 opencode-login），点「用「…」登录」由 Harness 自己完成（可能会打开浏览器），完成后自动重新检测；否则复制旁边的登录命令到终端执行，再点「重新检测」。所有 Agent 共用同一份 Harness 登录。
 
