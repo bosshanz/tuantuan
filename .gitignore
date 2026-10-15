@@ -10,3 +10,6 @@ config/providers.json
 test-results/
 playwright-report/
 .DS_Store
+desktop/dist/
+desktop/release/
+desktop/build/stage/

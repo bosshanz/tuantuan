@@ -1,5 +1,10 @@
 {
-  "name": "agent-hub",
+  "name": "tuantuan",
+  "description": "团团 Tuantuan — 多 Agent 群聊工作台：编码 Agent（ACP Harness）群聊、任务交接",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bosshanz/tuantuan.git"
+  },
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,12 +16,24 @@
     "format": "biome check --write .",
     "test": "bun test tests/",
     "e2e": "bun scripts/e2e-smoke.ts",
-    "check": "bun run typecheck && bun run lint && bun run test"
+    "check": "bun run typecheck && bun run lint && bun run test",
+    "desktop:install": "cd desktop && bun install && node node_modules/electron/install.js",
+    "desktop:dev": "bun run build && cd desktop && bun run dev",
+    "desktop:build": "bun run build && bun desktop/scripts/dist.ts",
+    "desktop:smoke": "bun desktop/scripts/smoke.ts"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.90.0",
+    "@agentclientprotocol/codex-acp": "2.2.2",
+    "@agentclientprotocol/sdk": "^1.8.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "highlight.js": "^11.12.0",
+    "lucide-react": "^1.57.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

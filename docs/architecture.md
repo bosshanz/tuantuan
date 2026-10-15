@@ -1,28 +1,48 @@
-# 架构
+# 团团 Tuantuan 架构
 
 ## 背景与约束
 
-- 单人/小团队本地使用的 MVP：一个 Bun 进程 + 一个 SQLite 文件，无鉴权、无多实例。
-- 必须在没有任何 API Key 时完整可运行、可测试 → 内置确定性 `mock` provider。
-- 所有真实模型都走 OpenAI 兼容的 `chat/completions`（流式 + function calling），不引入各家 SDK。
+- 本机使用：一个 Bun 进程 + 一个 SQLite 文件，无用户鉴权、无多实例。`serve` 和 `server/main.ts` 默认监听 `127.0.0.1`；`TUANTUAN_HOST` 可改监听地址。HTTP（含 MCP）和 WS 升级共用请求边界：URL / Host 必须是回环地址，提供 Origin 时必须为 HTTP(S) 本机来源，拒绝 `Sec-Fetch-Site: cross-site`。这允许本机 Vite 代理和不带 Origin 的原生客户端，不构成远程访问鉴权。桌面版（`desktop/`）是 Electron 壳：主进程把同一个 Bun 服务端作为子进程跑在随包 Bun 上，窗口加载它的本机地址。
+- 编码 Agent 通过 ACP（JSON-RPC over stdio，`@agentclientprotocol/sdk` 1.8.0）驱动 Harness，模型和原生登录由 Harness 管理；BYOK 是团团直接调用模型的轻量对话例外。团团配置的服务商 / BYOK / Harness `env_var` Key 由 SQLite 保存，原生登录凭据仍由 Harness 保存。
+- 没有任何账号也必须可测试 → `server/mock-agent.ts` 是一个确定性的 ACP agent（`TUANTUAN_MOCK_HARNESS=1` 时可选）。
 
 ## 模块
 
 | 文件 | 职责 |
 | --- | --- |
-| `server/main.ts` | 读取配置与 Skills，启动服务 |
-| `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件 |
-| `server/orchestrator.ts` | **运行时编排**：房间队列、@ 触发链、跳数上限、取消、单个 Agent 回合（上下文构建 → 路由 → 工具循环 → 持久化/推送） |
-| `server/router.ts` | 任务分类（LLM 分类器 + 规则回退）、候选模型排序、按候选回退调用 |
-| `server/classify.ts` | 确定性规则分类（router 与 mock 分类器共用） |
-| `server/tool-loop.ts` | function-calling 循环 |
-| `server/tools.ts` | 内置工具、为某个 Agent 组装工具集（内置 / MCP / `load_skill`） |
-| `server/mcp.ts` | MCP Streamable HTTP 客户端连接（官方 SDK） |
-| `server/skills.ts` | 读取 `SKILL.md`、生成 Skill 目录提示 |
-| `server/mentions.ts` | `@名字` 解析 |
-| `server/llm.ts` / `server/mock.ts` | OpenAI 兼容流式客户端 / 确定性假模型 |
+| `server/main.ts` | 打开数据库，按本机监听地址启动服务；退出时关闭 Harness 与安装任务，桌面父进程看门狗 |
+| `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件；HTTP / WS 共用 Host、Origin 与跨站请求检查 |
+| `server/harness.ts` | Harness 定义（常用 6 个 + mock，及 `reg:<id>` 形式的任意 Registry Agent）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖、来源判定 |
+| `server/registry.ts` | 官方 ACP Registry 客户端：本地缓存 → 随包快照兜底、zod 校验（坏条目跳过）、6 小时刷新、图标缓存（只接受 SVG）；平台键；额外的实验性条目（ZCode 桥接） |
+| `server/managed.ts` | 团团安装的 Harness（`<数据目录>/harnesses`）：npx 包用 Bun 或托管 Node 22（`npm install --omit=dev`）、uvx 用 uv（用户的或下载的）、二进制按平台下载 + sha256 校验 + 解压；`manifest.json` 记录版本与命令；卸载 |
+| `server/harness-secrets.ts` | 按 Harness 保存的 API Key（`settings.harnessEnv`，打码给前端，只注入该 Harness 进程）；打开终端（osascript / x-terminal-emulator…）；缺 Key 错误识别在 `shared/auth.ts` |
+| `server/installer.ts` | 安装任务：命令只来自定义（不接受请求里的命令）或 Registry 任务；日志流、取消、超时 |
+| `server/acp.ts` | `AcpProcess`：启动 Harness 并用 SDK `ndJsonStream` 连接；`fs/*` 校验真实路径与最近现存父目录，`terminal/*` 只约束启动 cwd；权限请求、终端输出与 stderr 尾部 |
+| `server/process-tree.ts` | Harness、ACP 终端与安装命令的进程组启动 / 回收；POSIX 按组发信号，Windows 使用 `taskkill /T /F` |
+| `server/custom.ts` | BYOK「自定义 API」harness：OpenAI Chat / Responses / Anthropic Messages 的 SSE 流式与 tool call，输出 ACP `session/update`；Key 只在服务端 |
+| `server/skills.ts` | Skills：解析 SKILL.md；自动发现（用户级 / 插件 / 项目）、勾选链接；导入（目录 / git / GitHub / SKILL.md 链接，先预览再选）；按 Harness 链接到会话目录的原生位置（不覆盖）；BYOK 的 `load_skill` |
+| `server/providers.ts` | 服务商：预设、Key 打码、按 Harness 注入（Claude Code 用进程 env，Codex 用 ACP `providers/set` + `CODEX_CONFIG` 里的 model，BYOK 直接用）、测速、公开余额接口、只读导入 CC Switch |
+| `usage_log` 表 | 每轮 Token（Harness 报告的 usage、模型、缓存读 / 写、思考、费用差分）；`GET /api/usage/stats?since=&tz=` 按 Agent / 模型 / Harness 汇总并按天分桶，`reporting` 列出报告过数据的 Harness |
+| `server/library.ts` | 「Skills 与插件」：只读扫描 ~/.claude / ~/.agents / ~/.codex / 项目目录，解析 Claude 插件（plugin.json），导入到 `<data>/library`（更新 / 删除），算各 Harness 支持；按 Agent 勾选的插件在建会话时变成 Claude `_meta.claudeCode.options.plugins` 或 Skill 链接 + stdio MCP |
+| `web/src/brands.ts` | 模型 id → 厂商（含 `openrouter/…`、`anthropic/…` 前缀），未知一律中性图标；Logo 来自 @lobehub/icons（MIT） |
+| `server/usage.ts` | 用量：读 `~/.claude/projects` / `~/.codex/sessions` 的 JSONL（只读），解析 Claude Code `/usage` 与 codex `/status` 的回复 |
+| `server/dirpicker.ts` | 选择文件夹：系统对话框（osascript / zenity / kdialog，可由桌面壳替换）+ 应用内浏览器的目录列表与常用位置 |
+| `server/host.ts` | `HarnessHost`：按「Agent + 会话工作目录」复用进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；权限请求挂起直到用户回答 |
+| `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
+| `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
+| `server/orchestrator.ts` | 房间队列、触发（单 Agent / @ / @所有人 / 主 Agent）、单个 Agent 回合（拼 prompt + 身份文档 → host.prompt → 推送 update → 持久化时间线）、取消 |
+| `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
 | `server/store.ts` | SQLite 迁移与读写 |
-| `web/src/*` | React 前端：会话列表、Agent 编辑、聊天视图 |
+| `web/src/Harness.tsx` | 时间线渲染（工具卡片、diff、终端、计划）、权限弹窗、会话栏 |
+| `web/src/Onboarding.tsx` / `Setup.tsx` / `Registry.tsx` | 首次引导（一页三步）；Harness 管理页；「更多 Agent」（Registry 列表、安装、握手、图标） |
+| `desktop/` | Electron 壳：主进程启动随包 Bun 服务端（子进程组、`/api/health`、父进程看门狗）、单实例、菜单、preload（文件夹对话框、全屏状态）；`scripts/` 打包（stage / electron-builder / afterPack）与 Xvfb 冒烟 |
+| `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
+| `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
+| `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
+| `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
+| `web/src/messageMerge.ts` | 历史快照与实时消息按 id 合并，保留完成态 / 较长流式文本；发送接口返回的消息立即插入 |
+| `web/src/motion.ts` | `usePresence`（退场动画期间保持挂载）、`withViewTransition`（路由切换） |
+| `web/src/BrandMark.tsx` | 团团 Logo（导航栏，眨眼 + 悬停互看）；favicon 在 `web/public/` |
 
 前端直接 `import type` 后端的数据类型（`Agent`、`Message`、`RoomEvent`…），契约只有一份定义。
 
@@ -30,51 +50,63 @@
 
 | 状态 | 所有者 | 说明 |
 | --- | --- | --- |
-| Agent、MCP 服务、房间与成员、消息、路由决策 | SQLite（`Store`） | 唯一权威来源；前端刷新后从 API 重建 |
-| 进行中的运行（每房间当前链 + 排队的人类消息 + AbortController） | `Orchestrator` 内存 | 进程退出即丢失；启动时把残留的 `streaming` 消息标记为 `interrupted`，不伪装成完成 |
-| 流式增量文本 | 仅经 WebSocket 推送 | 消息完成（done / error / cancelled）时才把全文写库；刷新页面时进行中的消息显示为空直到完成 |
-| Provider / 模型 / 路由表 / 限制 | 配置文件（只读） | 启动时校验，非法直接失败；Key 只存在环境变量 |
-| Skills | `skills/` 目录（只读） | 启动时加载；加载失败逐条报告 |
-| 当前用户显示名 | 浏览器 localStorage | 无账号体系 |
+| Agent（Harness、env、权限策略、身份文档、MCP 服务器）、项目（名称、目录）、房间/会话（所属项目、主 Agent）、消息（含时间线 JSON）、ACP 会话映射、会话配置偏好（`room_config`，含模型）、设置（Harness 路径覆盖、`onboarded`） | SQLite（`Store`） | 唯一权威来源 |
+| Harness 进程、挂起的权限请求、终端输出 | `HarnessHost` 内存 | 进程退出即丢失；重启后用 `acp_sessions` 里的 sessionId resume / load |
+| ACP session 自身的对话历史 | Harness；当前 slot 暂存 load 回放 | `/replay` 按用户消息文本去掉本房间已有轮次，前端只读显示其余回放 |
+| 团团配置的 API / 管理 Key | SQLite（`providers.api_key` / `mgmt_key`、`agents.custom`、`settings.harnessEnv`） | 当前明文存储；服务商、BYOK 与 Harness env_var 专用公开接口返回掩码，不是磁盘加密。普通 `agents.env` 是可读写配置，不具备这些专用接口的打码契约 |
+| 原生登录凭据、模型配置 | Harness | 沿用用户 Harness 的配置与登录态；系统钥匙串集成仍未实现 |
+| 前端消息、运行状态、会话视图、权限与终端投影 | `ChatView` 的 `chatReducer` | roomId 隔离；App 按 room.id 重挂载；非权威副本，最新快照与请求期间实时事件合并，旧响应忽略 |
+| 权限提交中的状态 / 错误 | `ChatView` | 按 askId 防重复；成功或 404 关闭，其余错误保留 ask 并显示可重试错误，WS 解决事件同样可关闭 |
 
-表：`agents`、`mcp_servers`、`rooms`、`room_agents`、`messages`（`run_id` = 触发这条链的人类消息 id，`hop` = 0 人类 / 1 被人类触发 / ≥2 被 Agent 触发）、`routing_decisions`（每条 Agent 消息一条：plan JSON、attempts JSON、chosen_model）。迁移按 `PRAGMA user_version` 顺序执行，只追加。
+迁移按 `PRAGMA user_version` 顺序执行，只追加：
+
+| 版本 | 内容 |
+| --- | --- |
+| 1–3 | 初始表；早期的路由与设备表（对应功能已移除，见 6、7） |
+| 4 | `agents.avatar_shape` |
+| 5 | 头像颜色映射到新色板 |
+| 6 | ACP：`system_prompt` → `identity`；agents 加 `harness`、`cwd`、`env`、`permission_policy`、`mcp_server_ids`（从旧的 `mcp:` 工具 id 迁移）；rooms 加 `main_agent_id`（回填第一个成员）、`cwd`；messages 加 `timeline`；删除 `routing_decisions`；新表 `acp_sessions`、`settings` |
+| 7 | 清理已移除功能的设备会话：删除对应房间（及其消息、ACP 会话、成员）和 `device_sessions` 表 |
+| 8 | 工作目录归房间：回填旧 DM cwd，删除 `agents.cwd` |
+| 9 | `agents.custom`：BYOK 配置（含服务端 Key） |
+| 10 | `projects` 与 `rooms.project_id`；启动时按文件系统状态分配已有房间 |
+| 11 | `room_models`：会话成员的模型偏好 |
+| 12 | `agents.config_defaults` 与 `room_config`：Agent 默认配置、会话覆盖；迁移模型偏好与旧 DM 名称 |
+| 13 | `providers`、`agents.provider_id`、`usage_log` |
+| 14 | 服务商 `mgmt_key` |
+| 15 | 用量的模型、缓存读写、思考 token、费用及币种 |
+| 16 | `agents.use_profile`：是否附带用户个人资料 |
+
+头像动画只用 CSS transform：≥32px 完整动画、更小只眨眼；`prefers-reduced-motion` 全部关闭；离屏（IntersectionObserver）和标签页隐藏（`html[data-tab-hidden]`）时暂停。
 
 ## 编排
 
-1. 人类消息写库并入房间队列；每个房间同时只执行一条链，后续人类消息排队（显示排队数）。不同房间并行。
-2. 初始触发：私聊 → 唯一的 Agent；群聊 → 消息中 @ 到的房间成员（不在房间的 Agent 不触发；没有 @ 就没人回复）。
-3. 触发按 FIFO 顺序**串行**执行。Agent 回复成功后，解析其中 @ 到的其他成员（排除自己）加入队列，`hop + 1`。
-4. `hop ≥ 2` 的每次执行计 1 次 Agent 互相 @；达到 `maxAgentHops` 后停止整条链，并发一条系统消息列出未执行的触发。
-5. 取消：中止当前链（正在流的消息以 `cancelled` 保存已生成部分）并清空该房间排队的人类消息（发系统消息说明数量）。
-
-上下文：取房间最近 `contextMessages` 条消息，从新到旧累计不超过 `contextChars` 字符；自己的消息作 `assistant`，其他人作 `user` 并带 `[发言者]:` 前缀。系统提示包含名字、房间类型、其他成员的 @ 名、Agent 自己的 Prompt、Skill 目录。
-
-## 模型路由
-
-```
-信号(text, contextTokens≈字符/3, toolCount, hasImages)
-  → 分类：classifierModel（JSON 输出，严格校验枚举）── 失败/未配置 → 规则分类（记录失败原因）
-  → 候选：具备该 task_type 标签且 contextWindow ≥ 1.2×contextTokens 的模型
-          （无标签匹配则退回所有容量够的模型，并在理由中写明）
-          排序：成本档 ≥ minTier[difficulty] 的按档位升序在前，低于的按档位降序在后
-  → 调用：按候选顺序；仅当 provider 在输出任何内容前失败（ProviderError：HTTP 错误、连接失败、缺 Key）才换下一个
-```
-
-- 固定模型的 Agent 跳过分类，只有一个候选，**不回退**（固定即意味着用户要这个模型）。
-- 工具循环的后续轮次从上一轮成功的模型开始，避免同一回答中途换模型。
-- 流开始后的错误不回退（否则会重复输出），直接以 `error` 状态结束并保留已生成内容。
-- 每条 Agent 消息记录：信号、分类结果与来源、分类器错误、候选顺序、理由、每次尝试结果、最终模型。前端在消息下方展开查看。
-
-## 工具与 Skills
-
-- 工具 id：`builtin:<name>` 或 `mcp:<serverId>:<toolName>`。保存 Agent 时校验 id 是否存在；MCP 工具在每个回合实时 `tools/list`，服务端不再提供的工具作为警告写入路由理由，不静默消失。
-- 工具循环最多 `maxToolIterations` 轮；工具异常以 `{"error": "..."}` 原样返回给模型，并在 UI 中标为失败。超过轮数时消息以 `error` 结束。
-- Skills 渐进披露：系统提示只列 `name: description`；Agent 有 Skill 时自动获得 `load_skill` 工具，调用后才得到正文。
+1. 人类消息写库并入房间队列，每个房间同时只执行一条链，不同房间并行。
+2. 触发：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 主 Agent。串行执行。
+3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session；多 Agent prompt = 该 Agent 上次发言之后的会话记录（带发言者），单 Agent = 用户消息（含图片）。身份文档按 Harness 传递（见 README）；不支持的 Harness 附加在会话第一条 prompt 前的 `<tuantuan-identity>` 中。
+4. `session/update` 实时以 `update` 事件推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。
+5. 取消：prompt 先检查 AbortSignal；会话初始化等待可被取消，取消后不发送 prompt，共享预热可继续供后续请求复用。已发出的 prompt 先发 `session/cancel`、解决挂起权限；默认 4 秒仍未返回则销毁对应 Harness 与 ACP 终端进程组，移除关联内存 slot，保留已生成部分并标为 `cancelled`。共用进程的其他会话同样受影响，下次按持久化映射与 Harness 能力重建 / 恢复。
+6. 交接：回合进行时，Agent 调用 `handoff` 把目标记到本回合（校验是会话成员、不是自己）；回合正常结束后按顺序入队（去重、`@所有人` 轮次不重复），`hop + 1`，接手方 prompt 末尾附 `<tuantuan-handoff from="…">task</tuantuan-handoff>`。时间线记录 `handoffs` / `handoffFrom`，界面显示交接卡片。超过 5 次交接停止。会话新消息打断当前链。
+7. 初始化去重与失效：同一房间 / Agent 的 opening 按配置签名复用并记录代次；发布 session 前再次核对签名与代次。Agent 设置、项目目录或会话选择变更，以及停机时使旧 opening 失效，旧结果不能回写映射或 slot；相关旧请求返回 409，下一次请求按当前配置重试。失败清理只移除该请求仍拥有的 slot，不删除后来加载同一 ACP sessionId 的新映射。
+8. session/load 回放：`switchSession` 指定历史会话时优先 load，回放的 update 存在 slot 里，`/replay` 接口按用户消息文本去掉本房间已有的轮次后返回，前端只读显示。
 
 ## 取舍
 
-- **SQLite + 单进程内存编排**：满足 MVP，部署最简单；代价是不能多实例、重启中断进行中的回复。需要横向扩展时，运行状态应迁到持久队列。
-- **链内串行**：保证消息顺序可读、跳数计数确定；代价是多个被 @ 的 Agent 不并行。
-- **只在首个输出前回退**：保证用户看到的内容不重复；代价是流中途失败不能自动恢复。
-- **MCP 每回合列工具**：反映服务端当前状态；代价是一次额外请求。
-- **未做鉴权 / 多用户**：仅适合本机或可信网络。
+- **每个 Agent 一个进程**：会话隔离清楚、可分别设置 env 和 cwd；代价是内存。同一 Agent 在不同会话（不同工作目录）会各开一个进程。
+- **身份文档不落盘**：不改用户仓库；拒绝了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 方案，因为它们会把登录态也换掉，每个 Agent 要各自登录。
+- **文件路径校验不等于沙箱**：ACP 文件接口将目标及现存父目录解析为真实路径，拒绝目录外目标和符号链接逃逸。终端仅校验初始 cwd；命令可使用绝对路径或自行切换目录，Harness 内置工具也按自身沙箱与权限运行。旧文档将这些都称为「限制在 cwd」过宽；当前不提供操作系统隔离，也不防御路径校验后发生的并发文件系统替换。
+- **未做鉴权 / 多用户**：仅适合本机。
+
+## Harness 来源与一键安装
+
+- `detectHarness` 顺序：「Harness 页填的路径」→ 登录 shell 的 PATH → 团团内置（`bundled`，从团团自己的 `node_modules` 解析 ACP 适配器，用 `process.execPath` 的 Bun 启动）→ 团团安装（`managed`）。`TUANTUAN_PREFER_MANAGED=1` 时团团安装的优先。
+- 桌面包默认不带 Claude Code / Codex 适配器（引擎各 250–400 MB）：首次使用时走 Registry 安装（`claude-acp` / `codex-acp`，npx 包，Bun 运行）。`TUANTUAN_BUNDLE_ADAPTERS=1` 打包时改为内置。登录命令按「内置 → 团团安装」两处找 Claude / Codex 可执行文件。
+- Registry 安装：schema 与 `installManaged` 的直接入口均校验 id / 版本为安全目录段（版本不得与 manifest 保留名称冲突），并确认安装路径在 Agent 目录内、关键目录不是符号链接。二进制与 npx 先安装到带随机后缀的独立 `.partial` 目录；发布前检查取消信号，成功后替换版本目录并写 manifest，失败 / 取消清理暂存。Registry 版本变了提示更新；卸载只删团团目录。需要 Node ≥ 22 的包（`engines.node` 或常用定义里 `runtime: "node"`，如 MiniMax 的 better-sqlite3）用托管 Node（nodejs.org，校验 SHASUMS256）。uv 工具直接装到最终目录（venv 写死路径）。
+- 一键安装（常用 Harness 的官方脚本 / bun / brew / npm）：`bash -c` 在登录 shell 环境里运行，`stdin` 关闭，日志去掉 ANSI 并折叠 `\r` 进度，最多保留 800 行；取消时连同子进程一起结束；15 分钟超时。完成后清掉登录 shell 环境缓存，页面重新检测。
+- 测试：`mock-cli`（本地安装脚本）与 `tests/fixtures/mock-registry.ts`（本地 CDN + npm 源，二进制 / npx / 坏条目）；`TUANTUAN_REAL_REGISTRY=1` 跑真实安装与握手。
+
+## 桌面（Electron）
+
+- 服务端不进 asar：`resources/server`（源码 + 生产依赖）+ `resources/bin/bun`。主进程选空闲端口启动子进程组，等 `/api/health` 后加载窗口。退出时除服务端原组外，还追踪其 Harness / ACP 终端 / 安装任务的独立子进程组，按 pid 与启动时间保留身份，服务端退出后继续回收已记录组，避免误杀复用的组号；4 秒强退兜底。POSIX 依赖 `ps` 发现子组，不可用时仅回收原服务组；Windows 走 `taskkill` 进程树，平台实际验收分开记录。服务端收到退出信号时关闭 host / installer，并用 `TUANTUAN_PARENT_PID` 看门狗兜底。
+- 登录 shell 环境在主进程解析一次，传给服务端，Harness 继承它（CC Switch 写的变量照常生效）。
+- macOS：`titleBarStyle: "hidden"`，红绿灯位置 `{x: 18, y: 20}`；网页侧 `html[data-desktop="darwin"]` 让侧栏顶行左侧留出红绿灯位置，搜索和「+」排在红绿灯右边；`data-fullscreen` 由主进程在进入 / 退出全屏时经 preload 设置，全屏时不再留空。

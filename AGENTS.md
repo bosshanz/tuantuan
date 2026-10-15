@@ -15,14 +15,17 @@
 
 | 路径 | 用途 | 何时同步 |
 | --- | --- | --- |
-| `docs/product.md` | 用户任务、业务规则（@ 触发、跳数上限、取消语义）、关键状态与验收条件 | 改变用户可见行为或规则时 |
+| `docs/product.md` | 用户任务、业务规则（@ 触发、跳数上限、取消语义、Harness 来源）、关键状态与验收条件 | 改变用户可见行为或规则时 |
 | `docs/architecture.md` | 模块职责、数据与状态归属、路由机制、技术取舍 | 改变模块边界、存储结构、路由或编排机制时 |
-| `README.md` | 运行方式、配置、mock 指令 | 改变启动方式、脚本或配置键时 |
+| `docs/plan-harness-acp.md` | 决定记录、里程碑状态 | 有新决定或里程碑完成时 |
+| `README.md` | 功能、运行方式、桌面版、Harness / Registry、服务商、Skills、配置、截图 | 改变启动方式、脚本、配置键或可见界面时 |
 | `config/providers.example.json`、`.env.example` | 配置契约示例（不含密钥） | 改变配置结构时 |
 
 ## 项目命令
 
 - `bun run check`：类型检查 + lint + 全部测试；提交前运行。
-- `bun run build && bun run e2e`：浏览器冒烟（需要本机 Chrome，`CHROME_PATH` 可覆盖）。
+- `bun run build && bun run e2e`：浏览器冒烟（需要本机 Chrome，`CHROME_PATH` 可覆盖；`SHOTS_DIR=docs/screenshots` 更新截图）。
+- `bun run desktop:build && xvfb-run -a bun run desktop:smoke`：桌面包冒烟（Linux）。
+- `TUANTUAN_REAL_REGISTRY=1 bun test tests/registry-real.test.ts`：从真实 ACP Registry 安装并握手（联网）。
 - 数据库结构变化只追加 `server/store.ts` 中的 `MIGRATIONS`，不改已发布的迁移。
 - 不提交密钥：API Key 只通过环境变量提供，配置文件中只写 `apiKeyEnv` 变量名。

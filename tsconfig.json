@@ -9,9 +9,10 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": false,
     "types": ["bun"]
   },
-  "include": ["server", "web/src", "tests", "scripts", "vite.config.ts"]
+  "include": ["shared", "server", "web/src", "tests", "scripts", "vite.config.ts"]
 }
