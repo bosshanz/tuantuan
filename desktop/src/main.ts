@@ -73,7 +73,7 @@ function createWindow() {
     // (html[data-desktop="darwin"]). The 3 lights (≈52×12px) are centered in the 64px rail's top cell:
     // x = (64 − 52) / 2, y = (52 − 12) / 2.
     titleBarStyle: isMac ? "hidden" : "default",
-    trafficLightPosition: isMac ? { x: 6, y: 20 } : undefined,
+    trafficLightPosition: isMac ? { x: 18, y: 20 } : undefined,
     webPreferences: {
       // (bun inlines __dirname at build time, so resolve from the app path)
       preload: join(app.getAppPath(), "dist", "preload.cjs"),

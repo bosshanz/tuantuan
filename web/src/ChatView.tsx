@@ -248,7 +248,7 @@ export function ChatView(props: {
   return (
     <div className="chat-wrap">
       <div className="chat">
-        <header className="main-head">
+        <header className="main-head chat-head">
           <button
             type="button"
             className="btn ghost icon back-btn"
@@ -258,11 +258,15 @@ export function ChatView(props: {
           >
             <ChevronLeft size={18} />
           </button>
-          <RoomIcon room={room} agents={agents} />
-          <div className="title">
+          <button
+            type="button"
+            className="title-pill"
+            title={roomSubtitle(room, agents)}
+            onClick={() => setPanel(true)}
+          >
+            <RoomIcon room={room} agents={agents} size={22} />
             <h2>{room.name}</h2>
-            <div className="sub">{roomSubtitle(room, agents)}</div>
-          </div>
+          </button>
           {!(panel && wide) && (
             <button
               type="button"
@@ -325,7 +329,7 @@ export function ChatView(props: {
                 <span>{g.messages[0]?.content}</span>
               </div>
             ) : (
-              <div key={g.messages[0]?.id} className="msg-group">
+              <div key={g.messages[0]?.id} className="msg-group" data-kind={g.kind}>
                 {g.kind === "agent" ? (
                   <LiveAvatar agent={agentById.get(g.senderId ?? "")} name={g.senderName} last={g.messages.at(-1)} />
                 ) : (
@@ -433,7 +437,7 @@ export function ChatView(props: {
                     <ChevronLeft size={16} />
                   </button>
                 )}
-                <h3>{selectedMsg ? "回复详情" : "会话信息"}</h3>
+                <h3>{selectedMsg ? "回复详情" : ""}</h3>
                 <div className="details-actions">
                   <button
                     type="button"
@@ -510,7 +514,12 @@ function MessageItem(props: {
   const t = withoutHandoffTools(m.timeline);
   const empty = !t || t.parts.length === 0;
   return (
-    <div className="msg" data-status={m.status} data-fresh={Date.now() - m.createdAt < 4000 ? "" : undefined}>
+    <div
+      className="msg"
+      data-sender={m.senderKind}
+      data-status={m.status}
+      data-fresh={Date.now() - m.createdAt < 4000 ? "" : undefined}
+    >
       {t?.handoffFrom && (
         <div className="handoff-from">
           <ArrowRightLeft size={12} />
@@ -774,7 +783,6 @@ function RoomInfo(props: {
   onDeleted: () => void;
 }) {
   const { room } = props;
-  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const replyCount = new Map<string, number>();
   for (const m of props.messages)
@@ -798,111 +806,160 @@ function RoomInfo(props: {
       setError((e as Error).message);
     }
   };
+  const [tab, setTab] = useState<"info" | "library" | "members">("members");
+  const [adding, setAdding] = useState(false);
+  const others = props.agents.filter((a) => !room.agentIds.includes(a.id));
   return (
     <>
-      <section className="d-section">
-        <h4 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          {`Agent（${props.members.length}）`}
-          <button type="button" className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
-            {editing ? "完成" : "管理"}
-          </button>
-        </h4>
-        {editing ? (
-          <PickList
-            searchPlaceholder="搜索 Agent"
-            emptyText="还没有 Agent"
-            groups={[
-              {
-                items: props.agents.map((a) => ({
-                  id: a.id,
-                  title: a.name,
-                  leading: <AgentAvatar agent={a} size={22} />,
-                  plain: true,
-                })),
-              },
-            ]}
-            selected={room.agentIds}
-            onToggle={(id) => void toggle(id)}
-          />
-        ) : (
-          <>
-            {props.members.length === 0 && <p className="muted">没有 Agent 成员。</p>}
-            {props.members.map((a) => {
-              const n = replyCount.get(a.id) ?? 0;
-              const doing = agentActivity(a.id, props.messages);
-              return (
-                <a key={a.id} className="member-row" href={`#/a/${a.id}`} title="编辑这个 Agent">
-                  <AgentAvatar agent={a} size={32} expression={doing} animate />
+      <div className="d-hero">
+        <RoomIcon room={room} agents={props.agents} size={64} />
+        <h3>{room.name}</h3>
+        <div className="d-tabs" role="tablist" aria-label="会话信息">
+          {(
+            [
+              ["info", "详情"],
+              ["library", "资料库"],
+              ["members", "成员"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              className="d-tab"
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {tab === "members" && (
+        <section className="d-section d-members">
+          {props.members.length === 0 && <p className="muted">没有 Agent 成员。</p>}
+          {props.members.map((a) => {
+            const n = replyCount.get(a.id) ?? 0;
+            const doing = agentActivity(a.id, props.messages);
+            return (
+              <div key={a.id} className="member-row">
+                <a className="member-link" href={`#/a/${a.id}`} title="编辑这个 Agent">
+                  <AgentAvatar agent={a} size={28} expression={doing} animate />
                   <span className="member-body">
                     <span className="member-name">{a.name}</span>
                     <span className="member-sub">
                       {a.harness ? props.harnessName(a.harness) : "未绑定 Harness"}
                       {room.mainAgentId === a.id && " · 主 Agent"}
+                      {n > 0 && ` · ${n} 条回复`}
                     </span>
                   </span>
-                  {n > 0 && (
-                    <span className="member-count" title="本会话回复数">
-                      {n}
-                    </span>
-                  )}
                 </a>
-              );
-            })}
-          </>
-        )}
-        {error && <div className="error-text">{error}</div>}
-      </section>
-      <section className="d-section">
-        <h4>设置</h4>
-        {props.members.length > 1 && (
-          <label className="field">
-            <span className="label">主 Agent</span>
-            <select
-              className="select"
-              aria-label="主 Agent"
-              value={room.mainAgentId ?? ""}
-              onChange={(e) => void patch({ mainAgentId: e.target.value })}
-            >
-              {props.members.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <div className="field">
-          <span className="label">项目</span>
+                {props.members.length > 1 && (
+                  <button
+                    type="button"
+                    className="btn ghost icon xs member-remove"
+                    aria-label={`移出 ${a.name}`}
+                    onClick={() => void toggle(a.id)}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          <div className="add-member">
+            <button type="button" className="member-row add-btn" onClick={() => setAdding((v) => !v)}>
+              <span className="add-icon">
+                <Plus size={15} />
+              </span>
+              <span className="member-name">添加成员</span>
+            </button>
+            {adding && (
+              <div className="add-pop">
+                <PickList
+                  searchPlaceholder="搜索 Agent"
+                  emptyText="没有可添加的 Agent"
+                  groups={[
+                    {
+                      items: others.map((a) => ({
+                        id: a.id,
+                        title: a.name,
+                        leading: <AgentAvatar agent={a} size={22} />,
+                        plain: true,
+                      })),
+                    },
+                  ]}
+                  selected={[]}
+                  onToggle={(id) => {
+                    setAdding(false);
+                    void toggle(id);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+          {error && <div className="error-text">{error}</div>}
+        </section>
+      )}
+      {tab === "library" && (
+        <section className="d-section">
+          <h4>项目</h4>
           <a className="project-link" href={props.project ? `#/p/${props.project.id}` : undefined}>
             <span>{props.project?.name ?? "—"}</span>
             <span className="muted mono">{room.cwd}</span>
           </a>
-        </div>
-      </section>
-      {props.members.map((a) =>
-        a.harness ? (
-          <SessionSection
-            key={a.id}
-            room={room}
-            agent={a}
-            view={props.sessions[a.id]}
-            solo={props.members.length === 1}
-          />
-        ) : null,
+          <p className="muted d-note">会话里的 Agent 都在这个文件夹里读写文件。</p>
+        </section>
       )}
-      <section className="d-section" style={{ marginTop: "auto" }}>
-        <button
-          type="button"
-          className="btn danger"
-          onClick={async () => {
-            if (!confirm(`删除会话「${room.name}」及其全部消息？此操作不可撤销。`)) return;
-            await api("DELETE", `/api/rooms/${room.id}`).then(props.onDeleted, (e) => setError((e as Error).message));
-          }}
-        >
-          <Trash2 size={14} />
-          删除会话
-        </button>
-      </section>
+      {tab === "info" && (
+        <>
+          {props.members.length > 1 && (
+            <section className="d-section">
+              <label className="field">
+                <span className="label">主 Agent</span>
+                <select
+                  className="select"
+                  aria-label="主 Agent"
+                  value={room.mainAgentId ?? ""}
+                  onChange={(e) => void patch({ mainAgentId: e.target.value })}
+                >
+                  {props.members.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
+          )}
+          {props.members.map((a) =>
+            a.harness ? (
+              <SessionSection
+                key={a.id}
+                room={room}
+                agent={a}
+                view={props.sessions[a.id]}
+                solo={props.members.length === 1}
+              />
+            ) : null,
+          )}
+          <section className="d-section" style={{ marginTop: "auto" }}>
+            <button
+              type="button"
+              className="btn danger"
+              onClick={async () => {
+                if (!confirm(`删除会话「${room.name}」及其全部消息？此操作不可撤销。`)) return;
+                await api("DELETE", `/api/rooms/${room.id}`).then(props.onDeleted, (e) =>
+                  setError((e as Error).message),
+                );
+              }}
+            >
+              <Trash2 size={14} />
+              删除会话
+            </button>
+          </section>
+        </>
+      )}
     </>
   );
 }
@@ -1137,7 +1194,7 @@ function Composer(props: {
               title={props.imageNote || "添加图片"}
               onClick={() => fileRef.current?.click()}
             >
-              <ImagePlus size={16} />
+              <Plus size={17} />
             </button>
           </>
         )}

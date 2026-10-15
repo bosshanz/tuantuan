@@ -1,9 +1,10 @@
 import {
   Bot,
+  ChevronLeft,
+  ChevronRight,
   Command,
   Folder,
   FolderOpen,
-  FolderPlus,
   Gauge,
   MessagesSquare,
   PlugZap,
@@ -139,183 +140,193 @@ export function App() {
   if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
     <div className={`shell ${fullPage ? "no-list" : ""}`} data-mobile={mobileView}>
-      <nav className="rail" aria-label="主导航">
-        <div className="logo" title="团团 Tuantuan">
-          <BrandMark size={32} />
+      <aside className="side" aria-label="侧栏">
+        <div className="side-top">
+          <span className="side-brand" title="团团 Tuantuan">
+            <BrandMark size={26} />
+          </span>
+          <span className="spacer" />
+          <button
+            type="button"
+            className="side-icon"
+            aria-label="搜索"
+            title="搜索（⌘K / Ctrl+K）"
+            onClick={() => setPaletteOpen(true)}
+          >
+            <Search size={17} />
+          </button>
+          <button
+            type="button"
+            className="side-icon"
+            aria-label="新建会话"
+            title={agents.length ? "新建会话" : "先创建一个 Agent"}
+            onClick={() => go(agents.length ? "c/new" : "a/new")}
+          >
+            <Plus size={18} />
+          </button>
         </div>
-        <RailButton
-          icon={<MessagesSquare size={20} />}
-          label="会话"
-          current={section === "rooms"}
-          onClick={() => go("c")}
-        />
-        <RailButton icon={<Bot size={20} />} label="Agents" current={section === "agents"} onClick={() => go("a")} />
-        <RailButton
-          icon={<PlugZap size={20} />}
-          label="Harness"
-          current={section === "harness"}
-          onClick={() => go("harness")}
-        />
-        <RailButton
-          icon={<Gauge size={20} />}
-          label="服务商"
-          current={section === "providers"}
-          onClick={() => go("providers")}
-        />
-        <div className="spacer" />
-        <button
-          type="button"
-          className="rail-btn rail-search"
-          title="快速切换（⌘K / Ctrl+K）"
-          onClick={() => setPaletteOpen(true)}
-        >
-          <Search size={18} />
-          搜索
-        </button>
-        <UserButton name={userName} onChange={setUserName} />
-        <div className="conn" title={connected ? "实时连接正常" : "实时连接已断开，正在重连…"}>
-          <span className={`dot ${connected ? "ok" : "bad"}`} />
-          <span className="sr-only">{connected ? "已连接" : "重连中"}</span>
-        </div>
-      </nav>
-
-      {section === "rooms" && (
-        <ListPane
-          title="会话"
-          action={
-            <span className="row" style={{ gap: 4 }}>
-              <button type="button" className="btn ghost icon sm" aria-label="新建项目" onClick={() => go("p/new")}>
-                <FolderPlus size={15} />
-              </button>
-              <button
-                type="button"
-                className="btn sm"
-                onClick={() => go("c/new")}
-                disabled={agents.length === 0}
-                title={agents.length ? "" : "先创建一个 Agent"}
-              >
-                <Plus size={14} />
+        <div className="side-scroll">
+          {section === "rooms" ? (
+            <>
+              {loaded && agents.length === 0 && (
+                <div className="list-empty first-run">
+                  <b>还没有 Agent</b>
+                  <span>创建一个，就能开始会话。</span>
+                  <button type="button" className="btn primary sm" onClick={() => go("a/new")}>
+                    创建 Agent
+                  </button>
+                </div>
+              )}
+              {[...rooms]
+                .filter((r) => r.projectId === "drafts" || !projects.some((p) => p.id === r.projectId))
+                .sort((x, y) => (y.last?.at ?? y.createdAt) - (x.last?.at ?? x.createdAt))
+                .map((r) => (
+                  <RoomRow key={r.id} r={r} agents={agents} current={roomId === r.id} onOpen={() => go(`c/${r.id}`)} />
+                ))}
+              <div className="side-section-head">
+                <span>项目</span>
+                <button
+                  type="button"
+                  className="side-section-add"
+                  aria-label="新建项目"
+                  title="新建项目"
+                  onClick={() => go("p/new")}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+              {projects
+                .filter((p) => p.id !== "drafts")
+                .map((p) => {
+                  const list = rooms
+                    .filter((r) => r.projectId === p.id)
+                    .sort((x, y) => (y.last?.at ?? y.createdAt) - (x.last?.at ?? x.createdAt));
+                  const active = list.some((r) => r.id === roomId) || projectPage === p.id;
+                  const open = active || !collapsed.includes(p.id);
+                  return (
+                    <div key={p.id} className="side-group" data-open={open || undefined}>
+                      <div className="side-group-head" aria-current={projectPage === p.id ? "page" : undefined}>
+                        <button
+                          type="button"
+                          className="side-group-toggle"
+                          aria-expanded={open}
+                          title={p.cwd}
+                          onClick={() => setCollapsed((c) => (open ? [...c, p.id] : c.filter((x) => x !== p.id)))}
+                        >
+                          <Folder size={15} className="side-group-icon" />
+                          <span className="side-group-name">{p.name}</span>
+                          <ChevronRight size={13} className="side-group-chev" />
+                        </button>
+                        <span className="side-group-count">{list.length || ""}</span>
+                        <span className="side-group-actions">
+                          <button
+                            type="button"
+                            className="btn ghost icon xs"
+                            aria-label={`${p.name} 设置`}
+                            onClick={() => go(`p/${p.id}`)}
+                          >
+                            <Settings2 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn ghost icon xs"
+                            aria-label={`在 ${p.name} 新建会话`}
+                            disabled={agents.length === 0}
+                            onClick={() => go(`c/new/${p.id}`)}
+                          >
+                            <Plus size={13} />
+                          </button>
+                        </span>
+                      </div>
+                      <div className="collapse">
+                        <div className="side-group-rooms">
+                          {list.length === 0 && <div className="side-group-empty">还没有会话</div>}
+                          {list.map((r) => (
+                            <RoomRow
+                              key={r.id}
+                              r={r}
+                              agents={agents}
+                              current={roomId === r.id}
+                              onOpen={() => go(`c/${r.id}`)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </>
+          ) : (
+            <>
+              <button type="button" className="side-back" onClick={() => go("c")}>
+                <ChevronLeft size={15} />
                 会话
               </button>
-            </span>
-          }
-          onSearch={() => setPaletteOpen(true)}
-        >
-          {loaded && agents.length === 0 && (
-            <div className="list-empty first-run">
-              <b>还没有 Agent</b>
-              <span>创建一个，就能开始会话。</span>
-              <button type="button" className="btn primary sm" onClick={() => go("a/new")}>
-                创建 Agent
-              </button>
-            </div>
-          )}
-          {(agents.length > 0 || rooms.length > 0 ? projects : []).map((p) => {
-            const list = rooms.filter((r) => r.projectId === p.id);
-            const open = !collapsed.includes(p.id);
-            return (
-              <div key={p.id} className="project" data-open={open || undefined}>
-                <div className="project-head" aria-current={projectPage === p.id ? "page" : undefined}>
-                  <button
-                    type="button"
-                    className="project-toggle"
-                    aria-expanded={open}
-                    onClick={() => setCollapsed((c) => (open ? [...c, p.id] : c.filter((x) => x !== p.id)))}
-                    title={p.cwd}
-                  >
-                    {open ? (
-                      <FolderOpen size={15} className="project-icon" />
-                    ) : (
-                      <Folder size={15} className="project-icon" />
-                    )}
-                    <span className="project-name">{p.name}</span>
-                    <span className="project-count">{list.length || ""}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ghost icon xs"
-                    aria-label={`${p.name} 设置`}
-                    onClick={() => go(`p/${p.id}`)}
-                  >
-                    <Settings2 size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ghost icon xs"
-                    aria-label={`在 ${p.name} 新建会话`}
-                    disabled={agents.length === 0}
-                    onClick={() => go(`c/new/${p.id}`)}
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-                <div className="collapse">
-                  <div className="project-rooms">
-                    {list.map((r) => (
-                      <button
-                        type="button"
-                        key={r.id}
-                        className="list-item room-item"
-                        aria-current={roomId === r.id ? "page" : undefined}
-                        onClick={() => go(`c/${r.id}`)}
-                      >
-                        <RoomIcon room={r} agents={agents} size={28} />
-                        <span className="li-body">
-                          <span className="li-title">{r.name}</span>
-                          <span className="li-sub">{roomSubtitle(r, agents)}</span>
+              <div className="side-section-title">设置</div>
+              <SideNav icon={<Bot size={17} />} label="Agents" current={section === "agents"} onClick={() => go("a")} />
+              {section === "agents" && (
+                <div className="side-sub">
+                  {agents.map((a) => (
+                    <button
+                      type="button"
+                      key={a.id}
+                      className="list-item"
+                      aria-current={detailId === a.id ? "page" : undefined}
+                      onClick={() => go(`a/${a.id}`)}
+                    >
+                      <AgentAvatar agent={a} size={28} />
+                      <span className="li-body">
+                        <span className="li-title">{a.name}</span>
+                        <span className="li-sub">
+                          {a.harness ? (
+                            [harnessName(a.harness), ...defaultsSummary(a.configDefaults)].join(" · ")
+                          ) : (
+                            <span className="warn-text">未绑定 Harness</span>
+                          )}
                         </span>
-                      </button>
-                    ))}
-                  </div>
+                      </span>
+                    </button>
+                  ))}
+                  <button type="button" className="side-add-project" onClick={() => go("a/new")}>
+                    <Plus size={14} />
+                    新建 Agent
+                  </button>
                 </div>
-              </div>
-            );
-          })}
-        </ListPane>
-      )}
-
-      {section === "agents" && (
-        <ListPane
-          title="Agents"
-          action={
-            <button type="button" className="btn sm" onClick={() => go("a/new")}>
-              <Plus size={14} />
-              新建
-            </button>
-          }
-          onSearch={() => setPaletteOpen(true)}
-        >
-          {loaded && agents.length === 0 && (
-            <div className="list-empty">
-              还没有 Agent。
-              <button type="button" className="btn primary sm" onClick={() => go("a/new")}>
-                创建第一个 Agent
-              </button>
-            </div>
+              )}
+              <SideNav
+                icon={<PlugZap size={17} />}
+                label="Harness"
+                current={section === "harness" || section === "setup"}
+                onClick={() => go("harness")}
+              />
+              <SideNav
+                icon={<Gauge size={17} />}
+                label="服务商与用量"
+                current={section === "providers"}
+                onClick={() => go("providers")}
+              />
+            </>
           )}
-          {agents.map((a) => (
-            <button
-              type="button"
-              key={a.id}
-              className="list-item"
-              aria-current={detailId === a.id ? "page" : undefined}
-              onClick={() => go(`a/${a.id}`)}
-            >
-              <AgentAvatar agent={a} />
-              <span className="li-body">
-                <span className="li-title">{a.name}</span>
-                <span className="li-sub">
-                  {a.harness ? (
-                    [harnessName(a.harness), ...defaultsSummary(a.configDefaults)].join(" · ")
-                  ) : (
-                    <span className="warn-text">未绑定 Harness</span>
-                  )}
-                </span>
-              </span>
-            </button>
-          ))}
-        </ListPane>
-      )}
+        </div>
+        <div className="side-foot">
+          <UserButton name={userName} onChange={setUserName} />
+          <button
+            type="button"
+            className="side-settings"
+            aria-current={section !== "rooms" ? "page" : undefined}
+            onClick={() => go(section === "rooms" ? "a" : "c")}
+          >
+            <Settings2 size={15} />
+            设置
+          </button>
+          <span
+            className={`dot ${connected ? "ok" : "bad"}`}
+            title={connected ? "实时连接正常" : "实时连接已断开，正在重连…"}
+          >
+            <span className="sr-only">{connected ? "已连接" : "重连中"}</span>
+          </span>
+        </div>
+      </aside>
 
       <main className="main">
         {loadError && (
@@ -462,16 +473,38 @@ export function App() {
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
-function RailButton(props: { icon: React.ReactNode; label: string; current: boolean; onClick: () => void }) {
+function SideNav(props: { icon: React.ReactNode; label: string; current: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
-      className="rail-btn"
+      className="side-nav"
       aria-current={props.current ? "page" : undefined}
       onClick={props.onClick}
     >
       {props.icon}
       {props.label}
+    </button>
+  );
+}
+
+/** Conversation row: big avatar, title, last message. */
+function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; onOpen: () => void }) {
+  const { r } = props;
+  const preview = r.last
+    ? `${r.last.sender && r.agentIds.length > 1 ? `${r.last.sender}：` : ""}${r.last.text}`
+    : roomSubtitle(r, props.agents);
+  return (
+    <button
+      type="button"
+      className="side-room"
+      aria-current={props.current ? "page" : undefined}
+      onClick={props.onOpen}
+    >
+      <RoomIcon room={r} agents={props.agents} size={40} />
+      <span className="li-body">
+        <span className="li-title">{r.name}</span>
+        <span className="li-sub">{preview}</span>
+      </span>
     </button>
   );
 }
@@ -561,9 +594,9 @@ function Welcome({
   ];
   return (
     <>
-      <header className="main-head">
-        <div className="title">
-          <h2>{agents.length === 0 ? "开始" : "会话"}</h2>
+      <header className="main-head chat-head">
+        <div className="title-pill static">
+          <h2>{agents.length === 0 ? "开始" : "团团"}</h2>
         </div>
       </header>
       <div className="welcome-body">

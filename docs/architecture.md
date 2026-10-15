@@ -91,4 +91,4 @@
 
 - 服务端不进 asar：`resources/server`（源码 + 生产依赖）+ `resources/bin/bun`。主进程选空闲端口启动子进程组，等 `/api/health` 后加载窗口；退出时结束整个进程组；服务端用 `TUANTUAN_PARENT_PID` 看门狗兜底。
 - 登录 shell 环境在主进程解析一次，传给服务端，Harness 继承它（CC Switch 写的变量照常生效）。
-- macOS：`titleBarStyle: "hidden"`，红绿灯位置 `{x: 6, y: 20}`；网页侧 `html[data-desktop="darwin"]` 把标题行统一为 52px，图标栏顶部留出红绿灯格；`data-fullscreen` 由主进程在进入 / 退出全屏时经 preload 设置，全屏时不再留空。
+- macOS：`titleBarStyle: "hidden"`，红绿灯位置 `{x: 18, y: 20}`；网页侧 `html[data-desktop="darwin"]` 让侧栏顶行左侧留出红绿灯位置，搜索和「+」排在红绿灯右边；`data-fullscreen` 由主进程在进入 / 退出全屏时经 preload 设置，全屏时不再留空。

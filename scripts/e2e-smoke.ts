@@ -122,10 +122,20 @@ try {
   const shot = async (name: string) => {
     if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}.png`) });
   };
+  // Sidebar: conversations by default; 设置 swaps it to Agents / Harness / 服务商与用量.
+  const nav = async (name: string) => {
+    const item = page.locator(".side-nav", { hasText: name });
+    if (!(await item.count())) await page.locator(".side-settings").click();
+    await item.first().click();
+  };
+  const toRooms = async () => {
+    if (await page.locator(".side-back").count()) await page.locator(".side-back").click();
+    await page.locator(".side-section-head").waitFor();
+  };
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`http://localhost:${server.port}/`);
-  await page.locator(".rail .dot.ok").waitFor();
+  await page.locator(".side-foot .dot.ok").waitFor();
 
   // First launch: one-screen onboarding. Pick the mock harness → it is logged out, its own login
   // method signs in → name the first agent → it is created with a conversation in 草稿, which opens.
@@ -145,7 +155,7 @@ try {
     throw new Error("onboarding agent missing");
   // Finishing is remembered server-side: #/setup now lands on Harness 管理.
   await page.goto(`http://localhost:${server.port}/#/setup`);
-  await page.locator(".rail .dot.ok").waitFor();
+  await page.locator(".side-foot .dot.ok").waitFor();
   await page.waitForFunction(() => location.hash === "#/harness");
   await page.getByRole("heading", { name: "Harness 管理" }).waitFor();
   const mockRow = page.locator(".harness-row", { hasText: "Mock（测试）" });
@@ -209,7 +219,7 @@ try {
     await fetch(`http://localhost:${server.port}/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "KeyBot", harness: "reg:mock-key" }),
+      body: JSON.stringify({ name: "KeyBot", harness: "reg:mock-key", avatarShape: "cat" }),
     })
   ).json();
   const keyRoom = await (
@@ -235,12 +245,12 @@ try {
   await keyBox.fill("再试一次");
   await keyBox.press("Enter");
   await page.getByText("收到：「再试一次」").waitFor();
-  await page.getByRole("button", { name: "Harness", exact: true }).click();
+  await nav("Harness");
   await page.getByRole("heading", { name: "Harness 管理" }).waitFor();
 
   const createAgent = async (name: string, identity: string) => {
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
-    await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
+    await nav("Agents");
+    await page.locator(".side").getByRole("button", { name: "新建 Agent" }).click();
     await page.getByLabel("名称").fill(name);
     await page.getByLabel("Harness", { exact: true }).selectOption({ label: "Mock（测试）" });
     await page.getByLabel("身份文档").fill(identity);
@@ -264,8 +274,8 @@ try {
       return new Response(stream, { headers: { "content-type": "text/event-stream" } });
     },
   });
-  await page.getByRole("button", { name: "Agents", exact: true }).click();
-  await page.locator(".pane-head").getByRole("button", { name: "新建" }).click();
+  await nav("Agents");
+  await page.locator(".side").getByRole("button", { name: "新建 Agent" }).click();
   await page.getByLabel("名称").fill("BYOK");
   await page.getByLabel("Harness", { exact: true }).selectOption({ label: "自定义 API（BYOK）" });
   await page.getByLabel("接口格式").selectOption({ label: "OpenAI Chat Completions" });
@@ -283,7 +293,7 @@ try {
 
   await shot("agent-editor");
 
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
+  await toRooms();
   // New project with an existing folder.
   await page.getByRole("button", { name: "新建项目" }).click();
   await page.getByLabel("项目名称").fill("冒烟项目");
@@ -308,7 +318,7 @@ try {
   if (!project || project.cwd !== cwd) throw new Error("new project dir mismatch");
 
   // Skills: discovered from the user's dirs + the selected project, enable one, add one from a URL.
-  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await nav("Agents");
   await page.locator(".list-item", { hasText: "Alice" }).first().click();
   const skillsCard = page.locator(".skills-card");
   await skillsCard.getByRole("button", { name: "项目" }).click();
@@ -341,8 +351,8 @@ try {
   await page.getByRole("button", { name: "保存修改" }).click();
   await page.locator(".list-item", { hasText: "Alice" }).filter({ hasText: "推理 高" }).waitFor();
 
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
-  await page.locator(".pane-head").getByRole("button", { name: "会话" }).click();
+  await toRooms();
+  await page.locator(".side-top").getByRole("button", { name: "新建会话" }).click();
   // 项目（可选）: defaults to 不选项目 (草稿); styled picker with folder icons.
   const projBtn = page.getByRole("button", { name: "项目", exact: true });
   await projBtn.filter({ hasText: "不选项目" }).waitFor();
@@ -400,7 +410,7 @@ try {
   // Single-agent conversation in 草稿
 
   // No project chosen → 草稿.
-  await page.locator(".pane-head").getByRole("button", { name: "会话" }).click();
+  await page.locator(".side-top").getByRole("button", { name: "新建会话" }).click();
   await projBtn.filter({ hasText: "不选项目" }).waitFor();
   await page.getByLabel("会话名称").fill("草稿会话");
   await pick("Bob").check();
@@ -409,6 +419,7 @@ try {
   if (app.store.listRooms().find((r) => r.name === "草稿会话")?.projectId !== "drafts")
     throw new Error("conversation without a project should go to 草稿");
   // A project's "+" preselects that project.
+  await page.locator(".side-group-head", { hasText: "冒烟项目" }).hover();
   await page.getByRole("button", { name: "在 冒烟项目 新建会话" }).click();
   await projBtn.filter({ hasText: "冒烟项目" }).waitFor();
   await page.getByLabel("会话名称").fill("与 Bob");
@@ -529,47 +540,60 @@ try {
     const out: string[] = [];
     const r = (el: Element | null) => el?.getBoundingClientRect();
     const near = (a: number, b: number, what: string) => Math.abs(a - b) > 0.5 && out.push(`${what}: ${a} vs ${b}`);
-    const heads = [".pane-head", ".main-head", ".details-head"].map((s) => [s, r(document.querySelector(s))] as const);
-    for (const [s, b] of heads) {
-      if (!b) out.push(`missing ${s}`);
+    // One 56px header line: sidebar top row, floating title pill, details header.
+    for (const sel of [".side-top", ".details-head"]) {
+      const b = r(document.querySelector(sel));
+      if (!b) out.push(`missing ${sel}`);
       else {
-        near(b.height, 56, `${s} height`);
-        near(b.top, 0, `${s} top`);
+        near(b.height, 56, `${sel} height`);
+        near(b.top, 0, `${sel} top`);
       }
     }
-    const logo = r(document.querySelector(".rail .logo"));
-    if (logo) near(logo.top + logo.height / 2, 28, "rail logo centred on header line");
+    const pill = r(document.querySelector(".title-pill"));
+    const main = r(document.querySelector(".chat-head"));
+    if (!pill || !main) out.push("missing title pill");
+    else {
+      near(pill.top + pill.height / 2, 28, "title pill centred on header line");
+      near(pill.left + pill.width / 2, main.left + main.width / 2, "title pill centred");
+    }
     const details = r(document.querySelector(".details"));
     for (const b of document.querySelectorAll(".main-head button")) {
       const x = b.getBoundingClientRect();
       if (details && x.width && x.right > details.left) out.push("chat header control overlaps the details panel");
     }
-    const left = (el: Element | null) => {
-      if (!el) return Number.NaN;
-      return el.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(el).paddingLeft);
-    };
-    const edge = r(document.querySelector(".pane-head h1"))?.left ?? Number.NaN;
-    near(r(document.querySelector(".pane-search .input"))?.left ?? Number.NaN, edge, "search box left edge");
-    near(left(document.querySelector(".project-toggle")), edge, "project label left edge");
-    // conversations are indented under their project: avatar column lines up with the project name
-    near(
-      left(document.querySelector(".room-item")),
-      r(document.querySelector(".project-name"))?.left ?? Number.NaN,
-      "conversation vs project name",
+    // Sidebar: ungrouped rows and project headers share one left edge; project rows indent one level.
+    const rows = [...document.querySelectorAll(".side-scroll > .side-room")].map((e) => e.getBoundingClientRect().left);
+    const heads = [...document.querySelectorAll(".side-group-head")].map((e) => e.getBoundingClientRect().left);
+    const kids = [...document.querySelectorAll(".side-group-rooms .side-room")].map(
+      (e) => e.getBoundingClientRect().left,
     );
-    for (const g of document.querySelectorAll(".msg-group")) {
-      const text = r(g.querySelector(".msg"))?.left ?? Number.NaN;
-      near(r(g.querySelector(".msg-head"))?.left ?? text, text, "message name vs body");
-      for (const s of [".msg-meta", ".timeline"])
-        for (const el of g.querySelectorAll(s)) near(el.getBoundingClientRect().left, text, `${s} vs body`);
+    const edge = rows[0] ?? heads[0] ?? Number.NaN;
+    for (const x of [...rows, ...heads]) near(x, edge, "sidebar row left edge");
+    for (const x of kids) near(x, edge + 14, "project conversation indent");
+    for (const c of document.querySelectorAll(".side-group-count")) {
+      const b = c.getBoundingClientRect();
+      const h = c.parentElement?.getBoundingClientRect();
+      if (b.width && h) near(h.right - b.right, 12, "project count right-aligned");
     }
-    const firstAvatar = r(document.querySelector(".msg-group .avatar"));
-    if (firstAvatar)
-      near(
-        r(document.querySelector(".composer-box"))?.left ?? Number.NaN,
-        firstAvatar.left,
-        "composer vs avatar column",
-      );
+    const left = (el: Element | null) =>
+      el ? el.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(el).paddingLeft) : Number.NaN;
+    // Agent bubbles: name label, meta and timeline line up with the text inside the bubble.
+    for (const g of document.querySelectorAll('.msg-group[data-kind="agent"]')) {
+      const text = left(g.querySelector(".msg"));
+      near(g.querySelector(".msg-head")?.getBoundingClientRect().left ?? text, text, "message name vs text");
+      for (const s of [".msg-meta", ".timeline"])
+        for (const el of g.querySelectorAll(s)) near(el.getBoundingClientRect().left, text, `${s} vs text`);
+    }
+    // Human bubbles sit on the right edge of the message column.
+    const col = r(document.querySelector(".messages"));
+    for (const m of document.querySelectorAll('.msg-group[data-kind="human"] .msg')) {
+      const b = m.getBoundingClientRect();
+      if (col && b.right > col.right) out.push("human bubble overflows message column");
+    }
+    const composer = r(document.querySelector(".composer-box"));
+    const list = r(document.querySelector(".messages-inner, .messages"));
+    if (composer && list && composer.width < list.width)
+      near(composer.left + composer.width / 2, list.left + list.width / 2, "composer centred under messages");
     const dts = [...document.querySelectorAll(".details .kv dt")].map((e) => e.getBoundingClientRect().left);
     const dds = [...document.querySelectorAll(".details .kv dd")].map((e) => e.getBoundingClientRect().left);
     if (new Set(dts).size > 1 || new Set(dds).size > 1) out.push("details label/value columns not aligned");
@@ -578,7 +602,7 @@ try {
   if (issues.length) throw new Error(`alignment: ${issues.join("; ")}`);
 
   // Agent editor: header stays on the 56px line, opaque, and scrolled content never shows through.
-  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await nav("Agents");
   await page.locator(".list-item", { hasText: "Alice" }).first().click();
   await page.getByLabel("名称").waitFor();
   await page.locator("form.page").evaluate((el) => el.scrollTo(0, 240));
@@ -587,12 +611,10 @@ try {
   const editorIssues = await page.evaluate(() => {
     const out: string[] = [];
     const head = document.querySelector(".main-head")?.getBoundingClientRect();
-    const list = document.querySelector(".pane-head")?.getBoundingClientRect();
     const page = document.querySelector("form.page")?.getBoundingClientRect();
     const bar = document.querySelector(".save-bar")?.getBoundingClientRect();
-    if (!head || !list || !page || !bar) return ["editor elements missing"];
+    if (!head || !page || !bar) return ["editor elements missing"];
     if (Math.abs(head.height - 56) > 0.5 || head.top !== 0) out.push(`editor head ${head.top}/${head.height}`);
-    if (Math.abs(head.bottom - list.bottom) > 0.5) out.push("editor head not aligned with list head");
     if (page.top < head.bottom - 0.5) out.push(`content scrolls under header (${page.top} < ${head.bottom})`);
     for (const el of document.querySelectorAll(".main-head > *, .main-head .avatar")) {
       const b = el.getBoundingClientRect();
@@ -631,11 +653,11 @@ try {
     if ((await page.locator(".msg", { hasText: body }).count()) === 0) throw new Error(`message vanished: ${text}`);
   };
   const navs = await page.evaluate(() => performance.getEntriesByType("navigation").length);
-  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await nav("Agents");
   await page.locator(".list-item", { hasText: "Bob" }).first().click();
   await page.getByRole("button", { name: /对话/ }).click();
   await live("Bob", "直播-1", /收到：「直播-1」/);
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "会话" }).click();
+  await toRooms();
   await page.locator(".li-title", { hasText: "冒烟会话" }).click();
   await live("冒烟会话", "@Bob 会话直播-2", /\[我\]: @Bob 会话直播-2/);
   await page.locator(".li-title", { hasText: "与 Bob" }).click();
@@ -676,8 +698,8 @@ try {
     chmodSync(join(gdir, "bin", "grok"), 0o755);
   }
   await page.reload();
-  await page.locator(".rail .dot.ok").waitFor();
-  await page.locator(".rail").getByRole("button", { name: "服务商" }).click();
+  await page.locator(".side-foot .dot.ok").waitFor();
+  await nav("服务商与用量");
   await page.waitForFunction(() => location.hash === "#/providers");
   const codexCard = page.getByTestId("usage-codex");
   await codexCard.getByText("剩 62%").waitFor();
@@ -754,7 +776,7 @@ try {
     }
     const dev = await browser.newPage();
     await dev.goto(`http://localhost:${vitePort}/`);
-    await dev.locator(".rail .dot.ok").waitFor({ timeout: 15000 });
+    await dev.locator(".side-foot .dot.ok").waitFor({ timeout: 15000 });
     await dev.getByText("冒烟会话").first().waitFor();
     await dev.close();
   } finally {

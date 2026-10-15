@@ -87,6 +87,47 @@ const SHAPES: Record<AvatarShape, { body: ReactNode; eyes: [number, number] }> =
     ),
     eyes: [50, 50],
   },
+  cat: {
+    body: (
+      <>
+        <path
+          d="M17 50L19 14Q20 9 25 12L46 28Z"
+          strokeWidth="6"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <path
+          d="M83 50L81 14Q80 9 75 12L54 28Z"
+          strokeWidth="6"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <ellipse cx="50" cy="58" rx="38" ry="32" />
+      </>
+    ),
+    eyes: [50, 56],
+  },
+  dog: {
+    body: (
+      <>
+        <circle cx="50" cy="54" r="34" />
+        <ellipse cx="20" cy="46" rx="12" ry="24" transform="rotate(18 20 46)" />
+        <ellipse cx="80" cy="46" rx="12" ry="24" transform="rotate(-18 80 46)" />
+        <ellipse cx="50" cy="74" rx="16" ry="12" />
+      </>
+    ),
+    eyes: [50, 52],
+  },
+  rabbit: {
+    body: (
+      <>
+        <rect x="27" y="4" width="17" height="46" rx="8.5" transform="rotate(-10 35 40)" />
+        <rect x="56" y="4" width="17" height="46" rx="8.5" transform="rotate(10 65 40)" />
+        <ellipse cx="50" cy="64" rx="34" ry="29" />
+      </>
+    ),
+    eyes: [50, 63],
+  },
 };
 
 /** Eyes (and mouth) per expression, drawn around the face midpoint (x, y). */

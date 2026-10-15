@@ -250,6 +250,8 @@ export interface Project {
   /** Working directory of every conversation in the project. */
   cwd: string;
   createdAt: number;
+  /** Sidebar preview: last message (list endpoint only). sender null = the user. */
+  last?: { sender: string | null; text: string; at: number };
 }
 
 /** A conversation inside a project. */
@@ -265,6 +267,8 @@ export interface Room {
   /** The project's directory (read-only here). */
   cwd: string;
   createdAt: number;
+  /** Sidebar preview: last message (list endpoint only). sender null = the user. */
+  last?: { sender: string | null; text: string; at: number };
 }
 
 export type MessageStatus = "streaming" | "done" | "error" | "cancelled" | "interrupted";
@@ -445,7 +449,31 @@ export class Store {
   // ---- rooms ----
   listRooms(): Room[] {
     const rooms = this.db.query("SELECT * FROM rooms ORDER BY created_at").all() as Row[];
-    return rooms.map((r) => this.toRoom(r));
+    // Last non-system message per room, for the sidebar preview / recency order.
+    const last = new Map(
+      (
+        this.db
+          .query(
+            `SELECT m.room_id, m.sender_name, m.sender_kind, m.content, m.error, m.created_at FROM messages m
+             JOIN (SELECT room_id, MAX(seq) AS seq FROM messages WHERE sender_kind != 'system' GROUP BY room_id) x
+               ON x.room_id = m.room_id AND x.seq = m.seq`,
+          )
+          .all() as Row[]
+      ).map((r) => [r.room_id as string, r]),
+    );
+    return rooms.map((r) => {
+      const room = this.toRoom(r);
+      const l = last.get(room.id);
+      if (l)
+        room.last = {
+          sender: l.sender_kind === "human" ? null : (l.sender_name as string),
+          text: String(l.content || l.error || "")
+            .replace(/\s+/g, " ")
+            .slice(0, 120),
+          at: l.created_at as number,
+        };
+      return room;
+    });
   }
 
   getRoom(id: string): Room | null {

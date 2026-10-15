@@ -16,6 +16,9 @@ export const AVATAR_SHAPES = [
   "gem",
   "burst",
   "hex",
+  "cat",
+  "dog",
+  "rabbit",
 ] as const;
 export type AvatarShape = (typeof AVATAR_SHAPES)[number];
 
@@ -33,6 +36,9 @@ export const SHAPE_LABEL: Record<AvatarShape, string> = {
   gem: "菱形",
   burst: "爆炸星",
   hex: "六边形",
+  cat: "小猫",
+  dog: "小狗",
+  rabbit: "兔子",
 };
 
 /** Vivid modern colours; the first ten are the default set. */
