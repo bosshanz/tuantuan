@@ -186,6 +186,14 @@ export const MIGRATIONS: string[] = [
    CREATE INDEX usage_log_at ON usage_log(at);`,
   // xAI: optional Management API key for the prepaid balance (separate from the inference key).
   `ALTER TABLE providers ADD COLUMN mgmt_key TEXT NOT NULL DEFAULT '';`,
+  // Usage dashboard: model, cache read/write split, reasoning tokens, cost when the harness reports it.
+  `ALTER TABLE usage_log ADD COLUMN model TEXT;
+   ALTER TABLE usage_log ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE usage_log ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE usage_log ADD COLUMN thought_tokens INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE usage_log ADD COLUMN cost REAL;
+   ALTER TABLE usage_log ADD COLUMN cost_currency TEXT;
+   UPDATE usage_log SET cache_read_tokens = cached_tokens;`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -255,6 +263,25 @@ export interface Project {
 }
 
 /** A conversation inside a project. */
+export interface UsageTally {
+  turns: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  thought: number;
+  total: number;
+  cost: number | null;
+  currency: string | null;
+}
+export interface UsageStats {
+  totals: UsageTally;
+  byAgent: ({ key: string | null } & UsageTally)[];
+  byModel: ({ key: string | null } & UsageTally)[];
+  byHarness: ({ key: string | null } & UsageTally)[];
+  daily: { day: string; input: number; output: number; cache: number; total: number }[];
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -741,17 +768,95 @@ export class Store {
     agentId: string | null;
     harness: string;
     providerId: string | null;
+    model?: string | null;
     input: number;
     output: number;
-    cached: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    /** Old callers: cache read + write combined. */
+    cached?: number;
+    thought?: number;
     total: number;
+    cost?: number | null;
+    currency?: string | null;
+    at?: number;
   }) {
+    const read = u.cacheRead ?? u.cached ?? 0;
+    const write = u.cacheWrite ?? 0;
     this.db
       .query(
-        `INSERT INTO usage_log (at, room_id, agent_id, harness, provider_id, input_tokens, output_tokens, cached_tokens, total_tokens)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO usage_log (at, room_id, agent_id, harness, provider_id, model, input_tokens, output_tokens,
+           cached_tokens, cache_read_tokens, cache_write_tokens, thought_tokens, total_tokens, cost, cost_currency)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
-      .run(Date.now(), u.roomId, u.agentId, u.harness, u.providerId, u.input, u.output, u.cached, u.total);
+      .run(
+        u.at ?? Date.now(),
+        u.roomId,
+        u.agentId,
+        u.harness,
+        u.providerId,
+        u.model ?? null,
+        u.input,
+        u.output,
+        read + write,
+        read,
+        write,
+        u.thought ?? 0,
+        u.total,
+        u.cost ?? null,
+        u.currency ?? null,
+      );
+  }
+
+  usageHarnesses(): string[] {
+    return (this.db.query("SELECT DISTINCT harness FROM usage_log").all() as Row[]).map((r) => r.harness as string);
+  }
+
+  /** Dashboard aggregation since `since` (ms). `tzOffsetMin` buckets days in the viewer's zone. */
+  usageStats(since: number, tzOffsetMin = 0): UsageStats {
+    const sums = `COUNT(*) AS turns, SUM(input_tokens) AS input, SUM(output_tokens) AS output,
+      SUM(cache_read_tokens) AS cache_read, SUM(cache_write_tokens) AS cache_write, SUM(thought_tokens) AS thought,
+      SUM(total_tokens) AS total, SUM(cost) AS cost, MAX(cost_currency) AS currency, COUNT(cost) AS costed`;
+    const tally = (r: Row): UsageTally => ({
+      turns: Number(r.turns ?? 0),
+      input: Number(r.input ?? 0),
+      output: Number(r.output ?? 0),
+      cacheRead: Number(r.cache_read ?? 0),
+      cacheWrite: Number(r.cache_write ?? 0),
+      thought: Number(r.thought ?? 0),
+      total: Number(r.total ?? 0),
+      cost: Number(r.costed ?? 0) > 0 ? Number(r.cost ?? 0) : null,
+      currency: (r.currency as string | null) ?? null,
+    });
+    const group = (col: string) =>
+      (
+        this.db
+          .query(`SELECT ${col} AS k, ${sums} FROM usage_log WHERE at >= ? GROUP BY ${col} ORDER BY total DESC`)
+          .all(since) as Row[]
+      ).map((r) => ({ key: (r.k as string | null) ?? null, ...tally(r) }));
+    const shift = tzOffsetMin * 60_000;
+    const daily = (
+      this.db
+        .query(
+          `SELECT ((at + ?) / 86400000) AS d, SUM(input_tokens) AS input, SUM(output_tokens) AS output,
+             SUM(cache_read_tokens) + SUM(cache_write_tokens) AS cache, SUM(total_tokens) AS total
+           FROM usage_log WHERE at >= ? GROUP BY d ORDER BY d`,
+        )
+        .all(shift, since) as Row[]
+    ).map((r) => ({
+      day: new Date(Number(r.d) * 86_400_000).toISOString().slice(0, 10),
+      input: Number(r.input ?? 0),
+      output: Number(r.output ?? 0),
+      cache: Number(r.cache ?? 0),
+      total: Number(r.total ?? 0),
+    }));
+    return {
+      totals: tally(this.db.query(`SELECT ${sums} FROM usage_log WHERE at >= ?`).get(since) as Row),
+      byAgent: group("agent_id"),
+      byModel: group("model"),
+      byHarness: group("harness"),
+      daily,
+    };
   }
 
   usageSince(

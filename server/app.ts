@@ -778,6 +778,12 @@ export function createApp(deps: AppDeps) {
         const since = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
         return json({ harnesses: await usageOverview(), tuantuan: store.usageSince(since) });
       }
+      // Token dashboard: only what harnesses reported per turn; `reporting` = harnesses that ever did.
+      if (id === "stats" && method === "GET") {
+        const since = Number(url.searchParams.get("since") ?? 0) || 0;
+        const tz = Number(url.searchParams.get("tz") ?? 0) || 0;
+        return json({ ...store.usageStats(since, tz), reporting: store.usageHarnesses() });
+      }
       if ((id === "claude-code" || id === "codex") && sub === "live" && method === "POST") {
         await harnessLiveLimits(id);
         return json({ harnesses: await usageOverview() });

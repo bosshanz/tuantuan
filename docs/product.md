@@ -55,7 +55,7 @@
 
 ## 验收条件
 
-- `TUANTUAN_MOCK_HARNESS=1` 下不装任何 CLI 可完成（`bun run e2e` 覆盖）：首次引导选 mock → 一键登录 → 起名后进入草稿会话 → 之后不再出现 → Harness 页一键安装（本地脚本 + mock Registry 的二进制包）与握手 → 建 Agent（Skills 列表）→ 建项目 → 多 Agent 会话：不 @ 时主 Agent 回复、@ 时被 @ 者回复、handoff → 单 Agent 会话中看到斜杠命令、计划、思考、权限 + diff、终端、配置项、用量、取消 → 服务商与用量。
+- `TUANTUAN_MOCK_HARNESS=1` 下不装任何 CLI 可完成（`bun run e2e` 覆盖）：首次引导选 mock → 一键登录 → 起名后进入草稿会话 → 之后不再出现 → Harness 页一键安装（本地脚本 + mock Registry 的二进制包）与握手 → 建 Agent（Skills 列表）→ 建项目 → 多 Agent 会话：不 @ 时主 Agent 回复、@ 时被 @ 者回复、handoff → 单 Agent 会话中看到斜杠命令、计划、思考、权限 + diff、终端、配置项、用量、取消 → 服务商与用量（Token 统计：mock 每轮报告 usage、模型和累计费用，按 Agent / 模型分组；没报告的 Harness 显示「无数据」）。
 - 桌面版（Linux AppImage，`bun run desktop:smoke`）：随包 Bun 服务端启动、preload 桥、Codex 从 Registry 安装后握手、Skills 从用户目录发现并在 Agent 页显示、mock 对话、退出时进程全部结束。
 - 真实 Harness 在登录后能完成对话；未登录时显示明确的登录提示。
 - 工作目录外的读写被拒绝。

@@ -197,7 +197,20 @@ Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的
 
 **从 CC Switch 导入**：点按钮后才去只读打开 `~/.cc-switch/cc-switch.db`（旧版为 `config.json`），列出 Claude / Codex 的配置，勾选后导入，不会修改 CC Switch。
 
-**用量**（同一页上方，每个 Harness 一张卡片，可单独刷新）：
+**Token 统计**（页面最上方）：每轮回复结束时，团团记下 Harness 自己报告的 Token（ACP `PromptResponse.usage`，Grok 的 `_meta.usage`），连同 Agent、模型（`_meta.quota.model_usage` / `_claude/model` / 当前模型选项）、Harness、服务商、会话和时间存进本地数据库；费用只在 Harness 通过 `usage_update` 报告累计费用时按轮差分记录。从不估算：没报告的 Harness 显示「无数据」。可按 Agent / 模型 / Harness 分组（排名 + 输入 / 输出 / 缓存条形），看每日趋势，范围选今天 / 7 天 / 30 天 / 全部。
+
+| Harness | Token | 模型 | 费用 |
+| --- | --- | --- | --- |
+| Claude Code | ✓ 每轮（含缓存读写） | ✓ | ✓ 累计费用差分 |
+| Codex | ✓ 每轮（含缓存、思考） | ✓ | — |
+| OpenCode | ✓ 每轮（含缓存、思考） | 当前模型选项 | ✓ 累计费用差分 |
+| Grok Build | ✓ `_meta.usage` | 当前模型选项 | — |
+| Pi | 无数据（只报告上下文占用） | — | — |
+| MiniMax Code、自定义 API、Registry 其他 Agent | 报告了就记，否则无数据 | | |
+
+![Token 统计](docs/screenshots/usage-dashboard.png)
+
+**额度**（同一页，每个 Harness 一张卡片，可单独刷新）：
 
 | 来源 | 内容 | 说明 |
 | --- | --- | --- |

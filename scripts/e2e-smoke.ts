@@ -701,6 +701,20 @@ try {
   await page.locator(".side-foot .dot.ok").waitFor();
   await nav("服务商与用量");
   await page.waitForFunction(() => location.hash === "#/providers");
+  // Token 统计: what the mock harness reported per turn (usage + _meta.quota model + cumulative cost).
+  const ud = page.locator(".ud");
+  await ud
+    .getByTestId("usage-row-Bob")
+    .getByText(/^\d+(\.\d)?k$/)
+    .waitFor();
+  await ud.getByTestId("usage-row-架构师").getByText("无数据").waitFor(); // Claude Code: no turns recorded here
+  await ud.getByRole("button", { name: "全部" }).click();
+  await ud.getByRole("tab", { name: "模型" }).click();
+  await ud.getByTestId("usage-row-mock-smart").waitFor();
+  await ud.getByTestId("usage-row-mock-fast").waitFor();
+  await ud.getByRole("tab", { name: "Agent" }).click();
+  await page.waitForTimeout(700);
+  await shot("usage-dashboard");
   const codexCard = page.getByTestId("usage-codex");
   await codexCard.getByText("剩 62%").waitFor();
   await codexCard.getByText("剩 19%").waitFor();

@@ -74,6 +74,10 @@ interface SessionSlot {
   /** Updates the harness replayed on session/load (history Tuantuan may not have); shown read-only. */
   replay: acp.SessionUpdate[];
   identityPending: boolean;
+  /** Session-cumulative cost known before any turn: 0 for a fresh session, null when resumed. */
+  costBase: number | null;
+  /** Model named by the harness in `_meta` (Claude Code's `_claude/model` on usage_update). */
+  usageModel: string | null;
 }
 
 /**
@@ -237,6 +241,10 @@ export class HarnessHost {
         break;
       case "usage_update":
         v.usage = { used: u.used, size: u.size, cost: u.cost ?? null };
+        {
+          const m = (u._meta as Record<string, unknown> | null | undefined)?.["_claude/model"];
+          if (typeof m === "string" && m) slot.usageModel = m;
+        }
         break;
       case "session_info_update":
         if (u.title !== undefined) v.title = u.title ?? null;
@@ -312,6 +320,8 @@ export class HarnessHost {
       replaying: false,
       replay: [],
       identityPending: false,
+      costBase: null,
+      usageModel: null,
     };
     const mcpServers = this.mcpServers(agent);
     const own = this.mcp?.serverEntry({ roomId: room.id, agentId: agent.id }, caps.mcpCapabilities);
@@ -373,6 +383,7 @@ export class HarnessHost {
       this.store.setAcpSession(room.id, agent.id, proc.spec.id, created.sessionId);
       res = created;
       fresh = true;
+      slot.costBase = 0;
     }
     view.configOptions = res?.configOptions ?? [];
     view.modes = res?.modes ?? null;
@@ -471,6 +482,8 @@ export class HarnessHost {
     });
     abandoned.catch(() => {});
     const stderrBefore = proc.acp.stderr;
+    const costBefore = slot.view.usage?.cost?.amount ?? slot.costBase;
+    slot.usageModel = null;
     try {
       const res = await Promise.race([
         abandoned,
@@ -481,19 +494,28 @@ export class HarnessHost {
           );
         }),
       ]);
-      // ACP `usage` (Claude Code, Codex); Grok Build reports the same counters under `_meta.usage`.
+      // Token usage exactly as the harness reports it (never estimated): ACP `usage` (Claude Code,
+      // Codex, OpenCode); Grok Build reports the same counters under `_meta.usage`.
       const u = res.usage ?? grokMetaUsage(res._meta);
-      if (u)
+      if (u) {
+        const after = slot.view.usage?.cost;
+        const cost = after && costBefore !== null && after.amount >= costBefore ? after.amount - costBefore : null;
         this.store.logUsage({
           roomId: room.id,
           agentId: agent.id,
           harness: agent.harness,
           providerId: agent.providerId,
+          model: usageModel(res._meta) ?? slot.usageModel ?? modelOption(slot.view.configOptions)?.currentValue ?? null,
           input: u.inputTokens ?? 0,
           output: u.outputTokens ?? 0,
-          cached: (u.cachedReadTokens ?? 0) + (u.cachedWriteTokens ?? 0),
+          cacheRead: u.cachedReadTokens ?? 0,
+          cacheWrite: u.cachedWriteTokens ?? 0,
+          thought: u.thoughtTokens ?? 0,
           total: u.totalTokens ?? 0,
+          cost,
+          currency: cost !== null ? (after?.currency ?? null) : null,
         });
+      }
       return { stopReason: res.stopReason };
     } catch (e) {
       if (signal.aborted) throw signal.reason ?? e;
@@ -532,6 +554,8 @@ export class HarnessHost {
         replaying: false,
         replay: [],
         identityPending: false,
+        costBase: null,
+        usageModel: null,
       };
       this.slots.set(key, slot);
       this.events.session(room.id, agent.id, { ...slot.view });
@@ -762,6 +786,19 @@ export function selectValues(o: acp.SessionConfigOption): string[] {
     else if (g.value !== undefined) out.push(g.value);
   }
   return out;
+}
+
+/** Model of a turn from `_meta.quota.model_usage` (Claude Code, Codex): the row with the most tokens. */
+export function usageModel(meta: unknown): string | null {
+  const rows = (meta as { quota?: { model_usage?: unknown } } | null | undefined)?.quota?.model_usage;
+  if (!Array.isArray(rows)) return null;
+  let best: { model: string; n: number } | null = null;
+  for (const r of rows as { model?: unknown; token_count?: { totalTokens?: unknown } }[]) {
+    if (typeof r?.model !== "string" || !r.model) continue;
+    const n = typeof r.token_count?.totalTokens === "number" ? r.token_count.totalTokens : 0;
+    if (!best || n > best.n) best = { model: r.model, n };
+  }
+  return best?.model ?? null;
 }
 
 function grokMetaUsage(meta: unknown): acp.Usage | null {

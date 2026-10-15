@@ -24,6 +24,8 @@ interface Sess {
   mcpServers: acp.McpServer[];
   mcp: Map<string, McpClient>;
   identity: string;
+  /** Session-cumulative cost, reported on usage_update like Claude Code / OpenCode. */
+  cost?: number;
   history: acp.SessionUpdate[];
   config: Record<string, string>;
   abort: AbortController | null;
@@ -429,14 +431,32 @@ acp
         await chunk(part);
         await sleep(15, abort.signal);
       }
+      // Deterministic per-turn usage (so dashboards / e2e have data): bigger model, more tokens.
+      const model = s.config.model ?? "mock-fast";
+      const k = model === "mock-smart" ? 3 : 1;
+      const turnUsage = {
+        inputTokens: 800 * k + text.length * 4,
+        outputTokens: 150 * k + reply.length * 2,
+        cachedReadTokens: 400 * k,
+        cachedWriteTokens: 100 * k,
+        thoughtTokens: 50 * k,
+        totalTokens: 0,
+      };
+      turnUsage.totalTokens =
+        turnUsage.inputTokens + turnUsage.outputTokens + turnUsage.cachedReadTokens + turnUsage.cachedWriteTokens;
+      s.cost = Math.round(((s.cost ?? 0) + 0.0012 * k) * 1e6) / 1e6;
       await send({
         sessionUpdate: "usage_update",
         used: 1200 + s.history.length * 10,
         size: 200_000,
-        cost: { amount: 0.0012, currency: "USD" },
+        cost: { amount: s.cost, currency: "USD" },
       });
       await send({ sessionUpdate: "session_info_update", title: s.title });
-      return { stopReason: "end_turn" as const, usage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 } };
+      return {
+        stopReason: "end_turn" as const,
+        usage: turnUsage,
+        _meta: { quota: { token_count: turnUsage, model_usage: [{ model, token_count: turnUsage }] } },
+      };
     } catch (e) {
       if (abort.signal.aborted) return { stopReason: "cancelled" as const };
       throw e;

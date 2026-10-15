@@ -126,3 +126,44 @@ describe("Store", () => {
     }
   });
 });
+
+describe("usage log", () => {
+  test("stats group by agent / model / harness, keep unreported cost null, bucket days in the viewer's zone", () => {
+    const s = new Store(":memory:");
+    const base = { roomId: null, providerId: null, input: 10, output: 5, total: 15 };
+    const day = Date.UTC(2026, 9, 14, 20, 0); // 04:00 on the 15th in UTC+8
+    s.logUsage({
+      ...base,
+      agentId: "a",
+      harness: "claude-code",
+      model: "opus",
+      cacheRead: 3,
+      cacheWrite: 2,
+      cost: 0.5,
+      currency: "USD",
+      at: day,
+    });
+    s.logUsage({ ...base, agentId: "a", harness: "claude-code", model: "sonnet", at: day + 1000 });
+    s.logUsage({ ...base, agentId: "b", harness: "codex", model: null, thought: 7, at: day + 2000 });
+    const st = s.usageStats(0, 480);
+    expect(st.totals).toMatchObject({
+      turns: 3,
+      input: 30,
+      output: 15,
+      cacheRead: 3,
+      cacheWrite: 2,
+      thought: 7,
+      total: 45,
+      cost: 0.5,
+    });
+    expect(st.byAgent.map((x) => [x.key, x.turns])).toEqual([
+      ["a", 2],
+      ["b", 1],
+    ]);
+    expect(st.byHarness.find((x) => x.key === "codex")?.cost).toBeNull();
+    expect(st.byModel.map((x) => x.key).sort()).toEqual([null, "opus", "sonnet"].sort());
+    expect(st.daily).toEqual([{ day: "2026-10-15", input: 30, output: 15, cache: 5, total: 45 }]);
+    expect(s.usageStats(0, 0).daily[0]?.day).toBe("2026-10-14");
+    expect(s.usageHarnesses().sort()).toEqual(["claude-code", "codex"]);
+  });
+});

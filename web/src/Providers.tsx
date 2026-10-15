@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Balance, ProviderPreset, ProviderTest } from "../../server/providers";
 import type { HarnessUsage, LimitWindow, TokenTotals } from "../../server/usage";
 import { type Agent, api, type Meta } from "./api";
+import { UsageDashboard } from "./UsageDashboard";
 
 export interface ProviderItem {
   id: string;
@@ -133,9 +134,11 @@ export function ProvidersPage(props: { meta: Meta; agents: Agent[]; onAgentsChan
         <div className="page-inner">
           {error && <div className="form-error">{error}</div>}
 
+          <UsageDashboard meta={props.meta} agents={props.agents} />
+
           <section className="card">
             <div className="card-head">
-              <h3>用量</h3>
+              <h3>额度</h3>
               <p>只读本机记录和 Harness 自己的查询结果，不读钥匙串。</p>
             </div>
             <div className="card-body usage-grid">

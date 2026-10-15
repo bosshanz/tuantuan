@@ -79,10 +79,57 @@ test("usage API: per-turn ACP usage is logged; opencode honestly not available, 
     harnesses: { harness: string; notes: string[]; limits: unknown[] }[];
     tuantuan: { harness: string; turns: number; total: number }[];
   }>("GET", "/api/usage");
-  expect(u.data.tuantuan).toContainEqual(expect.objectContaining({ harness: "mock", turns: 1, total: 1200 }));
+  expect(u.data.tuantuan).toContainEqual(expect.objectContaining({ harness: "mock", turns: 1, total: 1494 }));
   expect(u.data.harnesses.find((x) => x.harness === "opencode")?.notes).toEqual(["没有公开的用量 / 额度来源"]);
   expect(u.data.harnesses.find((x) => x.harness === "grok")?.notes).toContain(
     "账号额度只在 Grok 界面的 /usage 里显示，ACP 没有提供",
   );
   expect(u.data.harnesses.map((x) => x.harness)).toEqual(["claude-code", "codex", "grok", "opencode"]);
+});
+
+test("usage stats: per-turn tokens with model, cache split and cost delta; grouped and daily", async () => {
+  const a = await api<Agent>("POST", "/api/agents", agentInput("S"));
+  const room = await api<Room>("POST", "/api/rooms", { name: "s", agentIds: [a.data.id] });
+  for (const t of ["hi", "hi"]) {
+    await api<Message>("POST", `/api/rooms/${room.data.id}/messages`, { senderName: "Andy", content: t });
+    await app.orchestrator.idle(room.data.id);
+  }
+  type T = {
+    key: string | null;
+    turns: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    thought: number;
+    total: number;
+    cost: number | null;
+  };
+  const s = await api<{
+    totals: T;
+    byAgent: T[];
+    byModel: T[];
+    byHarness: T[];
+    daily: { day: string; total: number }[];
+    reporting: string[];
+  }>("GET", "/api/usage/stats?since=0&tz=480");
+  const mine = s.data.byAgent.find((x) => x.key === a.data.id);
+  // mock-fast: input 800 + 4/char, output 150 + 2/char of the reply, cache 400 read / 100 write, 50 thought
+  expect(mine).toMatchObject({
+    turns: 2,
+    input: 1616,
+    output: 372,
+    cacheRead: 800,
+    cacheWrite: 200,
+    thought: 100,
+    total: 2988,
+  });
+  // cost: the session-cumulative usage_update cost, differenced per turn
+  expect(mine?.cost).toBeCloseTo(0.0024, 6);
+  expect(s.data.byModel.find((x) => x.key === "mock-fast")?.turns).toBeGreaterThanOrEqual(2);
+  expect(s.data.byHarness.map((x) => x.key)).toContain("mock");
+  expect(s.data.reporting).toEqual(["mock"]);
+  expect(s.data.daily.at(-1)?.total).toBe(s.data.totals.total);
+  const none = await api<{ totals: T }>("GET", `/api/usage/stats?since=${Date.now() + 60_000}`);
+  expect(none.data.totals.turns).toBe(0);
 });
