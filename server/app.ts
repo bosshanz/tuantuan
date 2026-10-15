@@ -25,6 +25,7 @@ import {
 import { ENV_NAME, harnessSecretEnv, openTerminal, publicHarnessEnv, setHarnessEnv } from "./harness-secrets";
 import { HarnessHost, withProviderMeta } from "./host";
 import { Installer } from "./installer";
+import * as library from "./library";
 import { installManaged, readManifest, setManagedRoot, uninstallManaged } from "./managed";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
@@ -908,12 +909,44 @@ export function createApp(deps: AppDeps) {
       return host.answer(id, optionId) ? json({ ok: true }) : json({ error: "授权请求已失效" }, 404);
     }
 
+    // 「Skills 与插件」 library: read-only discovery + managed imports (update / delete).
+    if (resource === "library") {
+      const projects = store.listProjects().filter((p) => p.id !== "drafts" && p.cwd);
+      if (!id && method === "GET") return json(library.listLibrary(dataDir, projects));
+      if (!id && method === "POST") {
+        const b = z.object({ url: z.string().min(1).max(2048) }).parse(await body());
+        try {
+          return json(await library.importPackage(dataDir, b.url), 201);
+        } catch (e) {
+          throw new ValidationError((e as Error).message);
+        }
+      }
+      if (id && sub === "update" && method === "POST") {
+        try {
+          return json(await library.updatePackage(dataDir, id));
+        } catch (e) {
+          throw new ValidationError((e as Error).message);
+        }
+      }
+      if (id && !sub && method === "DELETE") {
+        try {
+          library.deletePackage(dataDir, id);
+        } catch (e) {
+          throw new ValidationError((e as Error).message, 404);
+        }
+        return json({ ok: true });
+      }
+    }
+
     // Skills on this machine for an agent that is not saved yet (new-agent form).
     if (resource === "skills" && !id && method === "GET") {
       const pid = url.searchParams.get("projectId");
       const project = pid ? store.getProject(pid) : null;
       const harness = url.searchParams.get("harness") ?? "";
-      return json({ items: skills.discoverSkills(dataDir, null, harness, project?.cwd ?? null) });
+      return json({
+        items: skills.discoverSkills(dataDir, null, harness, project?.cwd ?? null),
+        plugins: library.pluginsForAgent(dataDir, null, harness, store.listProjects()),
+      });
     }
     if (resource === "agents") {
       if (!id && method === "GET") return json(store.listAgents());
@@ -926,14 +959,25 @@ export function createApp(deps: AppDeps) {
         if (!agent) throw new ValidationError("Agent 不存在", 404);
         const pid = url.searchParams.get("projectId");
         const project = pid ? store.getProject(pid) : null;
-        return json({ items: skills.discoverSkills(dataDir, id, agent.harness, project?.cwd ?? null) });
+        return json({
+          items: skills.discoverSkills(dataDir, id, agent.harness, project?.cwd ?? null),
+          plugins: library.pluginsForAgent(dataDir, id, agent.harness, store.listProjects()),
+        });
       }
       if (id && sub === "skills" && method === "POST") {
         const agent = store.getAgent(id);
         if (!agent) throw new ValidationError("Agent 不存在", 404);
         const b = z
           .object({
-            action: z.enum(["import", "enable", "disable", "preview-url", "import-url"]),
+            action: z.enum([
+              "import",
+              "enable",
+              "disable",
+              "preview-url",
+              "import-url",
+              "enable-plugin",
+              "disable-plugin",
+            ]),
             path: z.string().optional(),
             key: z.string().optional(),
             url: z.string().max(2048).optional(),
@@ -958,6 +1002,14 @@ export function createApp(deps: AppDeps) {
           return json({ added: await skills.importSkillUrl(dataDir, id, b.url, b.paths) });
         }
         if (!b.key) throw new ValidationError("缺少 skill");
+        if (b.action === "enable-plugin" || b.action === "disable-plugin") {
+          try {
+            library.setPluginLinked(dataDir, id, b.key, b.action === "enable-plugin");
+          } catch (e) {
+            throw new ValidationError((e as Error).message);
+          }
+          return json({ ok: true });
+        }
         const on = b.action === "enable";
         const imported = skills.listAgentSkills(dataDir, id).find((x) => resolve(x.dir) === resolve(b.key as string));
         if (imported) skills.setSkillEnabled(dataDir, id, imported.name, on);

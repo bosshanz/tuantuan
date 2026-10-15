@@ -11,6 +11,7 @@ import {
   Lock,
   MessageCircle,
   Plug,
+  Search,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -152,7 +153,11 @@ export function AgentEditor(props: {
         : await api<Agent>("POST", "/api/agents", body);
       if (!agent)
         for (const key of pendingSkills)
-          await api("POST", `/api/agents/${saved.id}/skills`, { action: "enable", key }).catch(() => {});
+          await api(
+            "POST",
+            `/api/agents/${saved.id}/skills`,
+            key.startsWith("plugin:") ? { action: "enable-plugin", key: key.slice(7) } : { action: "enable", key },
+          ).catch(() => {});
       setJustSaved(true);
       props.onSaved(saved);
     } catch (err) {
@@ -663,6 +668,44 @@ function SkillText({ sk }: { sk: SkillItem }) {
   );
 }
 
+interface PluginItem {
+  key: string;
+  name: string;
+  description: string;
+  label: string;
+  counts?: Record<string, number>;
+  support: { level: "yes" | "partial" | "no"; missing: string[] };
+  enabled: boolean;
+}
+const PART_LABEL: Record<string, string> = {
+  skills: "Skill",
+  commands: "命令",
+  agents: "子代理",
+  mcp: "MCP",
+  hooks: "Hook",
+};
+export function partsText(c?: Record<string, number>): string {
+  if (!c) return "";
+  return Object.entries(c)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${n} ${PART_LABEL[k] ?? k}`)
+    .join(" · ");
+}
+function SupportBadge({ s, harnessName }: { s: PluginItem["support"]; harnessName: string }) {
+  if (s.level === "yes")
+    return (
+      <span className="badge ok-badge" title={`${harnessName} 全部可用`}>
+        可用
+      </span>
+    );
+  const miss = s.missing.map((m) => PART_LABEL[m] ?? m).join("、");
+  return (
+    <span className={`badge ${s.level === "no" ? "no-badge" : "warn-badge"}`} title={`${harnessName} 不支持：${miss}`}>
+      {s.level === "no" ? "不支持" : `部分 · 无${miss}`}
+    </span>
+  );
+}
+
 /** agentId null = new agent: lists what is on this machine; choices are applied after the first save. */
 function SkillsCard({
   agentId,
@@ -677,6 +720,8 @@ function SkillsCard({
 }) {
   const harnessName = HARNESS_NAMES[harness] ?? "Harness";
   const [items, setItems] = useState<SkillItem[] | null>(null);
+  const [plugins, setPlugins] = useState<PluginItem[]>([]);
+  const [q, setQ] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -696,8 +741,12 @@ function SkillsCard({
   useEffect(() => {
     let cancelled = false;
     const q = projectId ? `${listUrl.includes("?") ? "&" : "?"}projectId=${encodeURIComponent(projectId)}` : "";
-    void api<{ items: SkillItem[] }>("GET", `${listUrl}${q}`).then(
-      (r) => !cancelled && setItems(r.items),
+    void api<{ items: SkillItem[]; plugins?: PluginItem[] }>("GET", `${listUrl}${q}`).then(
+      (r) => {
+        if (cancelled) return;
+        setItems(r.items);
+        setPlugins(r.plugins ?? []);
+      },
       (e) => !cancelled && setErr((e as Error).message),
     );
     return () => {
@@ -721,6 +770,27 @@ function SkillsCard({
       refresh();
     });
   };
+  const togglePlugin = (pl: PluginItem) => {
+    const key = `plugin:${pl.key}`;
+    if (!agentId) {
+      const next = new Set(pending);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      onPending?.(next);
+      return;
+    }
+    setPlugins((l) => l.map((x) => (x.key === pl.key ? { ...x, enabled: !x.enabled } : x)));
+    void post({ action: pl.enabled ? "disable-plugin" : "enable-plugin", key: pl.key }).then(refresh, (e) => {
+      setErr((e as Error).message);
+      refresh();
+    });
+  };
+  const match = (x: { name: string; description: string; label?: string }) => {
+    const t = q.trim().toLowerCase();
+    return !t || `${x.name} ${x.description} ${x.label ?? ""}`.toLowerCase().includes(t);
+  };
+  const shownItems = items?.filter(match) ?? null;
+  const shownPlugins = plugins.filter(match);
   const doPreview = async () => {
     setBusy("preview");
     setErr(null);
@@ -758,7 +828,7 @@ function SkillsCard({
   return (
     <section className="card skills-card">
       <div className="card-head row" style={{ alignItems: "center" }}>
-        <h3 className="grow">Skills</h3>
+        <h3 className="grow">Skills 与插件</h3>
         <ProjectPicker
           className="sm"
           projects={projects}
@@ -768,15 +838,59 @@ function SkillsCard({
         />
       </div>
       <div className="card-body skills-body">
+        <div className="skill-search">
+          <Search size={14} aria-hidden />
+          <input
+            className="input"
+            aria-label="搜索 Skills 与插件"
+            placeholder="搜索"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        {shownPlugins.length > 0 && (
+          <div className="skill-group">
+            <span className="skill-group-title">插件</span>
+            <ul className="skill-list" aria-label="插件列表">
+              {shownPlugins.map((pl) => (
+                <li key={pl.key}>
+                  <label className="skill-row" title={pl.key} data-off={pl.support.level === "no" || undefined}>
+                    <input
+                      type="checkbox"
+                      checked={agentId ? pl.enabled : !!pending?.has(`plugin:${pl.key}`)}
+                      disabled={pl.support.level === "no"}
+                      onChange={() => togglePlugin(pl)}
+                      aria-label={pl.name}
+                    />
+                    <span className="skill-text">
+                      <span className="skill-name">{pl.name}</span>
+                      <span className="skill-desc">
+                        {[pl.description, partsText(pl.counts)].filter(Boolean).join(" · ")}
+                      </span>
+                    </span>
+                    <SupportBadge s={pl.support} harnessName={harnessName} />
+                    <span className="badge skill-src">{pl.label}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <ul className="skill-list" aria-label="Skill 列表">
-          {items === null && <li className="skill-empty muted">…</li>}
-          {items?.length === 0 && <li className="skill-empty muted">没有找到 Skill</li>}
-          {items &&
-            items.length > 0 &&
+          {shownItems === null && (
+            <li className="skill-empty muted">
+              <Loader2 size={14} className="spin" /> 正在查找…
+            </li>
+          )}
+          {shownItems?.length === 0 && shownPlugins.length === 0 && (
+            <li className="skill-empty muted">{q ? "没有匹配的结果" : "没有找到 Skill"}</li>
+          )}
+          {shownItems &&
+            shownItems.length > 0 &&
             (
               [
-                ["自动加载", items.filter((x) => x.native)],
-                ["可选", items.filter((x) => !x.native)],
+                ["自动加载", shownItems.filter((x) => x.native)],
+                ["可选", shownItems.filter((x) => !x.native)],
               ] as const
             ).map(
               ([title, list]) =>

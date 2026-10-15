@@ -36,6 +36,39 @@ putSkill(join(fakeHome, ".claude", "skills"), "code-review", "审查改动并指
 putSkill(join(fakeHome, ".agents", "skills"), "pdf-tools", "读取、拆分和合并 PDF");
 putSkill(join(fakeHome, ".codex", "skills"), "release-notes", "根据提交生成发布说明");
 putSkill(join(cwd, ".agents", "skills"), "deploy", "部署到预发环境");
+// A Claude plugin installed under ~/.claude/plugins and a plugin repo to import into the library.
+const putPlugin = (root: string, name: string) => {
+  mkdirSync(join(root, ".claude-plugin"), { recursive: true });
+  writeFileSync(
+    join(root, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name, version: "1.0.0", description: `${name} 插件` }),
+  );
+  putSkill(join(root, "skills"), `${name}-check`, "检查发布前的清单");
+  mkdirSync(join(root, "commands"), { recursive: true });
+  writeFileSync(join(root, "commands", "ship.md"), "---\ndescription: 发布\n---\n");
+  mkdirSync(join(root, "hooks"), { recursive: true });
+  writeFileSync(join(root, "hooks", "hooks.json"), JSON.stringify({ hooks: { Stop: [] } }));
+  writeFileSync(join(root, ".mcp.json"), JSON.stringify({ mcpServers: { notes: { command: "notes-mcp" } } }));
+};
+putPlugin(join(fakeHome, ".claude", "plugins", "marketplaces", "acme", "plugins", "release-kit"), "release-kit");
+mkdirSync(join(fakeHome, ".claude", "agents"), { recursive: true });
+writeFileSync(join(fakeHome, ".claude", "agents", "tester.md"), "---\nname: tester\ndescription: 写测试\n---\n");
+const pluginRepo = mkdtempSync(join(tmpdir(), "tuantuan-plugin-repo-"));
+putPlugin(pluginRepo, "doc-kit");
+for (const a of [
+  ["init", "-q"],
+  ["add", "."],
+  ["commit", "-qm", "init"],
+])
+  Bun.spawnSync(["git", "-C", pluginRepo, ...a], {
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "e2e",
+      GIT_AUTHOR_EMAIL: "e@e",
+      GIT_COMMITTER_NAME: "e2e",
+      GIT_COMMITTER_EMAIL: "e@e",
+    },
+  });
 const skillSrv = Bun.serve({
   port: 0,
   fetch: () => new Response("---\nname: changelog\ndescription: 维护 CHANGELOG.md\n---\n\nKeep a changelog.\n"),
@@ -342,6 +375,17 @@ try {
   if (!linked.includes("pdf-tools")) throw new Error("skill link not saved");
   await page.waitForTimeout(250);
   await shot("skills");
+  // Plugins in the Agent's checklist: searchable, with this harness's support.
+  await skillsCard.getByLabel("搜索 Skills 与插件").fill("release");
+  const kit = skillsCard.getByRole("list", { name: "插件列表" }).locator(".skill-row", { hasText: "release-kit" });
+  await kit.locator(".badge", { hasText: /部分/ }).waitFor(); // mock harness: no commands / hooks
+  await kit.getByLabel("release-kit", { exact: true }).check();
+  await page.waitForTimeout(300);
+  await shot("agent-library");
+  await skillsCard.getByLabel("搜索 Skills 与插件").fill("");
+  if (!readFileSync(join(dirname(dbPath), "agents", aliceId, "plugins-linked.json"), "utf8").includes("release-kit"))
+    throw new Error("plugin choice not saved");
+
   // Agent defaults read from the harness's own options.
   await page.getByRole("button", { name: "默认推理" }).click();
   await page.getByRole("option", { name: /^高/ }).click();
@@ -429,6 +473,17 @@ try {
   await page.locator(".model-trigger").waitFor(); // composer model picker
   await page.locator(".model-trigger").click();
   await page.getByRole("option", { name: "Mock Smart" }).waitFor();
+  // Vendor logos by model id; unknown (mock-*) ids get the neutral mark.
+  for (const [name, brand] of [
+    ["Claude Sonnet 4.5", "anthropic"],
+    ["GPT-5.5", "openai"],
+    ["Gemini 2.5 Pro", "google"],
+    ["GLM-4.6", "zhipu"],
+    ["Kimi K2", "moonshot"],
+    ["Mock Smart", "generic"],
+  ])
+    await page.getByRole("option", { name }).locator(`.brand-${brand}`).waitFor();
+  await page.waitForTimeout(350);
   await shot("model-picker");
   await page.getByRole("option", { name: "Mock Smart" }).click();
   await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
@@ -768,6 +823,31 @@ try {
   await shot("agent-provider");
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // 「Skills 与插件」: discovered read-only + imported (update / delete), per-harness support.
+  await nav("Skills 与插件");
+  const libItem = (n: string) => page.getByTestId(`lib-${n}`);
+  await libItem("release-kit").getByText("Claude 插件").waitFor();
+  await libItem("release-kit")
+    .getByText(/1 Skill · 1 命令 · 1 MCP · 1 Hook/)
+    .waitFor();
+  await libItem("release-kit").locator('.lib-chip[data-level="yes"]', { hasText: "Claude" }).waitFor();
+  await libItem("release-kit").locator('.lib-chip[data-level="partial"]', { hasText: "Codex" }).waitFor();
+  await libItem("tester").getByText("Claude 子代理").waitFor();
+  await libItem("code-review").getByText("~/.claude").waitFor();
+  await page.getByLabel("导入链接").fill(`file://${pluginRepo}`);
+  await page.getByRole("button", { name: "导入", exact: true }).click();
+  await libItem("doc-kit").getByText("已导入").waitFor();
+  await page.locator(".lib-pkg", { hasText: "doc-kit" }).getByRole("button", { name: "更新" }).click();
+  await page.locator(".lib-pkg", { hasText: "doc-kit" }).waitFor();
+  await page.waitForTimeout(400);
+  await shot("library");
+  await page.getByRole("tab", { name: /插件/ }).click();
+  await libItem("code-review").waitFor({ state: "detached" });
+  await page.getByRole("tab", { name: /全部/ }).click();
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "删除 doc-kit" }).click();
+  await libItem("doc-kit").waitFor({ state: "detached" });
+
   // Settings pages never scroll sideways and the sidebar never covers them (packaged mac window ≈1024px).
   for (const width of [1440, 1024]) {
     await page.setViewportSize({ width, height: 800 });
@@ -776,6 +856,7 @@ try {
       ["Agent 编辑", `#/a/${ccAgent.id}`],
       ["Harness", "#/harness"],
       ["服务商与用量", "#/providers"],
+      ["Skills 与插件", "#/library"],
     ] as const) {
       await page.goto(`http://localhost:${server.port}/${hash}`);
       await page.locator(".main .main-head").first().waitFor();

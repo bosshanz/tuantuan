@@ -67,6 +67,21 @@ function configOptions(s: Sess): acp.SessionConfigOption[] {
         { value: "mock-stuck", name: "Mock Stuck" },
         // The harness rejects switching to this one.
         { value: "mock-broken", name: "Mock Broken" },
+        // Real-looking ids from each vendor (the mock answers them all) so the logos can be checked.
+        ...[
+          ["claude-sonnet-4-5", "Claude Sonnet 4.5"],
+          ["gpt-5.5", "GPT-5.5"],
+          ["gemini-2.5-pro", "Gemini 2.5 Pro"],
+          ["grok-code-fast-1", "Grok Code Fast"],
+          ["glm-4.6", "GLM-4.6"],
+          ["moonshotai/kimi-k2", "Kimi K2"],
+          ["qwen3-coder-plus", "Qwen3 Coder"],
+          ["deepseek-chat", "DeepSeek V3"],
+          ["MiniMax-M2", "MiniMax M2"],
+          ["doubao-seed-1.6", "豆包 Seed 1.6"],
+          ["mistralai/devstral-medium", "Devstral Medium"],
+          ["meta-llama/llama-4-maverick", "Llama 4 Maverick"],
+        ].map(([value, name]) => ({ value: value as string, name: name as string })),
       ],
     },
     {

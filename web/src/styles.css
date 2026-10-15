@@ -1472,3 +1472,43 @@ fieldset.segmented { padding: 2px; min-inline-size: 0; }
 .main-head:not(.chat-head) > .title h2 { font-size: 14.5px; line-height: 1; }
 .main-head:not(.chat-head) > .title .sub { display: none; }
 .harness-name { flex-wrap: wrap; min-width: 0; }
+
+/* ================= Skills 与插件 ================= */
+.lib-import { display: flex; gap: 8px; min-width: 0; }
+.lib-import .input { min-width: 0; }
+.lib-pkgs { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; }
+.lib-pkg { display: flex; align-items: center; gap: 10px; min-height: 44px; border-top: 1px solid var(--border); min-width: 0; }
+.lib-pkg-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lib-pkg-text b { font-size: 13.5px; font-weight: 600; }
+.lib-pkg-text small { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.lib-head { flex-wrap: wrap; gap: 10px; align-items: center; }
+.lib-count { margin-left: 4px; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.skill-search { position: relative; display: flex; align-items: center; min-width: 0; }
+.skill-search svg { position: absolute; left: 10px; color: var(--text-3); pointer-events: none; }
+.skill-search .input { padding-left: 30px; width: 100%; }
+.lib-search { flex: 1; max-width: 260px; min-width: 140px; }
+.lib-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px 0; font-size: 13px; }
+.lib-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.lib-item { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); min-width: 0; animation: ud-in 0.24s var(--ease) both; animation-delay: calc(var(--i) * 20ms); }
+.lib-item:first-child { border-top: none; }
+.lib-icon { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-2); color: var(--text-2); }
+.lib-icon[data-kind="plugin"] { background: color-mix(in srgb, #9a5bea 14%, transparent); color: #7c3aed; }
+.lib-icon[data-kind="skill"] { background: color-mix(in srgb, #3d7bfa 14%, transparent); color: #2563eb; }
+.lib-icon[data-kind="command"] { background: color-mix(in srgb, #13a594 14%, transparent); color: #0f766e; }
+.lib-icon[data-kind="agent"] { background: color-mix(in srgb, #f5a30f 16%, transparent); color: #b45309; }
+.lib-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.lib-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.lib-title b { font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.lib-ver { font-size: 12px; }
+.lib-src { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-desc { font-size: 12.5px; color: var(--text-2); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.lib-support { display: flex; flex-wrap: wrap; gap: 4px; }
+.lib-chip { font-size: 11px; line-height: 18px; padding: 0 7px; border-radius: 9px; background: var(--surface-2); color: var(--text-3); white-space: nowrap; }
+.lib-chip[data-level="yes"] { color: #15803d; background: color-mix(in srgb, #2bb06a 12%, transparent); }
+.lib-chip[data-level="partial"] { color: #b26a00; background: color-mix(in srgb, #f5a524 16%, transparent); }
+.lib-chip[data-level="no"] { opacity: 0.7; }
+.ok-badge { color: #15803d; background: color-mix(in srgb, #2bb06a 14%, transparent); }
+.no-badge { color: var(--text-3); }
+.skill-row[data-off] { opacity: 0.55; cursor: default; }
+.skills-body .skill-search { margin-bottom: 2px; }
+.main-head:not(.chat-head) > .title .editor-title { flex: none; min-width: 0; max-width: 300px; }

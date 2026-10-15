@@ -2,6 +2,7 @@ import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Agent, Meta } from "./api";
 import { api } from "./api";
+import { harnessBrand } from "./brands";
 import { BrandLogo, brandFor } from "./ModelPicker";
 import { AgentAvatar } from "./ui";
 
@@ -138,7 +139,7 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
           id: r.key ?? "none",
           icon: (
             <span className="ud-logo">
-              <BrandLogo brand={brandFor("", r.key ?? "")} size={15} />
+              <BrandLogo brand={harnessBrand(r.key ?? "")} size={15} />
             </span>
           ),
           name: harnessName(r.key),
@@ -151,7 +152,7 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
             id: h,
             icon: (
               <span className="ud-logo">
-                <BrandLogo brand={brandFor("", h)} size={15} />
+                <BrandLogo brand={harnessBrand(h)} size={15} />
               </span>
             ),
             name: harnessName(h),

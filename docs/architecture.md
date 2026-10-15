@@ -22,6 +22,8 @@
 | `server/skills.ts` | Skills：解析 SKILL.md；自动发现（用户级 / 插件 / 项目）、勾选链接；导入（目录 / git / GitHub / SKILL.md 链接，先预览再选）；按 Harness 链接到会话目录的原生位置（不覆盖）；BYOK 的 `load_skill` |
 | `server/providers.ts` | 服务商：预设、Key 打码、按 Harness 注入（Claude Code 用进程 env，Codex 用 ACP `providers/set` + `CODEX_CONFIG` 里的 model，BYOK 直接用）、测速、公开余额接口、只读导入 CC Switch |
 | `usage_log` 表 | 每轮 Token（Harness 报告的 usage、模型、缓存读 / 写、思考、费用差分）；`GET /api/usage/stats?since=&tz=` 按 Agent / 模型 / Harness 汇总并按天分桶，`reporting` 列出报告过数据的 Harness |
+| `server/library.ts` | 「Skills 与插件」：只读扫描 ~/.claude / ~/.agents / ~/.codex / 项目目录，解析 Claude 插件（plugin.json），导入到 `<data>/library`（更新 / 删除），算各 Harness 支持；按 Agent 勾选的插件在建会话时变成 Claude `_meta.claudeCode.options.plugins` 或 Skill 链接 + stdio MCP |
+| `web/src/brands.ts` | 模型 id → 厂商（含 `openrouter/…`、`anthropic/…` 前缀），未知一律中性图标；Logo 来自 @lobehub/icons（MIT） |
 | `server/usage.ts` | 用量：读 `~/.claude/projects` / `~/.codex/sessions` 的 JSONL（只读），解析 Claude Code `/usage` 与 codex `/status` 的回复 |
 | `server/dirpicker.ts` | 选择文件夹：系统对话框（osascript / zenity / kdialog，可由桌面壳替换）+ 应用内浏览器的目录列表与常用位置 |
 | `server/host.ts` | `HarnessHost`：按「Agent + 会话工作目录」复用进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；权限请求挂起直到用户回答 |

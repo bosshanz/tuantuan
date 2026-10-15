@@ -207,8 +207,18 @@ export interface MaterializeResult {
 }
 
 /** Link the agent's enabled skills into the harness's native project dir in the room folder. */
-export function materializeSkills(dataDir: string, agentId: string, harness: string, cwd: string): MaterializeResult {
-  const skills = [...listAgentSkills(dataDir, agentId).filter((s) => s.enabled), ...listLinkedSkills(dataDir, agentId)];
+export function materializeSkills(
+  dataDir: string,
+  agentId: string,
+  harness: string,
+  cwd: string,
+  pluginSkills: { name: string; description: string; dir: string }[] = [],
+): MaterializeResult {
+  const skills = [
+    ...listAgentSkills(dataDir, agentId).filter((s) => s.enabled),
+    ...listLinkedSkills(dataDir, agentId),
+    ...pluginSkills.map((p) => ({ ...p, source: "import" as const, enabled: true })),
+  ];
   const roomSkills = listRoomSkills(cwd);
   const env: Record<string, string> = {};
 
@@ -239,8 +249,19 @@ export function materializeSkills(dataDir: string, agentId: string, harness: str
 }
 
 /** Body of a skill for BYOK load_skill. */
-export function loadSkillBody(dataDir: string, agentId: string, cwd: string, name: string): string {
-  const all = [...listAgentSkills(dataDir, agentId), ...listLinkedSkills(dataDir, agentId), ...listRoomSkills(cwd)];
+export function loadSkillBody(
+  dataDir: string,
+  agentId: string,
+  cwd: string,
+  name: string,
+  extra: { name: string; dir: string }[] = [],
+): string {
+  const all = [
+    ...listAgentSkills(dataDir, agentId),
+    ...listLinkedSkills(dataDir, agentId),
+    ...listRoomSkills(cwd),
+    ...extra,
+  ];
   const s = all.find((x) => x.name === name);
   if (!s) throw new Error(`未知 skill：${name}`);
   const md = existsSync(join(s.dir, "SKILL.md")) ? join(s.dir, "SKILL.md") : s.dir;
@@ -253,7 +274,7 @@ export function loadSkillBody(dataDir: string, agentId: string, cwd: string, nam
 // agent can be given access to without copying. Enabling links the skill dir into the project's
 // discovery dir at materialize time, same as imported ones (never over an existing name).
 
-export type SkillOrigin = "imported" | "user-agents" | "user-claude" | "user-codex" | "plugin" | "project";
+export type SkillOrigin = "imported" | "library" | "user-agents" | "user-claude" | "user-codex" | "plugin" | "project";
 
 export interface DiscoveredSkill {
   /** Stable id: the skill directory's absolute path. */
@@ -410,6 +431,11 @@ export function discoverSkills(
         enabled: s.enabled,
       });
     }
+  // 「Skills 与插件」 managed imports (<data>/library/<pkg>/…/SKILL.md), outside any plugin.
+  for (const dir of librarySkillDirs(dataDir)) {
+    const parsed = parseSkillMd(readFileSync(join(dir, "SKILL.md"), "utf8"));
+    if (parsed) push({ dir, name: parsed.name, description: parsed.description }, "library", "已导入");
+  }
   for (const s of skillDirs(join(home, ".agents", "skills"))) push(s, "user-agents", "~/.agents");
   for (const s of skillDirs(join(home, ".claude", "skills"))) push(s, "user-claude", "~/.claude");
   for (const s of skillDirs(join(home, ".codex", "skills"))) push(s, "user-codex", "~/.codex");
@@ -419,6 +445,38 @@ export function discoverSkills(
       for (const s of skillDirs(join(projectDir, rel, "skills"))) push(s, "project", `项目 ${rel}`);
   }
   return out;
+}
+
+function librarySkillDirs(dataDir: string): string[] {
+  const lib = join(dataDir, "library");
+  const out: string[] = [];
+  const walk = (d: string, depth: number) => {
+    if (depth > 6) return;
+    if (depth > 0 && existsSync(join(d, "SKILL.md"))) out.push(d);
+    let names: string[] = [];
+    try {
+      names = readdirSync(d);
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      if (n === ".git" || n === "node_modules") continue;
+      try {
+        if (statSync(join(d, n)).isDirectory()) walk(join(d, n), depth + 1);
+      } catch {
+        // skip
+      }
+    }
+  };
+  if (existsSync(lib)) for (const pkg of readdirSync(lib)) walk(join(lib, pkg), 1);
+  // Skills that belong to an imported plugin come with the plugin (checked as a whole).
+  return out.filter((d) => {
+    for (let p = dirname(d); p.startsWith(lib) && p !== lib; p = dirname(p)) {
+      const sk = join(p, "skills");
+      if (existsSync(join(p, ".claude-plugin", "plugin.json")) && d.startsWith(`${sk}/`)) return false;
+    }
+    return true;
+  });
 }
 
 /** Turn a discovered (non-imported) skill on or off for this agent. */
@@ -506,7 +564,11 @@ function findSkillMds(root: string, depth = 0, out: string[] = []): string[] {
 }
 
 /** Fetch `url` into the cache and list the skills found there. */
-export async function previewSkillUrl(dataDir: string, url: string): Promise<{ root: string; skills: RemoteSkill[] }> {
+export async function previewSkillUrl(
+  dataDir: string,
+  url: string,
+  opts: { allowEmpty?: boolean } = {},
+): Promise<{ root: string; scope: string; skills: RemoteSkill[] }> {
   const u = url.trim();
   if (!/^(https?:\/\/|git@|ssh:\/\/|file:\/\/)/.test(u)) throw new Error("请输入 GitHub / git / SKILL.md 链接");
   const root = cacheDirFor(dataDir, u);
@@ -548,8 +610,8 @@ export async function previewSkillUrl(dataDir: string, url: string): Promise<{ r
     if (parsed)
       skills.push({ path: dir.slice(root.length + 1) || ".", name: parsed.name, description: parsed.description });
   }
-  if (!skills.length) throw new Error("没找到 SKILL.md");
-  return { root, skills };
+  if (!skills.length && !opts.allowEmpty) throw new Error("没找到 SKILL.md");
+  return { root, scope, skills };
 }
 
 /** Copy the chosen skills (by path from preview) into the agent's store. Re-fetches if the cache is gone. */

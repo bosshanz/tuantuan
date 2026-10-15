@@ -1,4 +1,5 @@
 import {
+  Blocks,
   Bot,
   ChevronLeft,
   ChevronRight,
@@ -22,6 +23,7 @@ import { BrandMark } from "./BrandMark";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
 import { defaultsSummary } from "./config";
+import { LibraryPage } from "./Library";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
 import { Onboarding } from "./Onboarding";
@@ -108,7 +110,9 @@ export function App() {
           ? "harness"
           : route[0] === "providers"
             ? "providers"
-            : "rooms";
+            : route[0] === "library"
+              ? "library"
+              : "rooms";
   // 新手引导 opens by itself on first launch only; once finished or skipped it is gone for good.
   const onboarded = meta?.onboarded;
   const finishing = useRef(false);
@@ -133,7 +137,7 @@ export function App() {
   }, []);
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
-  const fullPage = section === "setup" || section === "harness" || section === "providers";
+  const fullPage = section === "setup" || section === "harness" || section === "providers" || section === "library";
   const mobileView = fullPage || detailId ? "main" : "list";
   const harnessName = (id: string) => meta?.harnesses.find((h) => h.id === id)?.name ?? id;
 
@@ -300,6 +304,12 @@ export function App() {
                 onClick={() => go("harness")}
               />
               <SideNav
+                icon={<Blocks size={17} />}
+                label="Skills 与插件"
+                current={section === "library"}
+                onClick={() => go("library")}
+              />
+              <SideNav
                 icon={<Gauge size={17} />}
                 label="服务商与用量"
                 current={section === "providers"}
@@ -408,6 +418,7 @@ export function App() {
           />
         )}
         {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
+        {section === "library" && meta && <LibraryPage meta={meta} />}
         {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
         {section === "agents" && !detailId && loaded && (
           <div className="empty">

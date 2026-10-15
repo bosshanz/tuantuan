@@ -183,6 +183,25 @@ Harness 通过 ACP `configOptions`（及旧的 `modes`）提供的设置，显�
 
 **卡住与停止**：`session/resume` / `load` 超过 45 秒会改开新会话；切换设置超过 20 秒算失败，Harness 拒绝时会直接显示它返回的原因。点「停止」后，如果 Harness 4 秒内没有结束这一轮，团团会自己结束。回复 15 秒还没有任何输出时，会显示等了多久。
 
+## Skills 与插件
+
+设置里的「Skills 与插件」是团团统一的库：
+
+- **本机（只读）**：`~/.claude`（skills、commands、agents、plugins 里的市场 / 已安装插件）、`~/.agents/skills`、`~/.codex`（skills、prompts）、每个项目的 `.claude` / `.agents`。显示来源和格式，团团从不写这些目录。
+- **导入**：粘贴 GitHub / git / SKILL.md 链接，复制到团团自己的目录（`<data>/library`），可更新、删除。
+- **插件**：Claude 插件格式（`.claude-plugin/plugin.json`，含 skills、commands、agents、MCP、hooks），显示各部分数量和每个 Harness 的支持情况。
+- **按 Agent 勾选**：Agent 编辑页「Skills 与插件」里搜索、勾选；新会话只加载勾选的：Claude Code 通过 `_meta.claudeCode.options.plugins` 加载整个插件（只对这个会话生效）；其他 Harness 拿到插件里的 Skill（链接到会话目录的 skills 目录，不覆盖同名）和 stdio MCP 服务器（ACP `mcpServers`）。
+
+| | Skill | 命令 | 子代理 | MCP | Hook |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Codex、OpenCode、Grok、Pi、MiniMax | ✓ | ✕ | ✕ | ✓ 仅 stdio | ✕ |
+| 自定义 API | ✓（load_skill） | ✕ | ✕ | ✕ | ✕ |
+
+Codex 的 `~/.codex/prompts` 只有 Codex 自己会读。
+
+![Skills 与插件](docs/screenshots/library.png)
+
 ## 服务商与用量
 
 左侧「服务商」页保存可复用的 API 服务商（名称、图标、Claude Code 地址、OpenAI 兼容地址、Key、主模型 / 快速模型、接口格式）。预设：Anthropic、OpenAI、xAI Grok、DeepSeek、Kimi、智谱 GLM、通义千问、MiniMax、硅基流动、OpenRouter、自定义。每个服务商可以「测速」（带 Key 请求 `/models`，显示延迟）、查「余额」（只有公开接口的才有），并用「切换 Agent」一键改用它。

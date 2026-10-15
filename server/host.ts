@@ -12,6 +12,7 @@ const CONFIG_TIMEOUT_MS = 20_000;
 import { CUSTOM_HARNESS, type Item, runTurn } from "./custom";
 import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./harness";
 import { harnessProcessEnv } from "./harness-env";
+import { pluginOverlay } from "./library";
 import { loadSkillBody, materializeSkills } from "./skills";
 import type { Agent, Room, Store } from "./store";
 import { ValidationError } from "./store";
@@ -144,7 +145,13 @@ export class HarnessHost {
     const status = await detectHarness(spec, overrides[spec.id] ?? null);
     if (!status.command) throw new ValidationError(`${spec.name} 未安装：${status.error}。在「Harness」页安装`);
     const base = await loginShellEnv();
-    const mat = materializeSkills(this.dataDir, agent.id, agent.harness, cwd);
+    const mat = materializeSkills(
+      this.dataDir,
+      agent.id,
+      agent.harness,
+      cwd,
+      pluginOverlay(this.dataDir, agent.id, agent.harness).skills,
+    );
     // Keep the user's CC Switch / Codex config: inherit ANTHROPIC_* / OPENAI_*, never isolate
     // CLAUDE_CONFIG_DIR or CODEX_HOME; only merge developer_instructions into CODEX_CONFIG.
     const env = harnessProcessEnv(base, mat.env, agent.env, spec, identity);
@@ -295,7 +302,8 @@ export class HarnessHost {
     if (cached?.view.sessionId && proc.sessions.get(cached.view.sessionId) === cached) return { proc, slot: cached };
 
     const caps = init.agentCapabilities ?? {};
-    const mat = materializeSkills(this.dataDir, agent.id, agent.harness, cwd);
+    const plugins = pluginOverlay(this.dataDir, agent.id, agent.harness);
+    const mat = materializeSkills(this.dataDir, agent.id, agent.harness, cwd, plugins.skills);
     const view: SessionView = {
       sessionId: null,
       harness: proc.spec.id,
@@ -323,11 +331,14 @@ export class HarnessHost {
       costBase: null,
       usageModel: null,
     };
-    const mcpServers = this.mcpServers(agent);
+    const mcpServers = [...this.mcpServers(agent), ...plugins.mcp];
     const own = this.mcp?.serverEntry({ roomId: room.id, agentId: agent.id }, caps.mcpCapabilities);
     if (own) mcpServers.push(own);
     const preferLoad = this.wantLoad.delete(slotKey);
-    const meta = withProviderMeta(identityMeta(proc.spec, identity), agent, this.store);
+    const meta = withClaudePlugins(
+      withProviderMeta(identityMeta(proc.spec, identity), agent, this.store),
+      plugins.claudePlugins,
+    );
     const saved = this.store.getAcpSession(room.id, agent.id);
     let res: { configOptions?: acp.SessionConfigOption[] | null; modes?: acp.SessionModeState | null } | null = null;
     if (saved && saved.harness === proc.spec.id && (view.capabilities.resume || view.capabilities.loadSession)) {
@@ -531,7 +542,13 @@ export class HarnessHost {
     const key = `${room.id}|${agent.id}`;
     let slot = this.slots.get(key);
     if (!slot) {
-      const mat = materializeSkills(this.dataDir, agent.id, CUSTOM_HARNESS, this.cwdFor(room));
+      const mat = materializeSkills(
+        this.dataDir,
+        agent.id,
+        CUSTOM_HARNESS,
+        this.cwdFor(room),
+        pluginOverlay(this.dataDir, agent.id, CUSTOM_HARNESS).skills,
+      );
       slot = {
         roomId: room.id,
         agentId: agent.id,
@@ -604,7 +621,13 @@ export class HarnessHost {
       .filter((b): b is acp.ContentBlock & { type: "text" } => b.type === "text")
       .map((b) => b.text)
       .join("\n");
-    const mat = materializeSkills(this.dataDir, agent.id, CUSTOM_HARNESS, this.cwdFor(room));
+    const mat = materializeSkills(
+      this.dataDir,
+      agent.id,
+      CUSTOM_HARNESS,
+      this.cwdFor(room),
+      pluginOverlay(this.dataDir, agent.id, CUSTOM_HARNESS).skills,
+    );
     const skillTools = mat.skills.length
       ? [
           {
@@ -629,7 +652,13 @@ export class HarnessHost {
       tools,
       callTool: async (name, args) => {
         if (name === "load_skill")
-          return loadSkillBody(this.dataDir, agent.id, this.cwdFor(room), String(args.name ?? ""));
+          return loadSkillBody(
+            this.dataDir,
+            agent.id,
+            this.cwdFor(room),
+            String(args.name ?? ""),
+            pluginOverlay(this.dataDir, agent.id, CUSTOM_HARNESS).skills,
+          );
         if (!this.mcp?.provider) throw new Error("工具不可用");
         return this.mcp.provider.call({ roomId: room.id, agentId: agent.id }, name, args);
       },
@@ -728,6 +757,16 @@ export function withProviderMeta(
   const prov = store.getProvider(agent.providerId);
   if (!prov || !providerSupports(prov, "claude-code")) return meta;
   return { ...meta, claudeCode: { options: { settings: claudeSettingsOverride(prov) } } };
+}
+
+/** Checked library plugins for Claude Code: session-only `plugins` option, merged with other options. */
+export function withClaudePlugins(
+  meta: Record<string, unknown> | undefined,
+  plugins: { type: "local"; path: string }[],
+): Record<string, unknown> | undefined {
+  if (!plugins.length) return meta;
+  const cc = (meta?.claudeCode ?? {}) as { options?: Record<string, unknown> };
+  return { ...meta, claudeCode: { ...cc, options: { ...cc.options, plugins } } };
 }
 
 function identityMeta(spec: HarnessSpec, identity: string): Record<string, unknown> | undefined {
