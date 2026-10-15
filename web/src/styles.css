@@ -1674,11 +1674,15 @@ html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region:
 .notify-row .grow { flex: 1; display: grid; gap: 2px; min-width: 0; }
 .notify-row .muted { font-size: 12px; }
 .notify-ico { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--surface-2); color: var(--text-2); flex: none; }
-.tg { appearance: none; flex: none; width: 36px; height: 20px; border-radius: 10px; background: var(--border-strong, #ccc); position: relative; cursor: pointer; transition: background-color 150ms var(--ease-out); margin: 0; }
-.tg::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.2); transition: transform 150ms var(--ease-out); }
-.tg:checked { background: var(--text); }
+.tg { appearance: none; flex: none; width: 36px; height: 20px; border-radius: 10px; background: color-mix(in srgb, var(--text) 22%, var(--surface)); box-shadow: inset 0 0 0 1px var(--border-strong); position: relative; cursor: pointer; transition: background-color 150ms var(--ease-out); margin: 0; }
+.tg::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #f7f7f8; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25); transition: transform 150ms var(--ease-out), background-color 150ms var(--ease-out); }
+.tg:checked { background: color-mix(in srgb, var(--accent) 90%, #000); }
 .tg:checked::after { transform: translateX(16px); }
-.tg:disabled { cursor: not-allowed; }
+.tg:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 28%, var(--surface)); }
+.tg:checked:hover:not(:disabled) { background: var(--accent); }
+.tg[type="checkbox"]:focus-visible { border-radius: 10px; box-shadow: var(--focus); }
+.tg:disabled { background: color-mix(in srgb, var(--text) 14%, var(--surface)); cursor: not-allowed; }
+.tg:disabled::after { background: color-mix(in srgb, var(--text) 45%, var(--surface)); box-shadow: none; }
 @media (prefers-reduced-motion: reduce) { .busy-dot { animation: none; } .tg, .tg::after { transition: none; } }
 /* Message list: soft fade under the floating title pill and above the composer, only when there is more to see */
 .messages-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
