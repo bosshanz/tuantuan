@@ -11,7 +11,6 @@ import {
   Loader2,
   PanelRight,
   Plus,
-  Square,
   Trash2,
   Users,
   X,
@@ -1195,29 +1194,34 @@ function Composer(props: {
           <span className="grow" />
         )}
         {props.modelPicker}
-        {props.running && !props.value.trim() && props.images.length === 0 ? (
-          <button
-            type="button"
-            className="send-btn stop"
-            onClick={props.onStop}
-            aria-label="停止"
-            title={`停止${props.replyingName ? ` · ${props.replyingName} 正在回复` : ""}${props.queued ? ` · ${props.queued} 条排队中` : ""}`}
-          >
-            <span className="stop-ring" aria-hidden />
-            <Square size={11} fill="currentColor" strokeWidth={0} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="send-btn"
-            onClick={props.onSubmit}
-            disabled={!props.value.trim() && props.images.length === 0}
-            aria-label="发送"
-            title={props.queued ? `发送 · ${props.queued} 条排队中` : "发送"}
-          >
-            <ArrowUp size={17} />
-          </button>
-        )}
+        {(() => {
+          const stop = !!props.running && !props.value.trim() && props.images.length === 0;
+          const label = stop ? "停止" : "发送";
+          return (
+            <button
+              type="button"
+              className="send-btn"
+              data-mode={stop ? "stop" : "send"}
+              onClick={stop ? props.onStop : props.onSubmit}
+              disabled={!stop && !props.value.trim() && props.images.length === 0}
+              aria-label={label}
+              title={
+                stop
+                  ? `停止${props.replyingName ? ` · ${props.replyingName} 正在回复` : ""}${props.queued ? ` · ${props.queued} 条排队中` : ""}`
+                  : props.queued
+                    ? `发送 · ${props.queued} 条排队中`
+                    : "发送"
+              }
+            >
+              <span className="send-ico send-ico-arrow" aria-hidden>
+                <ArrowUp size={17} />
+              </span>
+              <span className="send-ico send-ico-stop" aria-hidden>
+                <i />
+              </span>
+            </button>
+          );
+        })()}
       </div>
     </div>
   );

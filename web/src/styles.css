@@ -1537,10 +1537,15 @@ fieldset.segmented { padding: 2px; min-inline-size: 0; }
 
 /* composer: neutral focus, send ⇄ stop morph */
 .composer-box:focus-within { border-color: color-mix(in srgb, var(--text) 22%, var(--border-strong)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 6%, transparent), 0 10px 30px -18px rgb(24 24 27 / 0.35); }
-.send-btn { position: relative; }
-.send-btn.stop { background: var(--text); color: var(--surface); animation: t-pop-in var(--dur-2) var(--ease-out); }
-.send-btn.stop:hover { background: color-mix(in srgb, var(--text) 85%, transparent); transform: none; }
-.stop-ring { position: absolute; inset: -3px; border-radius: 12px; border: 1.5px solid transparent; border-top-color: color-mix(in srgb, var(--text) 45%, transparent); border-right-color: color-mix(in srgb, var(--text) 15%, transparent); animation: spin 1.1s linear infinite; pointer-events: none; }
+.composer-box .send-btn { position: relative; width: 32px; height: 32px; padding: 0; border-radius: 50%; background: var(--text); color: var(--surface); display: grid; place-items: center; transform: none; transition: background-color 140ms var(--ease-out); }
+.composer-box .send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 82%, #000); transform: none; }
+.composer-box .send-btn:disabled { background: var(--surface-2); color: var(--text-3); }
+.send-ico { grid-area: 1 / 1; display: grid; place-items: center; transition: opacity 140ms var(--ease-out), transform 140ms var(--ease-out); }
+.send-ico-stop i { display: block; width: 10px; height: 10px; border-radius: 2.5px; background: currentColor; }
+.send-btn[data-mode="send"] .send-ico-stop, .send-btn[data-mode="stop"] .send-ico-arrow { opacity: 0; transform: scale(0.6); }
+.send-btn[data-mode="stop"] .send-ico-stop i { animation: stop-breathe 1.6s ease-in-out infinite; }
+@keyframes stop-breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.85; transform: scale(0.85); } }
+@media (prefers-reduced-motion: reduce) { .send-btn[data-mode="stop"] .send-ico-stop i { animation: none; } .send-ico { transition: none; } }
 /* thinking dots: soft staggered breathing; reply fades in over the bubble */
 .typing { min-height: 1.6em; }
 .typing i { animation: breathe 1.4s ease-in-out infinite both; opacity: 0.3; }

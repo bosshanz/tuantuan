@@ -559,10 +559,26 @@ try {
 
   await input.fill("/slow");
   await input.press("Enter");
-  await page.locator(".send-btn.stop").waitFor();
+  await page.locator('.send-btn[data-mode="stop"]').waitFor();
   if (await page.locator(".run-bar").count()) throw new Error("reply banner should be gone");
   await page.waitForTimeout(250);
   await shot("composer-stop");
+  {
+    const btn = page.locator('.send-btn[data-mode="stop"]');
+    const off = await btn.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      const i = (el.querySelector(".send-ico-stop i") as HTMLElement).getBoundingClientRect();
+      return Math.max(
+        Math.abs(b.left + b.width / 2 - (i.left + i.width / 2)),
+        Math.abs(b.top + b.height / 2 - (i.top + i.height / 2)),
+      );
+    });
+    if (off > 0.5) throw new Error(`stop icon off-center by ${off}px`);
+    if (shotsDir) {
+      await page.addStyleTag({ content: ".send-ico-stop i { animation: none !important; }" });
+      await btn.screenshot({ path: join(shotsDir, "stop-1x.png") });
+    }
+  }
   await page.getByRole("button", { name: "停止" }).click();
   await page.locator(".state-tag", { hasText: "已停止" }).waitFor();
 
@@ -572,9 +588,9 @@ try {
   await page.locator(".model-trigger", { hasText: "Mock Stuck" }).waitFor();
   await input.fill("卡住了吗");
   await input.press("Enter");
-  await page.locator(".send-btn.stop").waitFor();
+  await page.locator('.send-btn[data-mode="stop"]').waitFor();
   await page.getByRole("button", { name: "停止" }).click();
-  await page.locator(".send-btn.stop").waitFor({ state: "detached", timeout: 10_000 });
+  await page.locator('.send-btn[data-mode="stop"]').waitFor({ state: "detached", timeout: 10_000 });
   await page.locator(".model-trigger").click();
   await page.getByRole("option", { name: "Mock Smart" }).click();
   await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
