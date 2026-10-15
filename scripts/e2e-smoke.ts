@@ -39,6 +39,74 @@ const skillSrv = Bun.serve({
   port: 0,
   fetch: () => new Response("---\nname: changelog\ndescription: 维护 CHANGELOG.md\n---\n\nKeep a changelog.\n"),
 });
+// 服务商与用量: local usage logs, a CC Switch db and a DeepSeek-style balance endpoint, all fixtures.
+process.env.TUANTUAN_USAGE_HOME = fakeHome;
+process.env.TUANTUAN_CCSWITCH_DIR = join(fakeHome, ".cc-switch");
+{
+  const now = Date.now();
+  const at = (ago: number) => new Date(now - ago).toISOString();
+  const cl = join(fakeHome, ".claude", "projects", "-work");
+  mkdirSync(cl, { recursive: true });
+  writeFileSync(
+    join(cl, "s.jsonl"),
+    [1, 2, 3]
+      .map((i) =>
+        JSON.stringify({
+          type: "assistant",
+          timestamp: at(i * 60_000),
+          requestId: `r${i}`,
+          message: { id: `m${i}`, usage: { input_tokens: 1200, output_tokens: 800, cache_read_input_tokens: 40_000 } },
+        }),
+      )
+      .join("\n"),
+  );
+  const cx = join(fakeHome, ".codex", "sessions", "2026", "10", "15");
+  mkdirSync(cx, { recursive: true });
+  const resets = Math.floor(now / 1000) + 2 * 3600;
+  writeFileSync(
+    join(cx, "rollout-e2e.jsonl"),
+    JSON.stringify({
+      timestamp: at(30_000),
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 52_000,
+            cached_input_tokens: 30_000,
+            output_tokens: 4000,
+            total_tokens: 56_000,
+          },
+        },
+        rate_limits: {
+          primary: { used_percent: 38, window_minutes: 300, resets_at: resets },
+          secondary: { used_percent: 81, window_minutes: 10080, resets_at: resets + 3 * 86400 },
+          plan_type: "plus",
+        },
+      },
+    }),
+  );
+  mkdirSync(join(fakeHome, ".cc-switch"), { recursive: true });
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(join(fakeHome, ".cc-switch", "cc-switch.db"));
+  db.run("CREATE TABLE providers (id TEXT, app_type TEXT, name TEXT, settings_config TEXT, is_current INTEGER)");
+  db.run("INSERT INTO providers VALUES ('k', 'claude', 'Kimi 包月', ?, 1)", [
+    JSON.stringify({
+      env: { ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic", ANTHROPIC_AUTH_TOKEN: "sk-kimi-e2e-0001" },
+    }),
+  ]);
+  db.close();
+}
+const balanceSrv = Bun.serve({
+  port: 0,
+  fetch: (req) => {
+    const u = new URL(req.url);
+    if (req.headers.get("authorization") !== "Bearer sk-e2e-deepseek-4242") return new Response("no", { status: 401 });
+    if (u.pathname === "/user/balance")
+      return Response.json({ balance_infos: [{ currency: "CNY", total_balance: "66.60" }] });
+    return Response.json({ data: [] });
+  },
+});
 const shotsDir = process.env.SHOTS_DIR;
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });
 const { server, app } = serve({ dbPath, staticDir: "web/dist" }, 0);
@@ -469,6 +537,69 @@ try {
   if ((await page.evaluate(() => performance.getEntriesByType("navigation").length)) !== navs)
     throw new Error("page reloaded during live checks");
 
+  // 服务商与用量: usage cards from local fixtures, add a DeepSeek profile (mock endpoint), test +
+  // balance, CC Switch import on click, then pick the profile on a Claude Code agent.
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const ccAgent = await (
+    await fetch(`http://localhost:${server.port}/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "架构师", harness: "claude-code", identity: "", env: {}, mcpServerIds: [] }),
+    })
+  ).json();
+  await page.reload();
+  await page.locator(".rail .dot.ok").waitFor();
+  await page.locator(".rail").getByRole("button", { name: "服务商" }).click();
+  await page.waitForFunction(() => location.hash === "#/providers");
+  const codexCard = page.getByTestId("usage-codex");
+  await codexCard.getByText("剩 62%").waitFor();
+  await codexCard.getByText("剩 19%").waitFor();
+  await codexCard.getByText("plus").waitFor();
+  await page.getByTestId("usage-claude-code").getByText("126.0k").first().waitFor();
+  await page.getByTestId("usage-grok").getByText("暂不支持查询").waitFor();
+  await page
+    .getByTestId("usage-tuantuan")
+    .getByText(/\d+ 轮/)
+    .waitFor();
+  await page.getByRole("button", { name: "添加", exact: true }).click();
+  const dlg = page.getByRole("dialog", { name: "添加服务商" });
+  await dlg.getByRole("button", { name: "DeepSeek" }).click();
+  if ((await dlg.getByLabel("名称").inputValue()) !== "DeepSeek") throw new Error("preset did not fill the name");
+  await dlg.getByLabel("API Key").fill("sk-e2e-deepseek-4242");
+  const mockBase = `http://127.0.0.1:${balanceSrv.port}`;
+  await dlg.getByLabel("Claude Code 地址").fill(`${mockBase}/anthropic`);
+  await dlg.getByLabel("OpenAI 兼容地址").fill(`${mockBase}/v1`);
+  await dlg.getByRole("button", { name: "保存" }).click();
+  await dlg.waitFor({ state: "detached" });
+  const ds = page.getByTestId("provider-DeepSeek");
+  await ds.getByText(/sk-e…4242|4242/).waitFor();
+  if ((await page.content()).includes("sk-e2e-deepseek-4242")) throw new Error("API key leaked to the page");
+  await ds.getByRole("button", { name: "测速" }).click();
+  await ds.getByText(/连通 · \d+ ms/).waitFor();
+  await ds.getByRole("button", { name: "余额" }).click();
+  await ds.getByText("余额 66.60 CNY").waitFor();
+  await page.getByRole("button", { name: "从 CC Switch 导入" }).click();
+  const imp = page.getByRole("dialog", { name: "从 CC Switch 导入" });
+  await imp.getByText("Kimi 包月").waitFor();
+  await page.waitForTimeout(500); // let the dialog finish animating in
+  await shot("ccswitch-import");
+  await imp.getByRole("button", { name: /导入 1 个/ }).click();
+  await page.getByTestId("provider-Kimi 包月").waitFor();
+  await shot("providers");
+  await ds.getByRole("button", { name: "切换 Agent" }).click();
+  await ds.getByRole("button", { name: "架构师" }).click();
+  await ds.getByText("架构师 在用").waitFor();
+  await page.goto(`http://localhost:${server.port}/#/a/${ccAgent.id}`);
+  const provPick = page.getByRole("group", { name: "服务商" });
+  await provPick.getByRole("button", { name: "DeepSeek" }).and(page.locator("[aria-pressed=true]")).waitFor();
+  await provPick.getByRole("button", { name: "本机配置" }).click();
+  await page.getByRole("button", { name: "保存修改" }).click();
+  await page.getByText("所有修改已保存").or(page.getByText("已保存")).first().waitFor();
+  await provPick.getByRole("button", { name: "Kimi 包月" }).waitFor();
+  await provPick.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await shot("agent-provider");
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   // Dev setup (`bun dev`): the UI must reach the API and its WebSocket through the Vite proxy.
   // Spawn vite's own entry (not `bunx`), so kill() stops the server itself: an orphaned vite from a
   // previous run would keep the port and proxy to a dead API, failing every other run.
@@ -501,7 +632,7 @@ try {
   await shot("final");
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`);
   console.log(
-    "e2e smoke: PASS (setup handshake + login → bundled adapters + one-click install → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → UI via Vite proxy)",
+    "e2e smoke: PASS (setup handshake + login → bundled adapters + one-click install → agents on mock ACP harness → BYOK form → onboarding once → new project (existing folder) → conversation with main agent → single-agent conversation → main agent, @, MCP handoff → DM: slash command, plan, thought, permission + diff, terminal, config option, usage, cancel → details → live updates under slow snapshot → providers: usage cards, add/test/balance, CC Switch import, agent switch → UI via Vite proxy)",
   );
 } catch (e) {
   failed = true;
@@ -514,6 +645,7 @@ try {
   rmSync(workspaces, { recursive: true, force: true });
   rmSync(fakeHome, { recursive: true, force: true });
   skillSrv.stop(true);
+  balanceSrv.stop(true);
   rmSync(dbPath, { force: true });
   rmSync(authFile, { force: true });
   rmSync(`${dbPath}-wal`, { force: true });

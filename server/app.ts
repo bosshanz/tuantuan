@@ -8,7 +8,7 @@ import { z } from "zod";
 import { replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
 import { AVATAR_SHAPES } from "./avatars";
-import { CUSTOM_FORMATS, CUSTOM_HARNESS, testConnection } from "./custom";
+import { CUSTOM_FORMATS, CUSTOM_HARNESS, maskKey, testConnection } from "./custom";
 import { listDirs, pickFolderNative, places } from "./dirpicker";
 import {
   detectHarness,
@@ -22,9 +22,26 @@ import { HarnessHost } from "./host";
 import { Installer } from "./installer";
 import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
+import {
+  PRESETS,
+  presetFor,
+  providerBalance,
+  providerSupports,
+  publicProvider,
+  readCcSwitch,
+  testProvider,
+} from "./providers";
 import * as skills from "./skills";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 import { TuantuanMcp } from "./tuantuan-mcp";
+import {
+  claudeLocalUsage,
+  codexLocalUsage,
+  type HarnessUsage,
+  type LimitWindow,
+  parseClaudeUsageMarkdown,
+  parseCodexStatusMarkdown,
+} from "./usage";
 import {
   createProjectDir,
   DRAFTS_PROJECT_ID,
@@ -72,6 +89,7 @@ const AgentInputSchema = z.object({
   mcpServerIds: z.array(z.string()).max(32).default([]),
   permissionPolicy: z.enum(PERMISSION_POLICIES).default("ask"),
   configDefaults: z.record(z.string().max(64), z.string().max(200)).default({}),
+  providerId: z.string().max(64).nullable().optional(),
   custom: CustomSchema.nullable().optional(),
 });
 
@@ -142,10 +160,15 @@ export function createApp(deps: AppDeps) {
 
   function validateAgent(raw: unknown): AgentInput {
     const a = AgentInputSchema.parse(raw);
-    if (a.harness === CUSTOM_HARNESS) {
+    if (a.providerId) {
+      const prov = store.getProvider(a.providerId);
+      if (!prov) throw new ValidationError("服务商不存在");
+      if (!providerSupports(prov, a.harness)) throw new ValidationError(`「${prov.name}」不能用于这个 Harness`);
+    }
+    if (a.harness === CUSTOM_HARNESS && !a.providerId) {
       if (!a.custom) throw new ValidationError("请填写自定义 API 设置");
       if (!a.custom.model) throw new ValidationError("请填写模型");
-    } else {
+    } else if (a.harness !== CUSTOM_HARNESS) {
       if (a.harness && !harnessSpec(a.harness)) throw new ValidationError(`未知 Harness：${a.harness}`);
       a.custom = null;
     }
@@ -196,6 +219,121 @@ export function createApp(deps: AppDeps) {
     }
     await job;
     return harnessOptions.get(id) ?? { at: Date.now(), configOptions: [], modes: null, error: "无法读取" };
+  }
+
+  /**
+   * Live limits straight from the harness: runs its own usage command (Claude Code `/usage`,
+   * codex-acp `/status`) in a throwaway session and parses the Markdown it prints. Uses the
+   * user's own login (no 服务商 override); nothing else is read.
+   */
+  const liveLimits = new Map<
+    string,
+    { at: number; limits: LimitWindow[]; plan: string | null; error: string | null }
+  >();
+  async function harnessLiveLimits(id: "claude-code" | "codex") {
+    const spec = harnessSpec(id);
+    if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
+    const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
+    const done = (limits: LimitWindow[], plan: string | null, error: string | null) => {
+      const r = { at: Date.now(), limits, plan, error };
+      liveLimits.set(id, r);
+      return r;
+    };
+    if (!status.command) return done([], null, status.error ?? "未安装");
+    const env = await loginShellEnv();
+    const scratch = mkdtempSync(join(tmpdir(), "tuantuan-usage-"));
+    let text = "";
+    const p = new AcpProcess(
+      { command: status.command, args: status.args, env, cwd: scratch },
+      {
+        onUpdate: (n) => {
+          const u = n.update;
+          if (u.sessionUpdate === "agent_message_chunk" && u.content.type === "text") text += u.content.text;
+        },
+        requestPermission: async () => ({ outcome: { outcome: "cancelled" } }),
+      },
+    );
+    try {
+      await p.initialize(30_000);
+      const created = await withTimeout(
+        p.agent.request(acpMethods.agent.session.new, { cwd: scratch, mcpServers: [] }),
+        60_000,
+        "session/new 超时",
+      );
+      await withTimeout(
+        p.agent.request(acpMethods.agent.session.prompt, {
+          sessionId: created.sessionId,
+          prompt: [{ type: "text", text: id === "claude-code" ? "/usage" : "/status" }],
+        }),
+        60_000,
+        "读取用量超时",
+      );
+      if (id === "claude-code") {
+        const r = parseClaudeUsageMarkdown(text);
+        return done(
+          r.limits,
+          r.plan,
+          r.limits.length ? null : "没有额度数据（API Key 或第三方服务没有 5 小时 / 每周额度）",
+        );
+      }
+      const r = parseCodexStatusMarkdown(text);
+      const err = r.limits.length
+        ? null
+        : r.account === "not logged in"
+          ? "未登录"
+          : "没有额度数据（API Key 登录没有额度窗口）";
+      return done(r.limits, r.account, err);
+    } catch (e) {
+      const msg = (e as Error).message;
+      return done([], null, /auth/i.test(msg) ? "未登录" : msg);
+    } finally {
+      p.kill();
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
+
+  function usageOverview(): HarnessUsage[] {
+    const out: HarnessUsage[] = [];
+    const cl = claudeLocalUsage();
+    const clLive = liveLimits.get("claude-code");
+    out.push({
+      harness: "claude-code",
+      today: cl?.today ?? null,
+      week: cl?.week ?? null,
+      limits: clLive?.limits ?? [],
+      limitsAt: clLive?.at ?? null,
+      limitsSource: clLive ? "Claude Code /usage" : null,
+      plan: clLive?.plan ?? null,
+      notes: [
+        ...(cl ? [] : ["没有 ~/.claude/projects 记录"]),
+        ...(clLive?.error ? [clLive.error] : clLive ? [] : ["额度：点刷新向 Claude Code 查询"]),
+      ],
+    });
+    const cx = codexLocalUsage();
+    const cxLive = liveLimits.get("codex");
+    const liveFresh = cxLive && cxLive.limits.length > 0 && (!cx?.limitsAt || cxLive.at > cx.limitsAt);
+    out.push({
+      harness: "codex",
+      today: cx?.today ?? null,
+      week: cx?.week ?? null,
+      limits: liveFresh ? cxLive.limits : (cx?.limits ?? []),
+      limitsAt: liveFresh ? cxLive.at : (cx?.limitsAt ?? null),
+      limitsSource: liveFresh ? "codex /status" : cx?.limits.length ? "~/.codex/sessions token_count" : null,
+      plan: cx?.plan ?? (liveFresh ? cxLive.plan : null),
+      notes: [...(cx ? [] : ["没有 ~/.codex/sessions 记录"]), ...(cxLive?.error && !liveFresh ? [cxLive.error] : [])],
+    });
+    for (const h of ["grok", "opencode"])
+      out.push({
+        harness: h,
+        today: null,
+        week: null,
+        limits: [],
+        limitsAt: null,
+        limitsSource: null,
+        plan: null,
+        notes: ["没有公开的用量 / 额度来源"],
+      });
+    return out;
   }
 
   async function probeHarness(id: string, methodId?: string) {
@@ -329,6 +467,91 @@ export function createApp(deps: AppDeps) {
         return json({ ok: true, reply });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message });
+      }
+    }
+
+    if (resource === "providers") {
+      const ProviderBody = z.object({
+        name: z.string().trim().min(1, "名称不能为空").max(40),
+        preset: z.string().max(32).default("custom"),
+        anthropicBaseUrl: z.string().trim().max(500).default(""),
+        openaiBaseUrl: z.string().trim().max(500).default(""),
+        apiKey: z.string().max(4000).default(""),
+        model: z.string().trim().max(200).default(""),
+        smallModel: z.string().trim().max(200).default(""),
+        wireApi: z.enum(["responses", "chat"]).default("chat"),
+      });
+      const urlOk = (u: string) => !u || /^https?:\/\//.test(u);
+      const check = (b: z.infer<typeof ProviderBody>) => {
+        if (!b.anthropicBaseUrl && !b.openaiBaseUrl) throw new ValidationError("至少填写一个接口地址");
+        if (!urlOk(b.anthropicBaseUrl) || !urlOk(b.openaiBaseUrl))
+          throw new ValidationError("地址需以 http(s):// 开头");
+      };
+      const usedBy = (pid: string) =>
+        store
+          .listAgents()
+          .filter((a) => a.providerId === pid)
+          .map((a) => a.name);
+      const list = () => store.listProviders().map((x) => ({ ...publicProvider(x), usedBy: usedBy(x.id) }));
+      if (!id && method === "GET") return json({ items: list(), presets: PRESETS });
+      if (id === "ccswitch" && method === "GET") {
+        const r = readCcSwitch();
+        return json({
+          found: r.found,
+          source: r.source,
+          entries: r.entries.map(({ apiKey, ...e }) => ({ ...e, keyHint: maskKey(apiKey) })),
+        });
+      }
+      if (id === "ccswitch" && method === "POST") {
+        const { keys } = z.object({ keys: z.array(z.string()).max(200) }).parse(await body());
+        const r = readCcSwitch();
+        let n = 0;
+        for (const e of r.entries.filter((x) => keys.includes(x.key))) {
+          store.saveProvider({
+            name: e.name,
+            preset: presetFor(e.anthropicBaseUrl || e.openaiBaseUrl),
+            anthropicBaseUrl: e.anthropicBaseUrl,
+            openaiBaseUrl: e.openaiBaseUrl,
+            apiKey: e.apiKey,
+            model: e.model,
+            smallModel: e.smallModel,
+            wireApi: e.wireApi,
+          });
+          n++;
+        }
+        return json({ imported: n, items: list() });
+      }
+      if (!id && method === "POST") {
+        const b = ProviderBody.parse(await body());
+        check(b);
+        const saved = store.saveProvider(b);
+        return json({ ...publicProvider(saved), usedBy: [] }, 201);
+      }
+      const prov = id ? store.getProvider(id) : null;
+      if (id && !prov) throw new ValidationError("服务商不存在", 404);
+      if (prov && !sub && method === "PUT") {
+        const b = ProviderBody.parse(await body());
+        check(b);
+        // agents using it pick the change up on their next turn (process signature changes)
+        return json({ ...publicProvider(store.saveProvider({ ...b, id: prov.id })), usedBy: usedBy(prov.id) });
+      }
+      if (prov && !sub && method === "DELETE") {
+        store.deleteProvider(prov.id);
+        return json({ ok: true });
+      }
+      if (prov && sub === "test" && method === "POST") return json(await testProvider(prov));
+      if (prov && sub === "balance" && method === "GET") return json(await providerBalance(prov));
+    }
+
+    if (resource === "usage") {
+      if (!id && method === "GET") {
+        const day = new Date();
+        const since = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+        return json({ harnesses: usageOverview(), tuantuan: store.usageSince(since) });
+      }
+      if ((id === "claude-code" || id === "codex") && sub === "live" && method === "POST") {
+        await harnessLiveLimits(id);
+        return json({ harnesses: usageOverview() });
       }
     }
 

@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import type * as acp from "@agentclientprotocol/sdk";
 import { methods } from "@agentclientprotocol/sdk";
 import { AcpProcess, type TerminalSnapshot, withTimeout } from "./acp";
+import { codexProviderSet, providerAsCustom, providerEnv, providerSupports } from "./providers";
 
 const CANCEL_GRACE_MS = Number(process.env.TUANTUAN_CANCEL_GRACE_MS) || 4000;
 const RESUME_TIMEOUT_MS = 45_000;
@@ -142,8 +143,22 @@ export class HarnessHost {
     // Keep the user's CC Switch / Codex config: inherit ANTHROPIC_* / OPENAI_*, never isolate
     // CLAUDE_CONFIG_DIR or CODEX_HOME; only merge developer_instructions into CODEX_CONFIG.
     const env = harnessProcessEnv(base, mat.env, agent.env, spec, identity);
+    // 服务商: only this child process's env changes; ~/.claude / ~/.codex are never touched.
+    const prov = agent.providerId ? this.store.getProvider(agent.providerId) : null;
+    if (prov && providerSupports(prov, agent.harness)) {
+      const pe = providerEnv(prov, agent.harness, env);
+      for (const k of pe.unset) delete env[k];
+      Object.assign(env, pe.set);
+    }
     const key = `${agent.id}|${cwd}`;
-    const signature = JSON.stringify([status.command, status.args, env.CODEX_CONFIG ?? "", agent.env, mat.env]);
+    const signature = JSON.stringify([
+      status.command,
+      status.args,
+      env.CODEX_CONFIG ?? "",
+      agent.env,
+      mat.env,
+      prov ? [prov.id, prov.updatedAt] : null,
+    ]);
     const existing = this.procs.get(key);
     if (existing && existing.signature === signature && existing.acp.proc.exitCode === null) return existing;
     if (existing) this.dropProc(existing);
@@ -167,7 +182,15 @@ export class HarnessHost {
         },
       },
     );
-    proc.ready = proc.acp.initialize();
+    const useProv = prov && providerSupports(prov, agent.harness) ? prov : null;
+    proc.ready = proc.acp.initialize().then(async (init) => {
+      if (useProv && agent.harness === "codex")
+        await proc.acp.agent.request(
+          methods.agent.providers.set,
+          codexProviderSet(useProv) as unknown as acp.SetProviderRequest,
+        );
+      return init;
+    });
     proc.ready.catch(() => this.dropProc(proc));
     void proc.acp.exited.then(() => {
       if (this.procs.get(key) === proc) this.dropProc(proc);
@@ -452,6 +475,18 @@ export class HarnessHost {
           );
         }),
       ]);
+      const u = res.usage;
+      if (u)
+        this.store.logUsage({
+          roomId: room.id,
+          agentId: agent.id,
+          harness: agent.harness,
+          providerId: agent.providerId,
+          input: u.inputTokens ?? 0,
+          output: u.outputTokens ?? 0,
+          cached: (u.cachedReadTokens ?? 0) + (u.cachedWriteTokens ?? 0),
+          total: u.totalTokens ?? 0,
+        });
       return { stopReason: res.stopReason };
     } catch (e) {
       if (signal.aborted) throw signal.reason ?? e;
@@ -520,8 +555,10 @@ export class HarnessHost {
     onUpdate: (u: acp.SessionUpdate) => void,
     signal: AbortSignal,
   ): Promise<{ stopReason: acp.StopReason }> {
-    const saved = this.store.getCustomSecret(agent.id);
-    if (!saved) throw new ValidationError("请先在 Agent 设置里填写自定义 API");
+    const prov = agent.providerId ? this.store.getProvider(agent.providerId) : null;
+    const saved =
+      prov && providerSupports(prov, "custom") ? providerAsCustom(prov) : this.store.getCustomSecret(agent.id);
+    if (!saved) throw new ValidationError("请先在 Agent 设置里填写自定义 API 或选择服务商");
     const cfg = { ...saved, model: this.store.getRoomModel(room.id, agent.id) || saved.model };
     if (!cfg.apiKey) throw new ValidationError("请填写 API Key");
     this.ensureCustom(room, agent);

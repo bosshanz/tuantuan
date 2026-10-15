@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { emptyTimeline, type Timeline } from "../shared/timeline";
 import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
 import { type CustomFormat, type CustomSecret, maskKey } from "./custom";
+import type { ProviderSecret } from "./providers";
 
 /** SQLite is the source of truth for agents, rooms, messages and ACP session bindings. */
 
@@ -155,6 +156,34 @@ export const MIGRATIONS: string[] = [
    );
    INSERT INTO room_config (room_id, agent_id, config_id, value) SELECT room_id, agent_id, 'model', model FROM room_models;
    UPDATE rooms SET name = substr(name, 3, length(name) - 5) WHERE name LIKE '与 % 私聊' AND length(name) > 5;`,
+  // 服务商 (provider profiles) + per-agent choice; per-turn token usage reported by harnesses.
+  `CREATE TABLE providers (
+     id TEXT PRIMARY KEY,
+     name TEXT NOT NULL,
+     preset TEXT NOT NULL DEFAULT 'custom',
+     anthropic_base_url TEXT NOT NULL DEFAULT '',
+     openai_base_url TEXT NOT NULL DEFAULT '',
+     api_key TEXT NOT NULL DEFAULT '',
+     model TEXT NOT NULL DEFAULT '',
+     small_model TEXT NOT NULL DEFAULT '',
+     wire_api TEXT NOT NULL DEFAULT 'chat',
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   ALTER TABLE agents ADD COLUMN provider_id TEXT REFERENCES providers(id) ON DELETE SET NULL;
+   CREATE TABLE usage_log (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     at INTEGER NOT NULL,
+     room_id TEXT,
+     agent_id TEXT,
+     harness TEXT NOT NULL,
+     provider_id TEXT,
+     input_tokens INTEGER NOT NULL DEFAULT 0,
+     output_tokens INTEGER NOT NULL DEFAULT 0,
+     cached_tokens INTEGER NOT NULL DEFAULT 0,
+     total_tokens INTEGER NOT NULL DEFAULT 0
+   );
+   CREATE INDEX usage_log_at ON usage_log(at);`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -175,6 +204,8 @@ export interface Agent {
   mcpServerIds: string[];
   /** "ask" shows the permission dialog; "allow" picks the agent's first allow option automatically. */
   permissionPolicy: PermissionPolicy;
+  /** 服务商 profile driving this agent's harness; null = the user's own local config. */
+  providerId: string | null;
   /** Default session config for new conversations (configId → value, e.g. model / effort / mode). */
   configDefaults: Record<string, string>;
   /** BYOK settings when harness is "custom"; the API key is only ever exposed masked. */
@@ -201,8 +232,9 @@ export interface CustomInput {
 
 export type AgentInput = Omit<
   Agent,
-  "id" | "createdAt" | "updatedAt" | "avatarShape" | "color" | "custom" | "configDefaults"
+  "id" | "createdAt" | "updatedAt" | "avatarShape" | "color" | "custom" | "configDefaults" | "providerId"
 > & {
+  providerId?: string | null;
   configDefaults?: Record<string, string>;
   custom?: CustomInput | null;
   /** Omitted or "" => deterministic default from the agent id. */
@@ -357,6 +389,7 @@ export class Store {
       permission_policy: a.permissionPolicy,
       mcp_server_ids: JSON.stringify(a.mcpServerIds),
       config_defaults: JSON.stringify(a.configDefaults ?? {}),
+      provider_id: a.providerId || null,
       tools: "[]",
       skills: "[]",
       model_mode: "auto",
@@ -365,10 +398,10 @@ export class Store {
     };
     const sql =
       op === "insert"
-        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,config_defaults,tools,skills,model_mode,created_at,updated_at,custom)
-             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$config_defaults,$tools,$skills,$model_mode,$created_at,$updated_at,$custom)`
+        ? `INSERT INTO agents (id,name,color,avatar,avatar_shape,identity,harness,env,permission_policy,mcp_server_ids,config_defaults,provider_id,tools,skills,model_mode,created_at,updated_at,custom)
+             VALUES ($id,$name,$color,$avatar,$avatar_shape,$identity,$harness,$env,$permission_policy,$mcp_server_ids,$config_defaults,$provider_id,$tools,$skills,$model_mode,$created_at,$updated_at,$custom)`
         : `UPDATE agents SET name=$name,color=$color,avatar=$avatar,avatar_shape=$avatar_shape,identity=$identity,harness=$harness,env=$env,
-             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,config_defaults=$config_defaults,custom=$custom,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
+             permission_policy=$permission_policy,mcp_server_ids=$mcp_server_ids,config_defaults=$config_defaults,provider_id=$provider_id,custom=$custom,updated_at=$updated_at WHERE id=$id AND created_at=$created_at`;
     try {
       this.db.query(sql).run(params);
     } catch (e) {
@@ -625,6 +658,89 @@ export class Store {
         .run(roomId, agentId, configId, value);
   }
 
+  // ---- 服务商 ----
+  listProviders(): ProviderSecret[] {
+    return (this.db.query("SELECT * FROM providers ORDER BY created_at").all() as Row[]).map(toProvider);
+  }
+
+  getProvider(id: string): ProviderSecret | null {
+    const r = this.db.query("SELECT * FROM providers WHERE id = ?").get(id) as Row | null;
+    return r ? toProvider(r) : null;
+  }
+
+  saveProvider(input: Omit<ProviderSecret, "id" | "createdAt" | "updatedAt"> & { id?: string }): ProviderSecret {
+    const now = Date.now();
+    const old = input.id ? this.getProvider(input.id) : null;
+    const id = old?.id ?? input.id ?? crypto.randomUUID();
+    const row = {
+      id,
+      name: input.name,
+      preset: input.preset,
+      anthropic_base_url: input.anthropicBaseUrl,
+      openai_base_url: input.openaiBaseUrl,
+      // empty key on edit = keep the stored one (the browser only ever sees a mask)
+      api_key: input.apiKey || old?.apiKey || "",
+      model: input.model,
+      small_model: input.smallModel,
+      wire_api: input.wireApi,
+      created_at: old?.createdAt ?? now,
+      updated_at: Math.max(now, (old?.updatedAt ?? 0) + 1),
+    };
+    this.db
+      .query(
+        `INSERT INTO providers (id,name,preset,anthropic_base_url,openai_base_url,api_key,model,small_model,wire_api,created_at,updated_at)
+         VALUES ($id,$name,$preset,$anthropic_base_url,$openai_base_url,$api_key,$model,$small_model,$wire_api,$created_at,$updated_at)
+         ON CONFLICT(id) DO UPDATE SET name=$name,preset=$preset,anthropic_base_url=$anthropic_base_url,openai_base_url=$openai_base_url,
+           api_key=$api_key,model=$model,small_model=$small_model,wire_api=$wire_api,updated_at=$updated_at`,
+      )
+      .run(row);
+    return this.getProvider(id) as ProviderSecret;
+  }
+
+  deleteProvider(id: string) {
+    this.db.query("UPDATE agents SET provider_id = NULL WHERE provider_id = ?").run(id);
+    this.db.query("DELETE FROM providers WHERE id = ?").run(id);
+  }
+
+  // ---- token usage reported by harnesses (ACP PromptResponse.usage) ----
+  logUsage(u: {
+    roomId: string | null;
+    agentId: string | null;
+    harness: string;
+    providerId: string | null;
+    input: number;
+    output: number;
+    cached: number;
+    total: number;
+  }) {
+    this.db
+      .query(
+        `INSERT INTO usage_log (at, room_id, agent_id, harness, provider_id, input_tokens, output_tokens, cached_tokens, total_tokens)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(Date.now(), u.roomId, u.agentId, u.harness, u.providerId, u.input, u.output, u.cached, u.total);
+  }
+
+  usageSince(
+    since: number,
+  ): { harness: string; providerId: string | null; turns: number; input: number; output: number; total: number }[] {
+    return (
+      this.db
+        .query(
+          `SELECT harness, provider_id, COUNT(*) AS turns, SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(total_tokens) AS total
+           FROM usage_log WHERE at >= ? GROUP BY harness, provider_id`,
+        )
+        .all(since) as Row[]
+    ).map((r) => ({
+      harness: r.harness as string,
+      providerId: (r.provider_id as string | null) ?? null,
+      turns: Number(r.turns),
+      input: Number(r.input),
+      output: Number(r.output),
+      total: Number(r.total),
+    }));
+  }
+
   // ---- ACP sessions: one per (room, agent) ----
   getAcpSession(roomId: string, agentId: string): AcpSessionRow | null {
     const r = this.db
@@ -672,6 +788,22 @@ function publicCustom(c: CustomSecret): CustomPublic {
   return { format: c.format, baseUrl: c.baseUrl, model: c.model, keyHint: maskKey(c.apiKey) };
 }
 
+function toProvider(r: Row): ProviderSecret {
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    preset: r.preset as string,
+    anthropicBaseUrl: r.anthropic_base_url as string,
+    openaiBaseUrl: r.openai_base_url as string,
+    apiKey: r.api_key as string,
+    model: r.model as string,
+    smallModel: r.small_model as string,
+    wireApi: (r.wire_api as string) === "responses" ? "responses" : "chat",
+    createdAt: r.created_at as number,
+    updatedAt: r.updated_at as number,
+  };
+}
+
 function toAgent(r: Row): Agent {
   return {
     id: r.id as string,
@@ -684,6 +816,7 @@ function toAgent(r: Row): Agent {
     env: JSON.parse(r.env as string),
     mcpServerIds: JSON.parse(r.mcp_server_ids as string),
     configDefaults: JSON.parse((r.config_defaults as string) || "{}"),
+    providerId: (r.provider_id as string | null) ?? null,
     permissionPolicy: r.permission_policy as PermissionPolicy,
     custom: r.custom ? publicCustom(JSON.parse(r.custom as string)) : null,
     createdAt: r.created_at as number,

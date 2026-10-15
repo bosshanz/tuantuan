@@ -29,6 +29,7 @@ import { ChoiceList, OptIcon, Popover } from "./ConfigChips";
 import { describeOptions, type Opt } from "./config";
 import { useFolderPicker } from "./FolderPicker";
 import { type PickItem, PickList } from "./PickList";
+import { ProviderIcon, type ProviderItem, providerFits } from "./Providers";
 import { AgentAvatar } from "./ui";
 
 type Form = Omit<AgentInput, "custom"> & { color: string; avatarShape: AvatarShape; custom: CustomInput | null };
@@ -49,6 +50,7 @@ function emptyAgent(seed: string): Form {
     mcpServerIds: [],
     permissionPolicy: "ask",
     configDefaults: {},
+    providerId: null,
     custom: null,
   };
 }
@@ -82,7 +84,8 @@ const comparable = (a: Form) =>
     [...a.mcpServerIds].sort(),
     a.permissionPolicy,
     a.configDefaults ?? {},
-    a.custom,
+    a.providerId ?? null,
+    a.providerId && a.harness === "custom" ? null : a.custom,
   ]);
 
 export function AgentEditor(props: {
@@ -235,6 +238,7 @@ export function AgentEditor(props: {
                     const v = e.target.value;
                     set("harness", v);
                     set("configDefaults", {});
+                    set("providerId", null);
                     if (v === "custom" && !form.custom)
                       set("custom", { format: "openai-chat", baseUrl: "", model: "", apiKey: "" });
                     if (v !== "custom") set("custom", null);
@@ -249,7 +253,18 @@ export function AgentEditor(props: {
                   ))}
                 </select>
               </label>
-              {form.harness === "custom" && form.custom && (
+              {(form.harness === "claude-code" || form.harness === "codex" || form.harness === "custom") && (
+                <ProviderPick
+                  harness={form.harness}
+                  value={form.providerId ?? null}
+                  onChange={(v) => {
+                    set("providerId", v);
+                    if (!v && form.harness === "custom" && !form.custom)
+                      set("custom", { format: "openai-chat", baseUrl: "", model: "", apiKey: "" });
+                  }}
+                />
+              )}
+              {form.harness === "custom" && form.custom && !form.providerId && (
                 <CustomFields
                   value={form.custom}
                   keyHint={agent?.custom?.keyHint ?? ""}
@@ -928,5 +943,47 @@ function DefaultRow(props: { opt: Opt; harness: string; value: string | null; on
         </Popover>
       )}
     </>
+  );
+}
+
+/** 服务商: "本机配置" (inherit the user's own login / env) or a saved profile that fits the harness. */
+function ProviderPick(props: { harness: string; value: string | null; onChange: (v: string | null) => void }) {
+  const [items, setItems] = useState<ProviderItem[] | null>(null);
+  useEffect(() => {
+    api<{ items: ProviderItem[] }>("GET", "/api/providers")
+      .then((r) => setItems(r.items))
+      .catch(() => setItems([]));
+  }, []);
+  const fits = (items ?? []).filter((p) => providerFits(p, props.harness) || p.id === props.value);
+  return (
+    <div className="field">
+      <span className="label">服务商</span>
+      <fieldset className="prov-pick" aria-label="服务商">
+        <button type="button" aria-pressed={!props.value} className="preset" onClick={() => props.onChange(null)}>
+          <span className="prov-icon local-icon">本</span>
+          本机配置
+        </button>
+        {fits.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            aria-pressed={props.value === p.id}
+            className="preset"
+            onClick={() => props.onChange(p.id)}
+          >
+            <ProviderIcon name={p.name} color={p.color} size={20} />
+            {p.name}
+          </button>
+        ))}
+      </fieldset>
+      <span className="help">
+        {props.value
+          ? "只对这个 Agent 的进程生效，不改你的本机配置。"
+          : props.harness === "custom"
+            ? "直接填写下面的接口。"
+            : "沿用你自己的登录和环境变量。"}{" "}
+        <a href="#/providers">管理服务商</a>
+      </span>
+    </div>
   );
 }

@@ -1109,3 +1109,66 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .room-stack > .avatar:nth-child(2) { right: 0; bottom: 0; }
 .room-stack-more { position: absolute; right: -2px; bottom: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--surface-2); color: var(--text-2); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1.5px var(--bg, var(--surface)); }
 .project-rooms:empty { display: none; }
+
+/* ---- 服务商与用量 ---- */
+.card-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
+.prov-icon { display: inline-grid; place-items: center; flex: none; border-radius: 8px; color: #fff; font-weight: 600; line-height: 1; }
+.prov-list { display: flex; flex-direction: column; gap: 2px; }
+.prov-empty { padding: 6px 2px; font-size: var(--fs-sm); }
+.prov-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px; border-radius: 12px; transition: background 0.15s; }
+.prov-row:hover { background: var(--surface-hover); }
+.prov-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.prov-name { display: flex; align-items: center; gap: 6px; font-weight: 500; min-height: 28px; flex-wrap: wrap; }
+.prov-sub { display: flex; align-items: center; gap: 4px; font-size: var(--fs-xs); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.prov-results { display: flex; gap: 12px; font-size: var(--fs-xs); align-items: center; animation: t-fade-in 0.2s ease; }
+.prov-actions { display: flex; gap: 4px; align-items: center; padding-top: 1px; opacity: 0.85; transition: opacity 0.15s; }
+.prov-row:hover .prov-actions { opacity: 1; }
+.prov-switch { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 6px; animation: t-fade-in 0.2s ease; }
+.chip-toggle { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface); font-size: var(--fs-xs); transition: all 0.15s; }
+.chip-toggle:hover { border-color: var(--border-strong); }
+.chip-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); }
+.prov-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
+.dlg-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 8px; }
+.dlg-head h3 { margin: 0; font-size: var(--fs-lg, 16px); }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; }
+.prov-form { display: flex; flex-direction: column; gap: 14px; padding: 8px 18px; overflow: auto; }
+.preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.preset { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); font-size: var(--fs-sm); text-align: left; overflow: hidden; white-space: nowrap; transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
+.preset:hover { border-color: var(--border-strong); }
+.preset[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--ring); }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.key-link { margin-left: 8px; font-weight: 400; font-size: var(--fs-xs); display: inline-flex; align-items: center; gap: 2px; }
+.cc-list { display: flex; flex-direction: column; gap: 2px; }
+.cc-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; cursor: pointer; }
+.cc-item:hover { background: var(--surface-hover); }
+.cc-name { font-weight: 500; }
+.cc-key { margin-left: auto; font-size: var(--fs-xs); font-family: var(--mono, monospace); }
+.usage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.usage-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 12px; background: var(--surface-2); min-height: 132px; transition: transform 0.2s var(--ease-pop, ease), box-shadow 0.2s; }
+.usage-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-1, 0 2px 8px rgb(0 0 0 / 0.06)); }
+.usage-card[data-na] { opacity: 0.75; }
+.usage-head { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.usage-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.usage-refresh { margin-left: auto; }
+.usage-na { font-size: var(--fs-sm); }
+.limits { display: flex; flex-direction: column; gap: 8px; }
+.limit-top { display: flex; justify-content: space-between; font-size: var(--fs-xs); }
+.limit-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+.limit-track { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin-top: 4px; }
+.limit-fill { height: 100%; border-radius: 3px; background: var(--ok); transition: width 0.5s var(--ease-pop, ease); }
+.limit[data-tone="warn"] .limit-fill { background: var(--warn); }
+.limit[data-tone="bad"] .limit-fill { background: var(--danger); }
+.limit-reset { font-size: 11px; margin-top: 3px; }
+.toks { display: flex; gap: 16px; }
+.tok { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); }
+.tok b { font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
+.usage-notes, .usage-src { font-size: 11px; line-height: 1.5; }
+.usage-src { margin-top: auto; }
+.usage-rows { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); }
+.usage-row { display: flex; justify-content: space-between; gap: 8px; }
+.usage-row b { font-variant-numeric: tabular-nums; }
+@keyframes t-fade-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@media (max-width: 640px) { .prov-row { flex-wrap: wrap; } .prov-actions { width: 100%; padding-left: 40px; flex-wrap: wrap; } .field-pair { grid-template-columns: 1fr; } }
+.prov-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.local-icon { width: 20px; height: 20px; font-size: 11px; background: var(--text-3); }
+fieldset.prov-pick, fieldset.preset-grid { border: 0; margin: 0; padding: 0; min-width: 0; }

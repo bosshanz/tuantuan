@@ -4,6 +4,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  Gauge,
   MessagesSquare,
   PlugZap,
   Plus,
@@ -23,6 +24,7 @@ import { defaultsSummary } from "./config";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
 import { NewProject, ProjectSettings } from "./Projects";
+import { ProvidersPage } from "./Providers";
 import { SetupPage } from "./Setup";
 import { AgentAvatar, RoomIcon, roomSubtitle, useHashRoute } from "./ui";
 
@@ -96,7 +98,15 @@ export function App() {
   }, []);
 
   const section =
-    route[0] === "a" ? "agents" : route[0] === "setup" ? "setup" : route[0] === "harness" ? "harness" : "rooms";
+    route[0] === "a"
+      ? "agents"
+      : route[0] === "setup"
+        ? "setup"
+        : route[0] === "harness"
+          ? "harness"
+          : route[0] === "providers"
+            ? "providers"
+            : "rooms";
   // 新手引导 opens by itself on first launch only; once finished or skipped it is gone for good.
   const onboarded = meta?.onboarded;
   useEffect(() => {
@@ -125,12 +135,13 @@ export function App() {
   }, []);
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
-  const mobileView = section === "setup" || section === "harness" || detailId ? "main" : "list";
+  const fullPage = section === "setup" || section === "harness" || section === "providers";
+  const mobileView = fullPage || detailId ? "main" : "list";
   const harnessName = (id: string) => meta?.harnesses.find((h) => h.id === id)?.name ?? id;
 
   if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
-    <div className={`shell ${section === "setup" || section === "harness" ? "no-list" : ""}`} data-mobile={mobileView}>
+    <div className={`shell ${fullPage ? "no-list" : ""}`} data-mobile={mobileView}>
       <nav className="rail" aria-label="主导航">
         <div className="logo" title="团团 Tuantuan">
           <BrandMark size={32} />
@@ -147,6 +158,12 @@ export function App() {
           label="Harness"
           current={section === "harness"}
           onClick={() => go("harness")}
+        />
+        <RailButton
+          icon={<Gauge size={20} />}
+          label="服务商"
+          current={section === "providers"}
+          onClick={() => go("providers")}
         />
         <div className="spacer" />
         <button
@@ -373,6 +390,7 @@ export function App() {
           <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} onFinish={finishOnboarding} />
         )}
         {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
+        {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
         {section === "agents" && !detailId && loaded && (
           <div className="empty">
             <div className="empty-icon">
