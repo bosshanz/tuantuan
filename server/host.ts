@@ -13,7 +13,7 @@ import { CUSTOM_HARNESS, type Item, runTurn } from "./custom";
 import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./harness";
 import { harnessProcessEnv } from "./harness-env";
 import { pluginOverlay } from "./library";
-import { loadSkillBody, materializeSkills } from "./skills";
+import { loadSkillBody, materializeSkills, selectedSkillIndex } from "./skills";
 import type { Agent, Room, Store } from "./store";
 import { ValidationError } from "./store";
 import type { TuantuanMcp } from "./tuantuan-mcp";
@@ -78,6 +78,8 @@ interface SessionSlot {
   /** Updates the harness replayed on session/load (history Tuantuan may not have); shown read-only. */
   replay: acp.SessionUpdate[];
   identityPending: boolean;
+  managedSkills: SessionView["skills"];
+  harnessSkills: SessionView["skills"];
   /** Whether this ACP session was attached to Tuantuan's room tools. */
   tuantuanMcp: boolean;
   /** Session-cumulative cost known before any turn: 0 for a fresh session, null when resumed. */
@@ -169,6 +171,7 @@ export class HarnessHost {
       agent.harness,
       cwd,
       pluginOverlay(this.dataDir, agent.id, agent.harness).skills,
+      { ...base, ...status.env, ...agent.env },
     );
     // Keep the user's CC Switch / Codex config: inherit ANTHROPIC_* / OPENAI_*, never isolate
     // CLAUDE_CONFIG_DIR or CODEX_HOME; only merge developer_instructions into CODEX_CONFIG.
@@ -194,7 +197,10 @@ export class HarnessHost {
       prov ? [prov.id, prov.updatedAt] : null,
     ]);
     const existing = this.procs.get(key);
-    if (existing && existing.signature === signature && existing.acp.proc.exitCode === null) return existing;
+    if (existing && existing.signature === signature && existing.acp.proc.exitCode === null) {
+      existing.acp.setSkillReadRoots(mat.skills.map((s) => s.dir));
+      return existing;
+    }
     if (existing) this.dropProc(existing);
 
     const proc: Proc = {
@@ -208,7 +214,7 @@ export class HarnessHost {
       ready: null as never,
     };
     proc.acp = new AcpProcess(
-      { command: status.command, args: status.args, env, cwd },
+      { command: status.command, args: status.args, env, cwd, skillReadRoots: mat.skills.map((s) => s.dir) },
       {
         onUpdate: (n) => this.onUpdate(proc, n),
         requestPermission: (p) => this.requestPermission(proc, agent.id, p),
@@ -257,10 +263,8 @@ export class HarnessHost {
       case "available_commands_update": {
         const split = splitCommands(u.availableCommands);
         v.commands = split.commands;
-        // Merge harness $skills over same-named entries; keep room/agent skills otherwise.
-        const by = new Map(v.skills.map((x) => [x.name, x]));
-        for (const sk of split.skills) by.set(sk.name, sk);
-        v.skills = [...by.values()];
+        slot.harnessSkills = split.skills;
+        v.skills = pickerSkills(slot.managedSkills, slot.harnessSkills);
         break;
       }
       case "config_option_update":
@@ -382,17 +386,23 @@ export class HarnessHost {
     const previous = this.slots.get(slotKey);
     const cached =
       previous?.view.sessionId && proc.sessions.get(previous.view.sessionId) === previous ? previous : undefined;
-    if (cached && (cached.turn || cached.tuantuanMcp === !!own)) return { proc, slot: cached };
-
     const plugins = pluginOverlay(this.dataDir, agent.id, agent.harness);
-    const mat = materializeSkills(this.dataDir, agent.id, agent.harness, cwd, plugins.skills);
+    const mat = materializeSkills(this.dataDir, agent.id, agent.harness, cwd, plugins.skills, proc.acp.launch.env);
+    const managedSkills = [...mat.skills, ...mat.roomSkills].map((x) => ({ name: x.name, description: x.description }));
+    if (cached && (cached.turn || cached.tuantuanMcp === !!own)) {
+      const before = JSON.stringify(cached.view.skills);
+      cached.managedSkills = managedSkills;
+      cached.view.skills = pickerSkills(managedSkills, cached.harnessSkills);
+      if (JSON.stringify(cached.view.skills) !== before) this.events.session(room.id, agent.id, { ...cached.view });
+      return { proc, slot: cached };
+    }
     const view: SessionView = {
       sessionId: null,
       harness: proc.spec.id,
       configOptions: [],
       modes: null,
       commands: [],
-      skills: [...mat.skills, ...mat.roomSkills].map((x) => ({ name: x.name, description: x.description })),
+      skills: pickerSkills(managedSkills, []),
       usage: null,
       title: null,
       capabilities: {
@@ -411,6 +421,8 @@ export class HarnessHost {
       replaying: false,
       replay: [],
       identityPending: false,
+      managedSkills,
+      harnessSkills: [],
       tuantuanMcp: !!own,
       costBase: null,
       usageModel: null,
@@ -470,6 +482,8 @@ export class HarnessHost {
     }
     checkCurrent();
     if (cached && view.sessionId === cached.view.sessionId) {
+      slot.harnessSkills = cached.harnessSkills;
+      view.skills = pickerSkills(managedSkills, slot.harnessSkills);
       slot.identityPending = cached.identityPending;
       slot.costBase = cached.costBase;
       if (slot.replay.length === 0) slot.replay = [...cached.replay];
@@ -592,9 +606,31 @@ export class HarnessHost {
     const { proc, slot } = await waitForSession(this.session(room, agent, identity, { startingTurn: true }), signal);
     signal.throwIfAborted();
     const sessionId = slot.view.sessionId as string;
-    if (slot.identityPending) {
-      blocks = [{ type: "text", text: `<tuantuan-identity>\n${identity}\n</tuantuan-identity>` }, ...blocks];
-      slot.identityPending = false;
+    const selection = materializeSkills(
+      this.dataDir,
+      agent.id,
+      agent.harness,
+      this.cwdFor(room),
+      pluginOverlay(this.dataDir, agent.id, agent.harness).skills,
+      proc.acp.launch.env,
+    );
+    proc.acp.setSkillReadRoots(selection.skills.map((s) => s.dir));
+    // Harness slash handlers inspect the original leading text. Context before /usage, /logout,
+    // etc. would bypass that handler and accidentally turn a native command into a model prompt.
+    const nativeCommand = blocks
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trimStart()
+      .startsWith("/");
+    // Declarations may arrive after session/new. Unknown slash commands also belong to the
+    // harness: preserve them rather than changing their routing by injecting context first.
+    if (!nativeCommand) {
+      blocks = [{ type: "text", text: selectedSkillIndex(selection.skills) }, ...blocks];
+      if (slot.identityPending) {
+        blocks = [{ type: "text", text: `<tuantuan-identity>\n${identity}\n</tuantuan-identity>` }, ...blocks];
+        slot.identityPending = false;
+      }
     }
     if (!slot.view.capabilities.image) blocks = blocks.filter((b) => b.type !== "image");
     slot.turn = (update) => {
@@ -668,14 +704,15 @@ export class HarnessHost {
   private ensureCustom(room: Room, agent: Agent): SessionSlot {
     const key = `${room.id}|${agent.id}`;
     let slot = this.slots.get(key);
+    const mat = materializeSkills(
+      this.dataDir,
+      agent.id,
+      CUSTOM_HARNESS,
+      this.cwdFor(room),
+      pluginOverlay(this.dataDir, agent.id, CUSTOM_HARNESS).skills,
+    );
+    const managedSkills = [...mat.skills, ...mat.roomSkills].map((x) => ({ name: x.name, description: x.description }));
     if (!slot) {
-      const mat = materializeSkills(
-        this.dataDir,
-        agent.id,
-        CUSTOM_HARNESS,
-        this.cwdFor(room),
-        pluginOverlay(this.dataDir, agent.id, CUSTOM_HARNESS).skills,
-      );
       slot = {
         roomId: room.id,
         agentId: agent.id,
@@ -699,6 +736,8 @@ export class HarnessHost {
         replaying: false,
         replay: [],
         identityPending: false,
+        managedSkills,
+        harnessSkills: [],
         tuantuanMcp: false,
         costBase: null,
         usageModel: null,
@@ -706,6 +745,10 @@ export class HarnessHost {
       this.slots.set(key, slot);
       this.events.session(room.id, agent.id, { ...slot.view });
     }
+    const before = JSON.stringify(slot.view.skills);
+    slot.managedSkills = managedSkills;
+    slot.view.skills = pickerSkills(managedSkills, []);
+    if (JSON.stringify(slot.view.skills) !== before) this.events.session(room.id, agent.id, { ...slot.view });
     const model = this.store.getRoomModel(room.id, agent.id) ?? agent.custom?.model ?? "";
     slot.view.customModel = { value: model, default: agent.custom?.model ?? "" };
     return slot;
@@ -964,6 +1007,10 @@ function harnessError(proc: Proc, e: unknown, stderrBefore = ""): Error {
   if (!detail && errLines && !msg.includes(errLines)) msg = `${msg}\n${errLines.slice(-600)}`;
   if (/auth/i.test(msg)) return new ValidationError(`${proc.spec.name} 需要登录：${proc.spec.auth}`, 401);
   return e instanceof Error && e.message === msg ? e : new Error(msg);
+}
+
+function pickerSkills(managed: SessionView["skills"], advertised: SessionView["skills"]): SessionView["skills"] {
+  return [...new Map([...managed, ...advertised].map((s) => [s.name, s])).values()];
 }
 
 /** Codex advertises skills as available_commands whose names start with "$". */

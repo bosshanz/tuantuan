@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "../server/app";
@@ -292,6 +292,10 @@ describe("session/load replay", () => {
     const sessionDir = mkdtempSync(join(tmpdir(), "tuantuan-collab-sessions-"));
     try {
       const a = await agent("Historian", { env: { MOCK_AGENT_SESSION_DIR: sessionDir } });
+      const skillDir = join(sessionDir, "selected-skill");
+      mkdirSync(skillDir);
+      writeFileSync(join(skillDir, "SKILL.md"), "---\nname: history-skill\ndescription: private selection\n---\nBody");
+      expect((await api("POST", `/api/agents/${a.id}/skills`, { action: "enable", key: skillDir })).status).toBe(200);
       const r1 = await room("r1", [a.id]);
       await say(r1.id, "外部历史");
       const s1 = (await api<{ sessionId: string }>("GET", `/api/rooms/${r1.id}/agents/${a.id}/session`)).data.sessionId;
@@ -315,6 +319,9 @@ describe("session/load replay", () => {
       expect(groupReplay.some((turn) => turn.user.includes("协作历史"))).toBe(true);
       expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-coordination"))).toBe(true);
       expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-results"))).toBe(true);
+      expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-skills") && !turn.user.includes(skillDir))).toBe(
+        true,
+      );
       expect(
         groupReplay.some((turn) =>
           turn.reply.parts.some((part) => part.kind === "text" && part.text.includes("群主汇总")),

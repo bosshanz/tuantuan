@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listDirs } from "../server/dirpicker";
@@ -60,8 +60,9 @@ describe("skill discovery", () => {
     );
     expect(pk(by, "plug-one").label).toBe("tidy-plugin");
     expect(pk(by, "proj-claude").label).toBe("项目 .claude");
-    // Claude Code reads ~/.claude, plugins and project .claude itself.
-    expect(pk(by, "claude-one").native && pk(by, "plug-one").native && pk(by, "proj-claude").native).toBe(true);
+    // Claude Code reads native skill directories; plugin caches alone do not prove enablement.
+    expect(pk(by, "claude-one").native && pk(by, "proj-claude").native).toBe(true);
+    expect(pk(by, "plug-one").native).toBe(false);
     expect(pk(by, "codex-one").native || pk(by, "codex-one").enabled).toBe(false);
 
     setSkillLinked(data, "a1", pk(by, "codex-one").key, true);
@@ -72,7 +73,7 @@ describe("skill discovery", () => {
     mkdirSync(join(proj, ".claude", "skills", "proj-agents-taken"), { recursive: true });
     const m = materializeSkills(data, "a1", "claude-code", proj);
     expect(m.skills.map((s) => s.name)).toContain("codex-one");
-    expect(lstatSync(join(proj, ".claude", "skills", "codex-one")).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(proj, ".claude", "skills", "codex-one"))).toBe(false);
     expect(lstatSync(join(proj, ".claude", "skills", "proj-claude")).isSymbolicLink()).toBe(false);
 
     setSkillLinked(data, "a1", pk(by, "codex-one").key, false);

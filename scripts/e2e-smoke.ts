@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { chromium, type Page } from "playwright-core";
 import { serve } from "../server/app";
+import { setSkillLinked } from "../server/skills";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
+import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { registryAuthSmoke } from "./e2e-registry-auth";
+import { registryUsageSmoke } from "./e2e-registry-usage";
 import { repliesSmoke } from "./e2e-replies";
 import { schedulingSmoke } from "./e2e-scheduling";
 import { terminalSmoke } from "./e2e-terminal";
@@ -335,6 +338,16 @@ try {
   };
   await createAgent("Alice", "你是产品经理。");
   await createAgent("Bob", "你是工程师。");
+  // The mock does not natively load project skills; completion fixtures belong to Bob explicitly.
+  const bobSkillsId = app.store.listAgents().find((a) => a.name === "Bob")?.id;
+  if (!bobSkillsId) throw new Error("Bob was not created");
+  for (let i = 1; i <= 18; i++)
+    setSkillLinked(
+      dirname(dbPath),
+      bobSkillsId,
+      join(cwd, ".agents", "skills", `completion-${String(i).padStart(2, "0")}`),
+      true,
+    );
 
   // BYOK custom agent against a local mock OpenAI-compatible server.
   const byok = Bun.serve({
@@ -493,7 +506,9 @@ try {
   await page.locator(".messages").getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
   await shot("conversation-handoff");
   await terminalSmoke(browser, `http://localhost:${server.port}`, group.id, project.id, cwd, shotsDir);
+  await registryUsageSmoke(browser, `http://localhost:${server.port}`, shotsDir);
   await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
+  await chatScrollSmoke(browser, `http://localhost:${server.port}`, shotsDir);
   await schedulingSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   // Auxiliary smoke pages use their own contexts; return focus before testing caret-driven completion.
   await page.bringToFront();
@@ -603,7 +618,15 @@ try {
   await input.fill("$");
   const skillList = page.getByRole("listbox", { name: "Skills", exact: true });
   await skillList.waitFor();
-  if ((await skillList.getByRole("option").count()) < 19) throw new Error("skill list was truncated");
+  if ((await skillList.getByRole("option").count()) !== 18)
+    throw new Error("skill list must contain all 18 selections for Bob");
+  if (
+    await skillList
+      .getByRole("option")
+      .filter({ hasText: /\$(deploy|pdf-tools)\b/ })
+      .count()
+  )
+    throw new Error("unselected project skills or Alice's selections leaked into Bob's menu");
   await skillList.getByRole("option").filter({ hasText: "$completion-18" }).waitFor();
   const lastSkill = await skillList.getByRole("option").last().locator("code").innerText();
   await input.press("ArrowUp");

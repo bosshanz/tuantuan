@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowRightLeft,
   ArrowUp,
   ChevronLeft,
@@ -19,6 +20,7 @@ import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useReducer, use
 import { canQuoteMessage, type MessageQuote, messageQuote } from "../../shared/messageQuote";
 import "./messageQuote.css";
 import "./chatTasks.css";
+import "./chatScroll.css";
 import type { ReplayTurn, Timeline } from "../../shared/timeline";
 import {
   type Agent,
@@ -44,6 +46,7 @@ import { PickList } from "./PickList";
 import type { TerminalFocusRequest } from "./ProjectTerminal";
 import { insertSkill, matchingSkills, skillTokenAt } from "./skillCompletion";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
+import { useChatScroll } from "./useChatScroll";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
 const ProjectTerminal = lazy(() => import("./ProjectTerminal"));
@@ -107,10 +110,10 @@ export function ChatView(props: {
   const terminalEnding = useRef(false);
   const terminalSlot = useRef<HTMLDivElement>(null);
   const terminalButton = useRef<HTMLButtonElement>(null);
+  const taskDisclosure = useRef<HTMLDivElement>(null);
+  const { listRef, following, followLatest, onScroll, onWheel, onTouchMove } = useChatScroll();
   const showTerminal = useCallback(
     (open: boolean) => {
-      const list = listRef.current;
-      if (list) followBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 24;
       setTerminalOpen(open);
       if (open) {
         if (terminalEnding.current) {
@@ -141,29 +144,6 @@ export function ChatView(props: {
     return () => window.removeEventListener("keydown", toggle, true);
   }, [terminalOpen, props.project, showTerminal]);
   const panelPresence = usePresence(panel, 180);
-  const listRef = useRef<HTMLDivElement>(null);
-  const taskDisclosure = useRef<HTMLDivElement>(null);
-  const opened = useRef(false);
-  const followBottom = useRef(true);
-  // Content or size changes move the edges without a scroll event.
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      // Resizing a dock or disclosure changes only the viewport. Preserve reading position or follow the bottom.
-      if (opened.current && followBottom.current) el.scrollTop = el.scrollHeight;
-      syncFades(el);
-    });
-    ro.observe(el);
-    for (const c of el.children) ro.observe(c);
-    const mo = new MutationObserver(() => syncFades(el));
-    mo.observe(el, { childList: true, subtree: true, characterData: true });
-    syncFades(el);
-    return () => {
-      ro.disconnect();
-      mo.disconnect();
-    };
-  }, []);
   const members = useMemo(
     () => room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a),
     [room.agentIds, agents],
@@ -236,17 +216,11 @@ export function ChatView(props: {
     api<ReplayTurn[]>("GET", `/api/rooms/${room.id}/agents/${primaryId}/replay`).then(setReplay, () => {});
   }, [room.id, primaryId, primarySession]);
 
-  // Open at the latest message; afterwards stick to the bottom only when the reader is already there.
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el || messages.length === 0) return;
-    if (!opened.current || el.scrollHeight - el.scrollTop - el.clientHeight < 240) el.scrollTop = el.scrollHeight;
-    opened.current = true;
-  }, [messages]);
-
   const send = async () => {
     const content = draft.trim();
     if (sendingRef.current || (!content && images.length === 0)) return;
+    // Sending resumes the tail now; a later upward gesture can revoke it before the HTTP reply arrives.
+    followLatest();
     sendingRef.current = true;
     setSending(true);
     setSendError(null);
@@ -263,10 +237,6 @@ export function ChatView(props: {
       setQuote(null);
       // The server's reply is authoritative: show it now even if the socket is slow, reconnecting or raced.
       dispatch({ type: "event", event: { type: "message", message: sent } });
-      requestAnimationFrame(() => {
-        const el = listRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-      });
     } catch (e) {
       setSendError(`发送失败：${(e as Error).message}`);
     } finally {
@@ -411,30 +381,7 @@ export function ChatView(props: {
           )}
 
           <div className="messages-wrap">
-            <div
-              className="messages"
-              ref={listRef}
-              onWheel={() => {
-                followBottom.current = false;
-              }}
-              onTouchMove={() => {
-                followBottom.current = false;
-              }}
-              onScroll={(e) => {
-                const el = e.currentTarget;
-                // Layout-driven scroll events may arrive a frame after the dock has resized again.
-                // Preserve the pre-toggle follow intent through the transition, unless the reader scrolls.
-                const movingLayout = [terminalSlot.current, taskDisclosure.current].some((panel) =>
-                  panel?.getAnimations().some((animation) => animation.playState === "running"),
-                );
-                if (!followBottom.current || !movingLayout)
-                  followBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-                const wrap = el.parentElement;
-                if (!wrap) return;
-                wrap.toggleAttribute("data-scrolled", el.scrollTop > 4);
-                wrap.toggleAttribute("data-more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
-              }}
-            >
+            <div className="messages" ref={listRef} onWheel={onWheel} onTouchMove={onTouchMove} onScroll={onScroll}>
               {messages.length === 0 && replay.length === 0 && !loadError && (
                 <div className="empty">
                   <RoomIcon room={room} agents={agents} />
@@ -509,6 +456,12 @@ export function ChatView(props: {
             </div>
             <div className="msg-fade msg-fade-top" aria-hidden />
             <div className="msg-fade msg-fade-bottom" aria-hidden />
+            {!following && (
+              <button type="button" className="btn sm chat-latest" onClick={followLatest} aria-label="回到最新消息">
+                <ArrowDown size={14} />
+                回到最新
+              </button>
+            )}
           </div>
 
           <footer className="composer">
@@ -519,10 +472,6 @@ export function ChatView(props: {
                 cancellations={cancellations}
                 onCancel={(id) => void cancel(id)}
                 disclosureRef={taskDisclosure}
-                onBeforeToggle={() => {
-                  const list = listRef.current;
-                  if (list) followBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 24;
-                }}
               />
             )}
             {sendError && (
@@ -709,14 +658,6 @@ function groupMessages(messages: Message[]): Group[] {
   return out;
 }
 
-/** Fade edges show only when there is content hidden above / below. */
-function syncFades(el: HTMLElement | null) {
-  const wrap = el?.parentElement;
-  if (!el || !wrap) return;
-  wrap.toggleAttribute("data-scrolled", el.scrollTop > 4);
-  wrap.toggleAttribute("data-more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
-}
-
 function MessageItem(props: {
   m: Message;
   terminals: Record<string, TerminalSnapshot>;
@@ -824,7 +765,6 @@ function TaskList(props: {
   cancellations: Record<string, { pending: boolean; error: string | null }>;
   onCancel: (id: string) => void;
   disclosureRef: React.RefObject<HTMLDivElement | null>;
-  onBeforeToggle: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -874,7 +814,6 @@ function TaskList(props: {
           aria-controls={listId}
           aria-describedby={summaryId}
           onClick={() => {
-            props.onBeforeToggle();
             if (expanded && props.disclosureRef.current?.contains(document.activeElement)) toggleRef.current?.focus();
             setExpanded((value) => !value);
           }}

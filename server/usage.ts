@@ -29,6 +29,9 @@ export interface TokenTotals {
 
 export interface HarnessUsage {
   harness: string;
+  /** Registry display name and explicit live-refresh support. */
+  name?: string;
+  live?: boolean;
   /** Tokens counted from local logs since local midnight. */
   today: TokenTotals | null;
   week: TokenTotals | null;

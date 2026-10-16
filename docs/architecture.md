@@ -11,22 +11,23 @@
 | 文件 | 职责 |
 | --- | --- |
 | `server/main.ts` | 打开数据库，按本机监听地址启动服务；退出时先停止调度，再关闭 Harness、安装任务与项目终端，桌面父进程看门狗 |
-| `server/project-terminal.ts` / `shared/project-terminal.ts` | 项目交互式终端：Bun PTY、每项目一个 shell、输入 / 尺寸校验、有界输出重放、退出与进程清理；独立于 ACP 工具终端 |
+| `server/project-terminal.ts` / `shared/project-terminal.ts` | 项目交互式终端：Bun PTY、每项目多个独立 shell、输入 / 尺寸校验、有界输出重放、退出与进程清理；独立于 ACP 工具终端 |
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件；HTTP / WS 共用 Host、Origin 与跨站请求检查 |
 | `server/harness.ts` | Harness 定义（常用 6 个 + mock，及 `reg:<id>` 形式的任意 Registry Agent）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖、来源判定 |
 | `server/registry.ts` | 官方 ACP Registry 客户端：本地缓存 → 随包快照兜底、zod 校验（坏条目跳过）、6 小时刷新、图标缓存（只接受 SVG）；平台键；额外的实验性条目（ZCode 桥接） |
 | `server/managed.ts` | 团团安装的 Harness（`<数据目录>/harnesses`）：npx 包用 Bun 或托管 Node 22（`npm install --omit=dev`）、uvx 用 uv（用户的或下载的）、二进制按平台下载 + sha256 校验 + 解压；`manifest.json` 记录版本与命令；卸载 |
 | `server/harness-secrets.ts` | 按 Harness 保存的 API Key（`settings.harnessEnv`，打码给前端，只注入该 Harness 进程）；打开终端（osascript / x-terminal-emulator…）；缺 Key 错误识别在 `shared/auth.ts` |
 | `server/installer.ts` | 安装任务：命令只来自定义（不接受请求里的命令）或 Registry 任务；日志流、取消、超时 |
-| `server/acp.ts` | `AcpProcess`：启动 Harness 并用 SDK `ndJsonStream` 连接；`fs/*` 校验真实路径与最近现存父目录，`terminal/*` 只约束启动 cwd；权限请求、终端输出与 stderr 尾部 |
+| `server/acp.ts` | `AcpProcess`：启动 Harness 并用 SDK `ndJsonStream` 连接；`fs/*` 校验真实路径与最近现存父目录；选中的 Skill 目录额外只读授权，每轮替换；`terminal/*` 只约束启动 cwd；权限请求、终端输出与 stderr 尾部 |
 | `server/process-tree.ts` | Harness、ACP 终端与安装命令的进程组启动 / 回收；POSIX 按组发信号，Windows 使用 `taskkill /T /F` |
 | `server/custom.ts` | BYOK「自定义 API」harness：OpenAI Chat / Responses / Anthropic Messages 的 SSE 流式与 tool call，输出 ACP `session/update`；Key 只在服务端 |
-| `server/skills.ts` | Skills：解析 SKILL.md；自动发现（用户级 / 插件 / 项目）、勾选链接；导入（目录 / git / GitHub / SKILL.md 链接，先预览再选）；按 Harness 链接到会话目录的原生位置（不覆盖）；BYOK 的 `load_skill` |
+| `server/skills.ts` | Skills：解析 SKILL.md；统一原生来源与 Agent 选择，按需路径索引；导入（目录 / git / GitHub / SKILL.md 链接，先预览再选）；不写共享项目链接；BYOK 的 `load_skill` 仅访问当前选择 |
 | `server/providers.ts` | 服务商：预设、Key 打码、按 Harness 注入（Claude Code 用进程 env，Codex 用 ACP `providers/set` + `CODEX_CONFIG` 里的 model，BYOK 直接用）、测速、公开余额接口、只读导入 CC Switch |
 | `usage_log` 表 | 每轮 Token（Harness 报告的 usage、模型、缓存读 / 写、思考、费用差分）；`GET /api/usage/stats?since=&tz=` 按 Agent / 模型 / Harness 汇总并按天分桶，`reporting` 列出报告过数据的 Harness |
-| `server/library.ts` | 「Skills 与插件」：只读扫描 ~/.claude / ~/.agents / ~/.codex / 项目目录，解析 Claude 插件（plugin.json），导入到 `<data>/library`（更新 / 删除），算各 Harness 支持；按 Agent 勾选的插件在建会话时变成 Claude `_meta.claudeCode.options.plugins` 或 Skill 链接 + stdio MCP |
+| `server/library.ts` | 「Skills 与插件」：只读扫描 ~/.claude / ~/.agents / ~/.codex / 项目目录，解析 Claude 插件（plugin.json），导入到 `<data>/library`（更新 / 删除），算各 Harness 支持；按 Agent 勾选的插件在建会话时变成 Claude `_meta.claudeCode.options.plugins` 或 Skill 索引 + stdio MCP |
 | `web/src/brands.ts` | 模型 id → 厂商（含 `openrouter/…`、`anthropic/…` 前缀），未知一律中性图标；Logo 来自 @lobehub/icons（MIT） |
 | `server/usage.ts` | 用量：读 `~/.claude/projects` / `~/.codex/sessions` 的 JSONL，解析 Claude Code `/usage`、Codex `/status`、Grok CLI 会话用量及 ACP billing 额度；未知值保留为空 |
+| `server/registry-usage.ts` | Registry Harness 的原生额度查询与解析；Antigravity `/usage`、ZCode `account/usage_stats`；不读取凭据或改变登录渠道 |
 | `server/dirpicker.ts` | 选择文件夹：系统对话框（osascript / zenity / kdialog，可由桌面壳替换）+ 应用内浏览器的目录列表与常用位置 |
 | `server/host.ts` | `HarnessHost`：按「房间 + Agent + 工作目录」隔离进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；同房间同 Agent 防重入，权限请求挂起直到用户回答 |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
@@ -41,8 +42,9 @@
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
+| `web/src/useChatScroll.ts` | 聊天自动跟随意图；上滑立即暂停，消息增量和布局变化保持阅读位置，回到底部或点击「回到最新」恢复 |
 | `shared/roomPreview.ts` / `web/src/roomListState.ts` | 列表快照和全局 `room.preview` 共用摘要规则；按消息 seq 与状态防回退，列表加载期间重放全局事件，重连刷新 |
-| `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，刷新重连同一项目 shell；只在显式打开且用户尚未选择其他焦点时聚焦，正常退出状态不被迟到的 PTY 错误覆盖 |
+| `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，标签页各自连接独立 shell，刷新恢复项目全部终端与选中页；只在显式打开且用户尚未选择其他焦点时聚焦，正常退出状态不被迟到的 PTY 错误覆盖 |
 | `web/src/messageMerge.ts` | 历史快照与实时消息按 id 合并，保留完成态 / 较长流式文本；发送接口返回的消息立即插入 |
 | `web/src/motion.ts` | `usePresence`（退场动画期间保持挂载）、`withViewTransition`（路由切换） |
 | `web/src/BrandMark.tsx` | 团团 Logo（导航栏，眨眼 + 悬停互看）；favicon 在 `web/public/` |
@@ -88,9 +90,15 @@
 
 ## 编排
 
-项目终端不参与 Agent 编排：`POST /api/projects/:id/terminal` 幂等打开，`GET` 读取状态，`DELETE ?terminalId=` 按实例结束，`/ws/terminal/:id` 推送快照 / 输出 / 退出。所有入口沿用本机请求边界。服务端内存拥有进程、最多 12 个终端及每终端 256K 字符尾部输出；浏览器只保留面板开关，断线不杀进程。Bun 1.3 的 PTY 部分写入按实际接受字节补发；交互式任务各自有进程组，结束时按专属 TTY 和后代身份清理。自然退出后已主动脱离的任务保留 shell 语义，无数据库迁移。
+项目终端不参与 Agent 编排：`POST /api/projects/:id/terminal` 默认幂等打开，加 `{create:true}` 新建独立实例；`GET` 默认读首个实例，`?all=1` 列出全部，`DELETE ?terminalId=` 按实例结束，`/ws/terminal/:id` 推送快照 / 输出 / 退出。所有入口沿用本机请求边界。服务端内存拥有进程、最多 12 个终端及每终端 256K 字符尾部输出；浏览器保留面板状态和选中标签，非活动标签停止输入但继续接收输出，断线不杀进程。项目删除或目录改变会清理所属全部终端。Bun 1.3 的 PTY 部分写入按实际接受字节补发；交互式任务各自有进程组，结束时按专属 TTY 和后代身份清理。自然退出后已主动脱离的任务保留 shell 语义，无数据库迁移。
+
+Skills 的原生来源与 Agent 选择由 `skills.ts` 统一解析：真实路径去重时合并来源及 native 标记；Antigravity 包括 GEMINI_HOME 和项目 `.agents/.gemini`。当前选择在每轮普通 prompt 中形成 `<tuantuan-skills>` 索引，`AcpProcess` 同步替换额外只读范围，拒绝根外符号链接；索引不注入 Skill 正文。前导斜杠命令保留原始 blocks，不依赖异步命令声明；身份和 Skills 索引不改变命令文本，身份延后到普通消息注入。回放会话时剥离内部索引。停止写共享项目链接；历史未知归属链接作为原生项目来源保留，不推断所有者后删除。BYOK 只允许 `load_skill` 读取当前启用项。
 
 Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建立模型会话；解析当前周期百分比及旧版 credits schema，缓存最新查询和错误。此处是 Grok 的只读扩展，不引入原生 provider 适配层。
+
+`server/registry-usage.ts` 负责 Antigravity / ZCode 的额度解析和只读 ACP 查询。Antigravity 等待当前会话声明 `/usage` 后发送原生命令；ZCode 直接发 `account/usage_stats`，不建会话或调用模型。`app.ts` 在成功登录 / 握手的同一进程查询并保存公开额度快照，手动刷新单飞；页面读取缓存，不启动登录。失败保留未知与错误，不用旧数值冒充新结果。ZCode 0.70.0 仅覆盖个人渠道，团队套餐明确标注未支持。
+
+额度刷新、Harness 检测与登录请求在入口校验后关闭 HTTP 的默认空闲超时，实际等待仍受各 ACP 操作的超时限制。`process-tree.ts` 统一隔离进程清理错误：进程组信号失败保留日志，仅对尚未退出的原始子进程尝试回退；延迟强制终止同样不抛出未捕获异常，显式强制终止会撤销旧计时器。主进程先退出时仍回收其组内后代；清理失败不能覆盖查询结果或终止团团服务。
 
 群聊引用由 `POST messages` 的 `replyToId` 指定；`Store.insertMessage` 在写入事务中校验同房间及完成态，再生成最多 400 字符的快照。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
 
@@ -121,7 +129,7 @@ Host slot 记录是否已接入团团 MCP，并将可用性纳入初始化签名
 - **每个房间的每个 Agent 一个进程**：即使工作目录相同也不跨房间共享，避免取消超时强杀误伤；代价是更多进程与内存，原有持久化会话恢复保持。
 - **并行不隔离项目文件**：Agent 仍使用该项目目录，未自动分配 worktree 或给文件写入加全局锁；群主分工需明确职责和边界。调度保证派发、结果回流、预算及取消范围，分工质量与最终内容仍取决于模型和用户配置的身份指令。
 - **身份文档不落盘**：不改用户仓库；拒绝了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 方案，因为它们会把登录态也换掉，每个 Agent 要各自登录。
-- **文件路径校验不等于沙箱**：ACP 文件接口将目标及现存父目录解析为真实路径，拒绝目录外目标和符号链接逃逸。终端仅校验初始 cwd；命令可使用绝对路径或自行切换目录，Harness 内置工具也按自身沙箱与权限运行。旧文档将这些都称为「限制在 cwd」过宽；当前不提供操作系统隔离，也不防御路径校验后发生的并发文件系统替换。
+- **文件路径校验不等于沙箱**：ACP 文件接口将目标及现存父目录解析为真实路径，拒绝工作目录及当前 Skill 只读授权范围外的目标和符号链接逃逸。终端仅校验初始 cwd；命令可使用绝对路径或自行切换目录，Harness 内置工具也按自身沙箱与权限运行。旧文档将这些都称为「限制在 cwd」过宽；当前不提供操作系统隔离，也不防御路径校验后发生的并发文件系统替换。
 - **未做鉴权 / 多用户**：仅适合本机。
 
 ## Harness 来源与一键安装

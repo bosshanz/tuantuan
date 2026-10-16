@@ -8,7 +8,6 @@ import {
   realpathSync,
   rmSync,
   statSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -21,9 +20,8 @@ import { dirname, join, resolve } from "node:path";
  *   <root>/.claude-plugin/plugin.json + root-level skills/
  * Cross-agent: `.agents/skills/<name>/SKILL.md`
  *
- * Tuantuan keeps each agent's copies under <data>/agents/<id>/ and links the enabled ones into
- * the room folder's native discovery dir for the harness, never over an existing name and never
- * into the user's global dirs. Skills already in the room's .claude/.agents/.opencode are listed.
+ * Tuantuan keeps each agent's copies under <data>/agents/<id>/. Selections produce a read-on-demand
+ * index, never links in the shared project. Existing native project/global files remain untouched.
  */
 export interface SkillMeta {
   name: string;
@@ -50,8 +48,6 @@ export function parseSkillMd(text: string): { name: string; description: string;
   if (!name) return null;
   return { name, description: description || "", body };
 }
-
-const CUSTOM = "custom";
 
 export function agentSkillsRoot(dataDir: string, agentId: string): string {
   return join(dataDir, "agents", agentId, "skills");
@@ -136,7 +132,11 @@ export function listRoomSkills(cwd: string): SkillMeta[] {
 
 function dedupe(skills: SkillMeta[]): SkillMeta[] {
   const seen = new Set<string>();
-  return skills.filter((s) => (seen.has(s.name) ? false : (seen.add(s.name), true)));
+  return skills.filter((s) => {
+    if (seen.has(s.name)) return false;
+    seen.add(s.name);
+    return true;
+  });
 }
 
 export function setSkillEnabled(dataDir: string, agentId: string, name: string, enabled: boolean) {
@@ -198,72 +198,76 @@ export function importSkills(dataDir: string, agentId: string, from: string): Sk
 }
 
 export interface MaterializeResult {
-  /** Env vars to merge into the harness process. */
+  /** Never isolates the harness's own settings or credentials. */
   env: Record<string, string>;
-  /** Extra skill names discovered in the room cwd (for the $ picker). */
+  /** Native global/project skills, including existing user or historical links. */
   roomSkills: SkillMeta[];
-  /** Enabled agent skills after materialize. */
+  /** Current Agent's selected non-native skills; no shared project files are written. */
   skills: SkillMeta[];
 }
 
-/** Link the agent's enabled skills into the harness's native project dir in the room folder. */
+/** Resolve the same effective sources as Settings, without mutating the shared project. */
 export function materializeSkills(
   dataDir: string,
   agentId: string,
   harness: string,
   cwd: string,
   pluginSkills: { name: string; description: string; dir: string }[] = [],
+  harnessEnv: Record<string, string | undefined> = {},
 ): MaterializeResult {
-  const skills = [
+  const discovered = discoverSkills(dataDir, agentId, harness, cwd, harnessEnv);
+  const native = discovered.filter((s) => s.native);
+  const nativePaths = new Set(native.map((s) => realKey(s.dir)));
+  const selected = [
     ...listAgentSkills(dataDir, agentId).filter((s) => s.enabled),
     ...listLinkedSkills(dataDir, agentId),
     ...pluginSkills.map((p) => ({ ...p, source: "import" as const, enabled: true })),
   ];
-  const roomSkills = listRoomSkills(cwd);
-  const env: Record<string, string> = {};
-
-  const linkInto = (targetParent: string) => {
-    if (!skills.some((s) => statSync(s.dir).isDirectory())) return;
-    mkdirSync(targetParent, { recursive: true });
-    for (const s of skills) {
-      if (!statSync(s.dir).isDirectory()) continue; // skip legacy file-only
-      const dest = join(targetParent, s.name);
-      if (existsSync(dest)) continue;
-      try {
-        symlinkSync(s.dir, dest);
-      } catch {
-        cpSync(s.dir, dest, { recursive: true });
-      }
-    }
+  const seen = new Set<string>();
+  const skills = selected.filter((s) => {
+    const key = realKey(s.dir);
+    if (nativePaths.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return {
+    env: {},
+    skills,
+    roomSkills: native.map((s) => ({
+      name: s.name,
+      description: s.description,
+      dir: s.dir,
+      source: "room",
+      enabled: true,
+    })),
   };
-
-  // Layer on top of the user's global config — never set CLAUDE_CONFIG_DIR / CODEX_HOME /
-  // XDG_CONFIG_HOME (those hide ~/.claude/settings.json, ~/.codex/config.toml + auth.json,
-  // CC Switch ANTHROPIC_* env, Codex model_provider). Project-level discovery only:
-  //   Claude Code: <cwd>/.claude/skills
-  //   Codex / OpenCode / Grok: <cwd>/.agents/skills  (Codex also reads ~/.agents/skills natively)
-  // env stays empty so the harness process inherits the login shell unchanged.
-  if (harness === "claude-code") linkInto(join(cwd, ".claude", "skills"));
-  else if (harness !== CUSTOM) linkInto(join(cwd, ".agents", "skills"));
-  return { env: {}, roomSkills, skills };
 }
 
-/** Body of a skill for BYOK load_skill. */
+/** Metadata only. Each turn replaces the previous Tuantuan selection without denying native skills. */
+export function selectedSkillIndex(skills: SkillMeta[]): string {
+  const entries = skills.map((s) => ({
+    name: s.name,
+    description: s.description.slice(0, 600),
+    file: resolve(existsSync(join(s.dir, "SKILL.md")) ? join(s.dir, "SKILL.md") : s.dir),
+  }));
+  return `<tuantuan-skills>\n当前团团为这个 Agent 额外选择的 Skills（此清单替代之前的团团选择；未列出不表示 Harness 没有原生技能）：\n${JSON.stringify(entries)}\n需要使用时，按正常文件读取与权限流程读取对应 file，再按需读取同目录附属文件。这里只提供索引，未读取正文前不要声称已加载。\n</tuantuan-skills>`;
+}
+
+/** BYOK exposes only the current selection; discovering a directory does not grant load_skill. */
 export function loadSkillBody(
   dataDir: string,
   agentId: string,
-  cwd: string,
+  _cwd: string,
   name: string,
   extra: { name: string; dir: string }[] = [],
 ): string {
   const all = [
-    ...listAgentSkills(dataDir, agentId),
+    ...listAgentSkills(dataDir, agentId).filter((s) => s.enabled),
     ...listLinkedSkills(dataDir, agentId),
-    ...listRoomSkills(cwd),
     ...extra,
   ];
   const s = all.find((x) => x.name === name);
-  if (!s) throw new Error(`未知 skill：${name}`);
+  if (!s) throw new Error(`未知或未启用的 skill：${name}`);
   const md = existsSync(join(s.dir, "SKILL.md")) ? join(s.dir, "SKILL.md") : s.dir;
   const parsed = parseSkillMd(readFileSync(md, "utf8"));
   return parsed?.body || readFileSync(md, "utf8");
@@ -271,10 +275,18 @@ export function loadSkillBody(
 
 // ---------------------------------------------------------------------------------------------
 // Discovery: skills the user already has (user-level dirs, Claude plugins, the project), which an
-// agent can be given access to without copying. Enabling links the skill dir into the project's
-// discovery dir at materialize time, same as imported ones (never over an existing name).
+// agent can be given access to without copying. Enabling adds it to that Agent's read-on-demand
+// index and read-only grants; no links are written into the shared project.
 
-export type SkillOrigin = "imported" | "library" | "user-agents" | "user-claude" | "user-codex" | "plugin" | "project";
+export type SkillOrigin =
+  | "imported"
+  | "library"
+  | "user-agents"
+  | "user-claude"
+  | "user-codex"
+  | "user-gemini"
+  | "plugin"
+  | "project";
 
 export interface DiscoveredSkill {
   /** Stable id: the skill directory's absolute path. */
@@ -288,6 +300,8 @@ export interface DiscoveredSkill {
   enabled: boolean;
   /** The agent's harness already reads this location on its own (so it is on regardless). */
   native: boolean;
+  /** Every lexical source of the same real directory; native sources are never lost to deduplication. */
+  sources: { key: string; origin: SkillOrigin; label: string; native: boolean }[];
 }
 
 function readLinked(dataDir: string, agentId: string): string[] {
@@ -369,13 +383,15 @@ function pluginSkills(home: string): { dir: string; name: string; description: s
   return out;
 }
 
-/** Locations each harness reads by itself (relative to home or the project). */
-function nativeFor(harness: string, origin: SkillOrigin, dir: string): boolean {
-  if (harness === "claude-code")
-    return origin === "user-claude" || origin === "plugin" || dir.includes("/.claude/skills/");
-  if (harness === "codex")
-    return origin === "user-codex" || origin === "user-agents" || dir.includes("/.agents/skills/");
-  if (harness === "opencode" || harness === "grok") return dir.includes("/.agents/skills/") && origin === "project";
+/** Known native directories only; cached/marketplace plugin presence does not prove it is enabled. */
+function nativeFor(harness: string, origin: SkillOrigin, projectKind?: string): boolean {
+  if (harness === "claude-code") return origin === "user-claude" || projectKind === ".claude";
+  if (harness === "codex") return origin === "user-codex" || origin === "user-agents" || projectKind === ".agents";
+  if (harness === "opencode")
+    return projectKind === ".agents" || projectKind === ".claude" || projectKind === ".opencode";
+  if (harness === "grok") return projectKind === ".agents";
+  if (harness === "reg:antigravity-acp")
+    return origin === "user-gemini" || projectKind === ".agents" || projectKind === ".gemini";
   return false;
 }
 
@@ -393,19 +409,34 @@ export function discoverSkills(
   agentId: string | null,
   harness: string,
   projectDir: string | null,
+  harnessEnv: Record<string, string | undefined> = {},
 ): DiscoveredSkill[] {
   const home = userHome();
   const linked = new Set(agentId ? readLinked(dataDir, agentId) : []);
-  const out: DiscoveredSkill[] = [];
-  const seen = new Set<string>();
-  const push = (s: { dir: string; name: string; description: string }, origin: SkillOrigin, label: string) => {
+  const byReal = new Map<string, DiscoveredSkill>();
+  const push = (
+    s: { dir: string; name: string; description: string },
+    origin: SkillOrigin,
+    label: string,
+    projectKind?: string,
+    importedEnabled = false,
+  ) => {
     const key = resolve(s.dir);
     const real = realKey(key);
-    // our own materialized symlinks show up in project dirs; list each skill once
-    if (seen.has(real)) return;
-    seen.add(real);
-    const native = nativeFor(harness, origin, key);
-    out.push({
+    const native = nativeFor(harness, origin, projectKind);
+    const enabled = native || linked.has(key) || importedEnabled;
+    const source = { key, origin, label, native };
+    const previous = byReal.get(real);
+    if (previous) {
+      previous.sources.push(source);
+      // Prefer a real native source for the visible badge; keep all paths in the source details.
+      if ((native && !previous.native) || (!previous.enabled && enabled))
+        Object.assign(previous, { key, dir: key, origin, label });
+      previous.native ||= native;
+      previous.enabled ||= enabled;
+      return;
+    }
+    byReal.set(real, {
       key,
       name: s.name,
       description: s.description,
@@ -413,38 +444,28 @@ export function discoverSkills(
       origin,
       label,
       native,
-      enabled: native || linked.has(key),
+      enabled,
+      sources: [source],
     });
   };
-  for (const s of agentId ? listAgentSkills(dataDir, agentId) : [])
-    if (statSync(s.dir).isDirectory()) {
-      const key = resolve(s.dir);
-      seen.add(realKey(key));
-      out.push({
-        key,
-        name: s.name,
-        description: s.description,
-        dir: key,
-        origin: "imported",
-        label: "已导入",
-        native: false,
-        enabled: s.enabled,
-      });
-    }
-  // 「Skills 与插件」 managed imports (<data>/library/<pkg>/…/SKILL.md), outside any plugin.
+  for (const s of agentId ? listAgentSkills(dataDir, agentId) : []) push(s, "imported", "已导入", undefined, s.enabled);
   for (const dir of librarySkillDirs(dataDir)) {
     const parsed = parseSkillMd(readFileSync(join(dir, "SKILL.md"), "utf8"));
-    if (parsed) push({ dir, name: parsed.name, description: parsed.description }, "library", "已导入");
+    if (parsed) push({ dir, ...parsed }, "library", "已导入");
   }
   for (const s of skillDirs(join(home, ".agents", "skills"))) push(s, "user-agents", "~/.agents");
   for (const s of skillDirs(join(home, ".claude", "skills"))) push(s, "user-claude", "~/.claude");
   for (const s of skillDirs(join(home, ".codex", "skills"))) push(s, "user-codex", "~/.codex");
+  const configuredGeminiHome = "GEMINI_HOME" in harnessEnv ? harnessEnv.GEMINI_HOME : process.env.GEMINI_HOME;
+  const geminiHome = resolve(configuredGeminiHome?.trim() || join(home, ".gemini"));
+  for (const rel of ["config", "antigravity-cli"])
+    for (const s of skillDirs(join(geminiHome, rel, "skills"))) push(s, "user-gemini", `Gemini ${rel}`);
   for (const s of pluginSkills(home)) push(s, "plugin", s.plugin);
   if (projectDir) {
-    for (const rel of [".agents", ".claude"])
-      for (const s of skillDirs(join(projectDir, rel, "skills"))) push(s, "project", `项目 ${rel}`);
+    for (const rel of [".agents", ".claude", ".opencode", ".gemini"])
+      for (const s of skillDirs(join(projectDir, rel, "skills"))) push(s, "project", `项目 ${rel}`, rel);
   }
-  return out;
+  return [...byReal.values()];
 }
 
 function librarySkillDirs(dataDir: string): string[] {
@@ -484,7 +505,7 @@ export function setSkillLinked(dataDir: string, agentId: string, dir: string, en
   const key = resolve(dir);
   const md = join(key, "SKILL.md");
   if (enabled && !existsSync(md)) throw new Error("这里没有 SKILL.md");
-  const cur = readLinked(dataDir, agentId).filter((d) => d !== key);
+  const cur = readLinked(dataDir, agentId).filter((d) => realKey(d) !== realKey(key));
   writeLinked(dataDir, agentId, enabled ? [...cur, key] : cur);
 }
 

@@ -23,6 +23,8 @@ export async function terminalSmoke(
   page.on("pageerror", (error) => errors.push(error.message));
   const endpoint = `${base}/api/projects/${projectId}/terminal`;
   const info = async () => (await (await fetch(endpoint)).json()) as ProjectTerminalMeta | null;
+  const list = async () => (await (await fetch(`${endpoint}?all=1`)).json()) as ProjectTerminalMeta[];
+  let isolatedProject: string | null = null;
   let disconnectTerminal: () => Promise<void> = async () => {
     throw new Error("terminal socket has not opened");
   };
@@ -116,8 +118,12 @@ export async function terminalSmoke(
     await page.unroute(moduleUrl);
     const dock = page.getByRole("region", { name: "项目终端" });
     const terminalElement = page.locator(".project-terminal");
-    const terminalInput = terminalElement.locator(".xterm-helper-textarea");
+    const activeSession = terminalElement.locator(".terminal-session:not([hidden])");
+    const terminalInput = activeSession.locator(".xterm-helper-textarea");
     const command = async (text: string) => {
+      await page.waitForFunction(
+        () => document.querySelector<HTMLElement>(".project-terminal")?.dataset.ready === "true",
+      );
       await terminalInput.focus();
       await page.keyboard.type(text);
       await page.keyboard.press("Enter");
@@ -125,7 +131,7 @@ export async function terminalSmoke(
     const output = async (text: string) => {
       await page.waitForFunction(
         (value) =>
-          [...document.querySelectorAll(".xterm-accessibility-tree > div")].some(
+          [...document.querySelectorAll(".terminal-session:not([hidden]) .xterm-accessibility-tree > div")].some(
             (row) => row.textContent?.trim() === value,
           ),
         text,
@@ -260,7 +266,7 @@ export async function terminalSmoke(
     await page.evaluate(
       () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
     );
-    const clientRows = await dock.locator(".xterm-accessibility-tree > div").count();
+    const clientRows = await activeSession.locator(".xterm-accessibility-tree > div").count();
     await page.waitForFunction(
       async ({ endpoint, rows }) => {
         const terminal = await (await fetch(endpoint)).json();
@@ -277,6 +283,92 @@ export async function terminalSmoke(
     if ((await info())?.id !== first.id) throw new Error("reload replaced the shell");
     await command("expr $TT_SMOKE_VALUE + 989");
     await output("686989");
+
+    // Each tab owns a shell and screen, including while another tab or project is visible.
+    await dock.getByRole("button", { name: "新建终端", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector(".terminal-status")?.textContent === "");
+    if (!(await terminalInput.evaluate((element) => element === document.activeElement)))
+      throw new Error("new terminal tab did not receive keyboard focus");
+    const second = (await list()).find((terminal) => terminal.id !== first.id);
+    if (!second || (await dock.getByRole("tab").count()) !== 2) throw new Error("new tab reused the first PTY");
+    await command('test -z "$TT_SMOKE_VALUE" && expr 0 + 3');
+    await output("3");
+    await command("export TT_SECOND_VALUE=50000; expr $TT_SECOND_VALUE + 17");
+    await output("50017");
+    await command("sleep .3; printf '\\nINACTIVE_TAB_%s\\n' OUTPUT");
+    await dock.getByRole("tab", { name: `终端 ${first.number}`, exact: true }).click();
+    await command("expr $TT_SMOKE_VALUE + 990");
+    await output("686990");
+    await dock.getByRole("tab", { name: `终端 ${second.number}`, exact: true }).click();
+    await output("INACTIVE_TAB_OUTPUT");
+    await dock.getByRole("button", { name: "收起终端", exact: true }).click();
+    await waitSettled(false);
+    if ((await list()).length !== 2) throw new Error("hiding closed a terminal tab");
+    await page.getByRole("button", { name: "打开项目终端", exact: true }).click();
+    await waitSettled(true);
+    await command("expr $TT_SECOND_VALUE + 18");
+    await output("50018");
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector(".terminal-status")?.textContent === "");
+    if (
+      (await dock.getByRole("tab", { name: `终端 ${second.number}`, exact: true }).getAttribute("aria-selected")) !==
+      "true"
+    )
+      throw new Error("reload lost the selected tab");
+    await command("expr $TT_SECOND_VALUE + 19");
+    await output("50019");
+    console.log("terminal tabs: independent environments, inactive output, hide and reload passed");
+
+    const post = async (path: string, body: unknown) => {
+      const response = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(`terminal fixture ${path}: ${await response.text()}`);
+      return response.json();
+    };
+    const rooms = (await (await fetch(`${base}/api/rooms`)).json()) as { id: string; agentIds: string[] }[];
+    const members = rooms.find((room) => room.id === roomId)?.agentIds;
+    const project = await post("/api/projects", { name: "终端隔离验证", cwd });
+    isolatedProject = project.id;
+    const isolatedRoom = await post("/api/rooms", { name: "独立项目终端", agentIds: members, projectId: project.id });
+    await page.goto(`${base}/#/c/${isolatedRoom.id}`);
+    // Fixtures were created outside the app's mutation callbacks; refresh its project/room lists.
+    await page.reload();
+    await page.getByRole("button", { name: "打开项目终端", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector(".terminal-status")?.textContent === "");
+    if ((await dock.getByRole("tab").count()) !== 1) throw new Error("another project inherited terminal tabs");
+    await command('test -z "$TT_SECOND_VALUE" && expr 0 + 7');
+    await output("7");
+    if ((await list()).length !== 2) throw new Error("switching projects closed the original sessions");
+    await page.goto(`${base}/#/c/${roomId}`);
+    await dock.getByRole("tab", { name: `终端 ${second.number}`, exact: true }).waitFor();
+    await page.waitForFunction(() => document.querySelector(".terminal-status")?.textContent === "");
+    await command("expr $TT_SECOND_VALUE + 20");
+    await output("50020");
+    console.log("terminal tabs: project isolation and restoration passed");
+    await fetch(`${base}/api/projects/${isolatedProject}`, { method: "DELETE" });
+    isolatedProject = null;
+    if (shotsDir) await page.screenshot({ path: join(shotsDir, "project-terminal-tabs.png") });
+    await dock.getByRole("button", { name: "新建终端", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector(".terminal-status")?.textContent === "");
+    const third = (await list()).find((terminal) => terminal.id !== first.id && terminal.id !== second.id);
+    if (!third) throw new Error("third terminal did not open");
+    await dock.getByRole("tab", { name: `终端 ${second.number}`, exact: true }).click();
+    await dock.getByRole("button", { name: `关闭终端 ${third.number}`, exact: true }).click();
+    await dock.getByRole("tab", { name: `终端 ${third.number}`, exact: true }).waitFor({ state: "detached" });
+    await command("expr $TT_SECOND_VALUE + 21");
+    await output("50021");
+    await dock.getByRole("button", { name: `关闭终端 ${second.number}`, exact: true }).click();
+    await dock.getByRole("tab", { name: `终端 ${second.number}`, exact: true }).waitFor({ state: "detached" });
+    if (!(await terminalInput.evaluate((element) => element === document.activeElement)))
+      throw new Error("closing the active tab did not focus its surviving sibling");
+    if ((await list()).length !== 1 || (await info())?.id !== first.id)
+      throw new Error("closing a tab affected its sibling");
+    await command("expr $TT_SMOKE_VALUE + 991");
+    await output("686991");
+    console.log("terminal tabs: inactive and active tab closure passed");
     await command("sleep 30");
     // The shell acknowledges command input by echoing it; Ctrl+C then interrupts the foreground job.
     await page.waitForFunction(() =>
@@ -298,17 +390,57 @@ export async function terminalSmoke(
     if (shotsDir) await page.screenshot({ path: join(shotsDir, "project-terminal-narrow.png") });
     await command("exit 7");
     await dock.getByRole("status").filter({ hasText: "已退出 · 7" }).waitFor();
-    await dock.getByRole("button", { name: "重新打开" }).click();
-    await page.waitForFunction(() => document.querySelector(".terminal-status")?.textContent === "");
+    let releaseRestart: () => void = () => {};
+    const restartGate = new Promise<void>((resolve) => {
+      releaseRestart = resolve;
+    });
+    const holdRestart = async (route: import("playwright-core").Route) => {
+      if (route.request().method() === "POST" && route.request().postDataJSON()?.create === true) {
+        await restartGate;
+      }
+      await route.continue();
+    };
+    await page.route(endpoint, holdRestart);
+    try {
+      const restartRequested = page.waitForRequest(
+        (request) =>
+          request.url() === endpoint && request.method() === "POST" && request.postDataJSON()?.create === true,
+      );
+      await dock.getByRole("button", { name: "重新打开" }).click();
+      await restartRequested;
+      await page.waitForFunction(() => document.querySelectorAll(".terminal-session").length === 0);
+      if (
+        (await dock.getByRole("status").textContent()) !== "正在打开…" ||
+        (await dock.getAttribute("aria-busy")) !== "true" ||
+        (await dock.getAttribute("data-ready")) === "true"
+      )
+        throw new Error("terminal restart reported ready while replacing the removed session");
+      releaseRestart();
+      await page.waitForFunction(
+        () => document.querySelector<HTMLElement>(".project-terminal")?.dataset.ready === "true",
+      );
+      if (!(await terminalInput.evaluate((element) => element === document.activeElement)))
+        throw new Error("terminal restart did not restore keyboard focus");
+    } finally {
+      releaseRestart();
+      await page.unroute(endpoint, holdRestart);
+    }
     if ((await info())?.id === first.id) throw new Error("restart retained the exited shell");
     await command("expr 19000 + 992");
     await output("19992");
+    console.log("terminal restart: replacement stayed busy, then restored input focus and produced 19992");
     await beginMotion();
     await dock.getByRole("button", { name: "结束终端" }).click();
     await waitSettled(false);
     await finishMotion("end terminal", true);
     await terminalElement.waitFor({ state: "detached" });
     if (await info()) throw new Error("ending left the terminal registered");
+    if (
+      !(await page
+        .getByRole("button", { name: "打开项目终端" })
+        .evaluate((element) => element === document.activeElement))
+    )
+      throw new Error("closing the last tab did not return toolbar focus");
     // Changing the system preference during an exit must finish cleanup without waiting for a transition event.
     await page.getByRole("button", { name: "打开项目终端" }).click();
     await waitSettled(true);
@@ -329,8 +461,8 @@ export async function terminalSmoke(
     if (shotsDir) await page.screenshot({ path: join(shotsDir, "project-terminal-failure.png") }).catch(() => {});
     throw error;
   } finally {
-    const current = await info();
-    if (current) await fetch(`${endpoint}?terminalId=${current.id}`, { method: "DELETE" });
+    for (const current of await list()) await fetch(`${endpoint}?terminalId=${current.id}`, { method: "DELETE" });
+    if (isolatedProject) await fetch(`${base}/api/projects/${isolatedProject}`, { method: "DELETE" });
     await page.close();
     if (video && videoDir) {
       await video.saveAs(join(videoDir, "project-terminal-motion.webm"));

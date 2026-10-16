@@ -78,7 +78,8 @@ export function terminalSize(cols: unknown, rows: unknown): { cols: number; rows
 
 export class ProjectTerminals {
   private entries = new Map<string, Entry>();
-  private projects = new Map<string, string>();
+  private projects = new Map<string, Set<string>>();
+  private removingProjects = new Map<string, Promise<void>>();
   private closed = false;
 
   get(id: string): ProjectTerminalMeta | null {
@@ -87,22 +88,36 @@ export class ProjectTerminals {
   }
 
   forProject(projectId: string): ProjectTerminalMeta | null {
-    return this.get(this.projects.get(projectId) ?? "");
+    return this.get(this.projects.get(projectId)?.values().next().value ?? "");
+  }
+
+  list(projectId: string): ProjectTerminalMeta[] {
+    return [...(this.projects.get(projectId) ?? [])].flatMap((id) => {
+      const meta = this.get(id);
+      return meta ? [meta] : [];
+    });
   }
 
   open(project: { id: string; cwd: string }, env: Record<string, string>, cols = 80, rows = 24): ProjectTerminalMeta {
     if (this.closed) throw new ValidationError("服务正在关闭", 503);
-    const existingId = this.projects.get(project.id);
+    if (this.removingProjects.has(project.id)) throw new ValidationError("项目终端正在关闭，请稍后重试", 409);
+    const existingId = this.projects.get(project.id)?.values().next().value;
     const existing = existingId ? this.entries.get(existingId) : null;
     if (existing?.removing || (existing?.stopping && existing.meta.status === "running"))
       throw new ValidationError("终端正在关闭，请稍后重试", 409);
     if (existing) return { ...existing.meta };
+    return this.create(project, env, cols, rows);
+  }
+
+  create(project: { id: string; cwd: string }, env: Record<string, string>, cols = 80, rows = 24): ProjectTerminalMeta {
+    if (this.closed) throw new ValidationError("服务正在关闭", 503);
+    if (this.removingProjects.has(project.id)) throw new ValidationError("项目终端正在关闭，请稍后重试", 409);
     if (process.platform !== "darwin" && process.platform !== "linux")
       throw new ValidationError("内嵌终端需要 macOS 或 Linux", 501);
     if (typeof Bun.Terminal !== "function")
       throw new ValidationError("内嵌终端需要支持 Bun.Terminal 的 Bun 1.3.5 或更新版本", 501);
     if (this.entries.size >= PROJECT_TERMINAL_LIMITS.terminals)
-      throw new ValidationError("已达到 12 个项目终端上限，请先结束一个终端", 409);
+      throw new ValidationError("已达到 12 个终端上限，请先结束一个终端", 409);
     const size = terminalSize(cols, rows);
     try {
       if (!statSync(project.cwd).isDirectory()) throw new Error("not a directory");
@@ -150,6 +165,7 @@ export class ProjectTerminals {
     const meta: ProjectTerminalMeta = {
       id: crypto.randomUUID(),
       projectId: project.id,
+      number: Math.max(0, ...this.list(project.id).map((terminal) => terminal.number)) + 1,
       cwd: project.cwd,
       shell,
       ...size,
@@ -190,7 +206,9 @@ export class ProjectTerminals {
       throw new ValidationError(`终端启动失败：${(error as Error).message}`, 503);
     }
     this.entries.set(meta.id, entry);
-    this.projects.set(project.id, meta.id);
+    const terminals = this.projects.get(project.id) ?? new Set<string>();
+    terminals.add(meta.id);
+    this.projects.set(project.id, terminals);
     for (const data of early) this.output(entry, data);
     const current = entry;
     void proc.exited.then(async (code) => {
@@ -244,15 +262,29 @@ export class ProjectTerminals {
   }
 
   async remove(projectId: string, terminalId?: string): Promise<void> {
-    const id = this.projects.get(projectId);
-    if (terminalId !== undefined && id !== terminalId) throw new ValidationError("终端已更换，请刷新后重试", 409);
-    const entry = id ? this.entries.get(id) : null;
-    if (!entry) return;
+    if (terminalId === undefined) {
+      const existing = this.removingProjects.get(projectId);
+      if (existing) return existing;
+      const removal = Promise.all(
+        [...(this.projects.get(projectId) ?? [])].map((id) => this.remove(projectId, id)),
+      ).then(() => {});
+      this.removingProjects.set(projectId, removal);
+      try {
+        await removal;
+      } finally {
+        this.removingProjects.delete(projectId);
+      }
+      return;
+    }
+    const entry = this.entries.get(terminalId);
+    if (!entry || entry.meta.projectId !== projectId) throw new ValidationError("终端已更换，请刷新后重试", 409);
     entry.removing = true;
     await this.stop(entry);
     await entry.proc.exited;
     this.entries.delete(entry.meta.id);
-    this.projects.delete(projectId);
+    const terminals = this.projects.get(projectId);
+    terminals?.delete(entry.meta.id);
+    if (terminals?.size === 0) this.projects.delete(projectId);
   }
 
   async shutdown(): Promise<void> {

@@ -19,7 +19,7 @@ describe("skills", () => {
     expect(parseSkillMd("no frontmatter")).toBeNull();
   });
 
-  test("import, enable/disable, materialize per harness, room discovery", () => {
+  test("import, enable/disable, resolve per harness without writing project links", () => {
     const data = mkdtempSync(join(tmpdir(), "sk-data-"));
     const src = mkdtempSync(join(tmpdir(), "sk-src-"));
     const skill = join(src, ".agents", "skills", "greet");
@@ -44,11 +44,11 @@ describe("skills", () => {
       expect(m.skills.some((s) => s.name === "greet")).toBe(true);
       expect(m.env).toEqual({});
     }
-    expect(existsSync(join(cwd, ".claude", "skills", "greet", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(cwd, ".agents", "skills", "greet", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".claude", "skills", "greet", "SKILL.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".agents", "skills", "greet", "SKILL.md"))).toBe(false);
     // an existing name is never overwritten
     mkdirSync(join(cwd, ".agents", "skills", "taken"), { recursive: true });
-    // OpenCode / custom link into cwd .agents/skills without clobbering roomy
+    // Resolving selections never clobbers the user's existing room skill
     expect(listRoomSkills(cwd).find((s) => s.name === "roomy")).toBeTruthy();
     expect(loadSkillBody(data, agentId, cwd, "greet")).toContain("Hello!");
   });
