@@ -43,6 +43,8 @@
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
 | `web/src/useChatScroll.ts` | 聊天自动跟随意图；上滑立即暂停，消息增量和布局变化保持阅读位置，回到底部或点击「回到最新」恢复 |
+| `web/src/ui.tsx` / `MermaidBlock.tsx` / `mermaidRendering.ts` | 稳定的 Markdown renderer；显式 Mermaid 围栏按需加载，串行渲染、资源语法校验、主题重绘与源码回退，见下方「消息渲染」 |
+| `web/src/ImagePreview.tsx` | 图表和各类消息图片共用缩略图、原生模态 dialog、适应窗口 / 原图与键盘焦点管理 |
 | `shared/roomPreview.ts` / `web/src/roomListState.ts` | 列表快照和全局 `room.preview` 共用摘要规则；按消息 seq 与状态防回退，列表加载期间重放全局事件，重连刷新 |
 | `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，标签页各自连接独立 shell，刷新恢复项目全部终端与选中页；只在显式打开且用户尚未选择其他焦点时聚焦，正常退出状态不被迟到的 PTY 错误覆盖 |
 | `web/src/messageMerge.ts` | 历史快照与实时消息按 id 合并，保留完成态 / 较长流式文本；发送接口返回的消息立即插入 |
@@ -65,6 +67,8 @@
 | 权限提交中的状态 / 错误 | `ChatView` | 按 askId 防重复；成功或 404 关闭，其余错误保留 ask 并显示可重试错误，WS 解决事件同样可关闭 |
 | 停止任务请求中的状态 / 错误 | `ChatView` | 按 taskId 防重复、失败可重试；任务列表只由服务端 RoomState 更新，HTTP 确认不会覆盖实时任务状态 |
 | 终端面板开合、高度与焦点意图 | `ChatView` | 外层网格裁切连续改变占位，内部 xterm 保持实际尺寸，避免动效逐帧触发 PTY resize；首次加载与结束共用外层，隐藏立即 inert，结束后在退场完成时卸载。减少动态效果直接切换，拖动高度立即响应 |
+| 图表源码、主题与最后一次渲染结果 | `MermaidBlock` | 仅前端派生状态；源码变化不复用旧图，同一源码换主题保留上次结果直至重绘完成；不写数据库 |
+| 图片预览开合、原图模式与加载错误 | `PreviewImage` / `ImagePreview` | 组件局部状态；相同入口更新图片地址时保持预览与焦点，加载错误按地址隔离 |
 
 迁移按 `PRAGMA user_version` 顺序执行，只追加：
 
@@ -87,6 +91,20 @@
 | 17 | `messages.quote`：群聊引用的服务端有界快照（原消息 id、作者、角色及摘录），旧消息为空 |
 
 头像动画只用 CSS transform：≥32px 完整动画、更小只眨眼；`prefers-reduced-motion` 全部关闭；离屏（IntersectionObserver）和标签页隐藏（`html[data-tab-hidden]`）时暂停。
+
+## 消息渲染
+
+`MessageMarkdown` 使用 `react-markdown`、GFM 和 highlight.js，不执行原始 HTML。renderer 定义在模块级，避免流式文本增量让图片预览和图表组件重新挂载；含图片的链接拆为图片按钮与独立外链，避免 `<a>` 嵌套按钮。
+
+`MermaidBlock` 只处理 `language-mermaid` 围栏，延迟 180ms 合并流式片段；`mermaidRendering` 按需加载固定版本的 Mermaid。其主题初始化和渲染依赖全局状态，因此共用一条串行队列；任务在加载前、渲染前和结果提交前检查是否过期。临时测量 DOM 位于屏幕外，成功或失败都会清理。渲染输出补齐 SVG 固有尺寸，再作为图片展示，无需数据库迁移或 ACP 协议扩展。
+
+图表使用固定 `strict`、关闭 HTML labels，并在渲染前拒绝配置覆盖、HTML（无属性的 `<br>` 换行除外）、图片 / 图标元数据、sequence `properties` / `details`、资源别名及外部样式资源。`strict` 本身不阻止测量 DOM 发起图片请求，不能只依赖最终 SVG 图片的隔离。源码上限 50,000 字符、边数上限 500；不支持或解析失败时显示转义后的源码，不插入 Mermaid 错误页。输出作为静态 SVG 图片，不绑定图内事件，并关闭图内动画。
+
+图表从 CSS token 读取主题，监听系统主题与根元素主题变化。相同源码重绘期间保留图像和预览实例，替换地址时不重置原图模式、焦点；重绘失败明确显示上次图表仍在使用。源码变更立即失效旧图，过期结果不能覆盖新内容。
+
+`PreviewImage` 为 Mermaid、Markdown、ACP 时间线及工具图片提供同一个入口。预览通过 portal 和原生 `dialog.showModal()` 进入 top layer，缩略图继续占据消息中的原位置；Tab 保持在弹窗内，关闭时以 `preventScroll` 恢复触发按钮焦点。原图模式使用可滚动区域，适应窗口模式限制在可用视口内。
+
+`tests/rich-message.test.tsx` 覆盖 Markdown 分流、图片入口与资源语法；`scripts/e2e-rich-media.ts` 接入全量浏览器冒烟，使用持久化测试消息和 ACP 形状的确定性更新验证实际 SVG、主题、预览与流式恢复。测试夹具不代表真实模型输出质量或各 Harness 的图片输入能力。
 
 ## 编排
 

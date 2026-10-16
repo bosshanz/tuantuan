@@ -80,6 +80,15 @@ export async function repliesSmoke(browser: Browser, base: string, roomId: strin
       }
       await route.fulfill({ response, json: snapshot });
     });
+    // Member warm-up also dispatches an HTTP SessionView. It may arrive after the snapshot/WS
+    // fixtures, so all three sources must advertise the same deterministic completions.
+    await page.route(`${base}/api/rooms/${roomId}/agents/*/session`, async (route) => {
+      const response = await route.fetch();
+      if (!response.ok()) return route.fulfill({ response });
+      const session = (await response.json()) as ChatSnapshot["sessions"][string];
+      withCompletions(session);
+      await route.fulfill({ response, json: session });
+    });
     await page.goto(`${base}/#/c/${roomId}`);
     const input = page.getByRole("textbox", { name: "消息输入框" });
     const sourceBubble = page.locator(`[data-message-id="${source.id}"]`);

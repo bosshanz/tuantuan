@@ -18,6 +18,7 @@
 - **桌面版**（macOS / Windows / Linux，Electron）或浏览器 + 本机服务。
 - **Harness**：自动发现你自己装的版本；没有时一键装到团团自己的目录（官方 ACP Registry，固定版本、校验和、不用 sudo）；握手测试与登录引导。
 - **会话**：按项目分组；单 Agent 直接对话，多 Agent 由群主负责分工、跟进和汇总，明确 @ 成员保持直达；支持 @所有人、`handoff` 交接和引用回复。侧栏随回复完成更新预览，断线重连后补齐。
+- **消息阅读**：Markdown 支持 Mermaid 代码围栏（跟随明暗主题，可查看源码）；图表、Markdown、ACP 与工具图片可点击放大，切换适应窗口 / 原图，按 Esc 关闭。
 - **项目终端**：会话右上角打开内嵌交互式终端（macOS / Linux），默认进入项目目录；用标签页多开独立 shell，支持新增、切换、单独结束、Ctrl+C、调整高度和平滑展开 / 收起。收起保留全部终端，刷新后重连；支持减少动态效果。
 - **服务商与用量**：给 Claude Code / Codex / 自定义 API 配置服务商（Key 只在服务端、打码显示），只读导入 CC Switch，查看本机用量和余额。
 - **Skills**：自动发现 `~/.agents`、`~/.claude`、`~/.codex`、插件和项目里的 Skills，按 Agent 勾选；可从链接或文件夹导入。
@@ -27,7 +28,7 @@
 
 ## 快速开始
 
-需要 [Bun](https://bun.sh)。CI 固定为 1.4.2；本轮本机在 1.3.14 上通过完整检查、构建与 Chrome 冒烟，见 [修复记录](docs/plan-harness-acp.md#2026-10-15-本机边界与状态恢复修复)。Skill 解析依赖内置的 `Bun.YAML`；其他版本未验证。
+使用 [Bun](https://bun.sh) 1.4.2 安装依赖，与 CI 保持一致。仓库使用 v2 锁文件，Bun 1.3.14 无法读取；已有依赖环境下的历史检查结果不能代替首次安装验证。Skill 解析依赖内置的 `Bun.YAML`，验证记录见 [ACP 计划](docs/plan-harness-acp.md)。
 
 ```bash
 git clone https://github.com/bosshanz/tuantuan.git
@@ -129,6 +130,31 @@ Registry 中的登录选项来自各 Harness 自己的认证方式。第三方�
   - 传输：HTTP `/mcp/<token>` 或 stdio 中转（`server/mcp-shim.ts`）。
 - **并行与停止**：同一会话内，不同 Agent 并行，同一 Agent 按入队顺序执行。新消息不自动打断；输入框上方以轻量状态条分别显示参与者的头像、名字、当前状态和各自的排队数量，最多直接显示 3 位，其余显示人数，展开后可查看全部任务的头像、请求摘要与状态，并分别停止。展开、收起平滑过渡，连续点击可反向，减少动态效果时直接切换。单任务可直接停止，失败提示在折叠时也可见并能重试。停止只取消选中任务及依赖它的后续交接，独立请求继续；也可只取消一项排队任务。队列保存在服务内存，刷新浏览器可恢复状态，服务重启后不自动重放未完成工作。
 
+## 消息阅读与图表
+
+| 内容 | 显示方式 |
+| --- | --- |
+| Markdown | 标题、列表、引用、链接和 GFM 表格；普通代码块保留语法高亮 |
+| Mermaid | 标记为 `mermaid` 的代码围栏渲染成图表，跟随明暗主题，可展开源码 |
+| 图片 | Markdown 图片、ACP 时间线图片与工具返回的图片可点击放大 |
+
+让 Agent 返回下面这样的代码围栏，即可显示流程图；时序图等 Mermaid 语法使用同一入口：
+
+````markdown
+```mermaid
+flowchart LR
+  A[需求] --> B{确认方案}
+  B --> C[Agent 并行执行]
+  C --> D[汇总结果]
+```
+````
+
+图表和图片共用放大预览：点击打开，切换「原图」查看实际尺寸或「适应窗口」查看全图。原图超出窗口时可滚动；按 Esc、点击背景或关闭按钮退出，键盘焦点回到原图片，保留消息阅读位置。预览打开时收到后续文本或切换明暗主题，不会关闭预览或重置原图模式。图片自带链接时，旁边的「打开链接」保留原链接入口。
+
+未完成或语法有误的图表会保留源码，后续内容修正后自动恢复，也可重试。图内 HTML（无属性的 `<br>` 换行除外）、外部图片 / 图标和修改渲染设置的指令不支持，相关图表保留源码；图中的链接和回调不执行。图表输出为静态 SVG，沿用团团的字体与中性色，不播放 Mermaid 自带动画。图片显示和放大是客户端能力，能否向 Agent 发送图片仍取决于所选 Harness。
+
+![Mermaid 图表放大预览](docs/screenshots/mermaid-preview.png)
+
 ## 能力
 
 - 流式回复、思考过程、工具卡片（文件 diff、终端输出）、计划清单、用量。生成时主动向上滚动会暂停跟随，保留历史阅读位置；回到底部或点击「回到最新」恢复跟随。
@@ -174,6 +200,8 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 ```
 
 浏览器冒烟可用 `SHOTS_DIR=/tmp/tuantuan-shots` 保存截图；加上 `TERMINAL_VIDEO_DIR=/tmp/tuantuan-shots` 会保存终端动效录像 `project-terminal-motion.webm`，便于按原速检查展开、收起与快速反向操作。
+
+图文回归已纳入 `bun run e2e`：覆盖流程图、时序图、源码回退与流式修正、明暗主题、图表与各类图片预览、键盘焦点及窄屏布局。`SHOTS_DIR` 同时保存 `mermaid-preview-light.png`、`mermaid-preview-dark.png` 和 `image-preview-narrow-dark.png` 等截图。场景使用持久化测试消息与确定性 ACP 数据，不调用付费模型。
 
 ## 自定义 API（BYOK）
 
@@ -311,7 +339,7 @@ Harness 本来就会读取的全局 / 项目技能在设置里显示「原生可
 | configOptions | mode/model/effort… | mode/collaboration_mode/model | model/mode | — | 无 |
 | 未接进 UI | providers、additionalDirectories、subagents、elicitation 表单、session.compaction | 同上；`/review-branch` 等已在命令列表可选 | MCP sse、自定义 skill tool 的单独面板 | 登录后能力未探 | 文件/终端 |
 
-**用户本地配置（CC Switch / Codex provider）**：团团**从不**设置 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`。Skill 只链到会话目录；进程继承登录 shell 的 `ANTHROPIC_*` / `OPENAI_*`；`CODEX_CONFIG` 只合并 `developer_instructions`，不覆盖 `model_provider`。
+**用户本地配置（CC Switch / Codex provider）**：团团**从不**设置 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`。额外选择的 Skill 通过当前 Agent 的按需路径索引提供，不写共享项目链接；进程继承登录 shell 的 `ANTHROPIC_*` / `OPENAI_*`；`CODEX_CONFIG` 只合并 `developer_instructions`，不覆盖 `model_provider`。
 
 ## 常见问题
 
@@ -319,6 +347,7 @@ Harness 本来就会读取的全局 / 项目技能在设置里显示「原生可
 | --- | --- |
 | 「Harness」页显示未安装 | 在终端里 `which <命令>` 确认已安装；GUI 启动时找不到的话，在「Harness」页填绝对路径。 |
 | 发消息后提示 Authentication required | 该 Harness 没登录：按「Harness」页的登录方式在终端登录后重试。 |
+| Antigravity 只能选 Gemini，没有 Opus | Antigravity ACP 1.4.0 对第三方模型按客户端开放；团团当前只显示 Harness 实际返回的模型。登录或额度可查不等于 Opus 已开放，应以当前 Harness 返回结果为准。 |
 | Agent 想改文件但没反应 | 查看权限弹窗；提交失败可原地重试。经团团 ACP 文件接口访问的目录外路径会被拒绝。 |
 | e2e 找不到浏览器 | 设置 `CHROME_PATH` 指向本机 Chrome。 |
 
