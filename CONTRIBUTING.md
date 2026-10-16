@@ -20,7 +20,7 @@ bun run desktop:install && bun run desktop:build && bun run desktop:smoke   # �
 2. 提交前跑 `bun run check`；改了界面请附截图，涉及桌面行为请跑 `desktop:smoke`。
 3. 截图只用 mock 数据，不要包含真实 API Key、个人路径或邮箱。
 4. 不要提交 `.env`、`config/providers.json`、打包产物。
-5. 用户可见的改动请同步更新 README。
+5. 用户可见的改动请同步更新 README 或 `docs/` 下对应的文档（索引见 [docs/README.md](docs/README.md)）。
 
 ## 报告问题
 

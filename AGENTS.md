@@ -18,7 +18,8 @@
 | `docs/product.md` | 用户任务、业务规则（@ 触发、跳数上限、取消语义、Harness 来源）、关键状态与验收条件 | 改变用户可见行为或规则时 |
 | `docs/architecture.md` | 模块职责、数据与状态归属、路由机制、技术取舍 | 改变模块边界、存储结构、路由或编排机制时 |
 | `docs/plan-harness-acp.md` | 决定记录、里程碑状态 | 有新决定或里程碑完成时 |
-| `README.md` | 功能、运行方式、桌面版、Harness / Registry、服务商、Skills、配置、截图 | 改变启动方式、脚本、配置键或可见界面时 |
+| `README.md` | 简介、主要功能、快速开始、文档索引 | 改变启动方式或主要功能时 |
+| `docs/*.md`（索引 `docs/README.md`） | 安装、Harness / Registry、会话、Skills、服务商、配置、界面、开发、FAQ | 改变脚本、配置键、行为或可见界面时 |
 | `config/providers.example.json`、`.env.example` | 配置契约示例（不含密钥） | 改变配置结构时 |
 
 ## 项目命令
