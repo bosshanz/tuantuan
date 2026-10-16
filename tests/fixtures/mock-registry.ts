@@ -9,7 +9,7 @@ import { platformKey } from "../../server/registry";
  * that runs the mock ACP agent), one npx agent (a tiny npm package served from a fake npm
  * registry), and one malformed entry the schema must skip.
  */
-export function mockRegistry(opts: { version?: string; badSha?: boolean } = {}) {
+export function mockRegistry(opts: { version?: string; badSha?: boolean; authFile?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "mock-acp-registry-"));
   const state = { version: opts.version ?? "1.0.0", badSha: !!opts.badSha, hits: { registry: 0, icon: 0 } };
   const build = (version: string) => {
@@ -66,6 +66,7 @@ export function mockRegistry(opts: { version?: string; badSha?: boolean } = {}) 
                     archive: `${base}/dl/mock-acp-${v}.tar.gz`,
                     cmd: "./bin/mock-acp",
                     args: [],
+                    ...(opts.authFile ? { env: { MOCK_AGENT_AUTH_FILE: opts.authFile } } : {}),
                     sha256: state.badSha ? "0".repeat(64) : sha(f.tgz),
                   },
                 },

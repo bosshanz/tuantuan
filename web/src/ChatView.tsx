@@ -9,7 +9,6 @@ import {
   History,
   PanelRight,
   Plus,
-  Reply,
   Square,
   SquareTerminal,
   Trash2,
@@ -39,6 +38,7 @@ import { type ChatSnapshot, chatReducer, emptyChat } from "./chatState";
 import type { Opt } from "./config";
 import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
 import { MissingKey } from "./HarnessAuth";
+import { MessageActions } from "./MessageActions";
 import { reducedMotion, usePresence } from "./motion";
 import { PickList } from "./PickList";
 import type { TerminalFocusRequest } from "./ProjectTerminal";
@@ -732,95 +732,87 @@ function MessageItem(props: {
   const t = withoutHandoffTools(m.timeline);
   const empty = !t || t.parts.length === 0;
   return (
-    <div
-      className="msg"
-      data-message-id={m.id}
-      data-sender={m.senderKind}
-      data-status={m.status}
-      data-fresh={Date.now() - m.createdAt < 4000 ? "" : undefined}
-    >
-      {m.quote && <QuoteExcerpt quote={m.quote} />}
-      {t?.handoffFrom && (
-        <div className="handoff-from">
-          <ArrowRightLeft size={12} />
-          <span>
-            接 <b>@{t.handoffFrom.agentName}</b> 的交接：{t.handoffFrom.task}
-          </span>
-        </div>
-      )}
-      {m.senderKind === "human" ? (
-        <>
-          {m.content && <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />}
-          {t && <TimelineView t={t} streaming={false} terminals={props.terminals} mentionNames={props.mentionNames} />}
-        </>
-      ) : t ? (
-        <TimelineView t={t} streaming={streaming} terminals={props.terminals} mentionNames={props.mentionNames} />
-      ) : (
-        m.content && <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />
-      )}
-      {t?.handoffs?.map((h) => (
-        <div key={h.agentId} className="handoff-card" role="note">
-          <div className="handoff-title">
-            <ArrowRightLeft size={13} />
-            交接给 <b>@{h.agentName}</b>
-          </div>
-          <p>{h.task}</p>
-        </div>
-      ))}
-      {m.senderKind === "agent" && empty && !m.content && streaming && (
-        <span className="typing">
-          <i />
-          <i />
-          <i />
-          正在思考
-          <Waited since={m.createdAt} />
-        </span>
-      )}
-      {m.senderKind === "agent" && empty && !m.content && m.status === "done" && (
-        <span className="muted">（空回复）</span>
-      )}
-      {m.status === "error" && (
-        <div className="msg-error" role="alert">
-          <AlertTriangle size={14} />
-          <span>{m.error ?? "回复失败"}</span>
-        </div>
-      )}
-      {m.status === "error" && m.error && <MissingKey harnessId={props.harnessId} error={m.error} />}
-      {m.status === "interrupted" && (
-        <div className="msg-error">
-          <AlertTriangle size={14} />
-          <span>{m.error ?? "回复被中断"}</span>
-        </div>
-      )}
-      {props.onQuote && (
-        <button type="button" className="quote-reply" onClick={props.onQuote} disabled={props.quoteDisabled}>
-          <Reply size={13} aria-hidden />
-          引用回复
-        </button>
-      )}
-      {m.senderKind === "agent" && !streaming && (
-        <div className="msg-meta">
-          {t?.reviewOf && <span className="muted">群主跟进 · 已收到 {t.reviewOf.length} 份成员结果</span>}
-          {m.status === "cancelled" && (
-            <span className="state-tag">
-              <CircleSlash size={11} />
-              {m.error === "被新消息打断" ? "被新消息打断" : "已停止"}
+    <div className="message-row" data-message-id={m.id} data-sender={m.senderKind}>
+      <div
+        className="msg"
+        data-sender={m.senderKind}
+        data-status={m.status}
+        data-fresh={Date.now() - m.createdAt < 4000 ? "" : undefined}
+      >
+        {m.quote && <QuoteExcerpt quote={m.quote} />}
+        {t?.handoffFrom && (
+          <div className="handoff-from">
+            <ArrowRightLeft size={12} />
+            <span>
+              接 <b>@{t.handoffFrom.agentName}</b> 的交接：{t.handoffFrom.task}
             </span>
-          )}
-          <button
-            type="button"
-            className="trace"
-            aria-pressed={props.selected}
-            onClick={props.onDetails}
-            data-shot="expand"
-            title="查看详情"
-          >
-            {t && Object.keys(t.tools).length > 0 && <span>{Object.keys(t.tools).length} 次工具调用</span>}
-            <span>详情</span>
-            <ChevronRight size={11} className="chev" />
-          </button>
-        </div>
-      )}
+          </div>
+        )}
+        {m.senderKind === "human" ? (
+          <>
+            {m.content && <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />}
+            {t && (
+              <TimelineView t={t} streaming={false} terminals={props.terminals} mentionNames={props.mentionNames} />
+            )}
+          </>
+        ) : t ? (
+          <TimelineView t={t} streaming={streaming} terminals={props.terminals} mentionNames={props.mentionNames} />
+        ) : (
+          m.content && <MessageMarkdown text={m.content} mentionNames={props.mentionNames} />
+        )}
+        {t?.handoffs?.map((h) => (
+          <div key={h.agentId} className="handoff-card" role="note">
+            <div className="handoff-title">
+              <ArrowRightLeft size={13} />
+              交接给 <b>@{h.agentName}</b>
+            </div>
+            <p>{h.task}</p>
+          </div>
+        ))}
+        {m.senderKind === "agent" && empty && !m.content && streaming && (
+          <span className="typing">
+            <i />
+            <i />
+            <i />
+            正在思考
+            <Waited since={m.createdAt} />
+          </span>
+        )}
+        {m.senderKind === "agent" && empty && !m.content && m.status === "done" && (
+          <span className="muted">（空回复）</span>
+        )}
+        {m.status === "error" && (
+          <div className="msg-error" role="alert">
+            <AlertTriangle size={14} />
+            <span>{m.error ?? "回复失败"}</span>
+          </div>
+        )}
+        {m.status === "error" && m.error && <MissingKey harnessId={props.harnessId} error={m.error} />}
+        {m.status === "interrupted" && (
+          <div className="msg-error">
+            <AlertTriangle size={14} />
+            <span>{m.error ?? "回复被中断"}</span>
+          </div>
+        )}
+        {m.senderKind === "agent" && !streaming && (t?.reviewOf || m.status === "cancelled") && (
+          <div className="msg-meta">
+            {t?.reviewOf && <span className="muted">群主跟进 · 已收到 {t.reviewOf.length} 份成员结果</span>}
+            {m.status === "cancelled" && (
+              <span className="state-tag">
+                <CircleSlash size={11} />
+                {m.error === "被新消息打断" ? "被新消息打断" : "已停止"}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      <MessageActions
+        message={m}
+        onQuote={props.onQuote}
+        quoteDisabled={props.quoteDisabled}
+        onDetails={m.senderKind === "agent" ? props.onDetails : undefined}
+        selected={props.selected}
+      />
     </div>
   );
 }

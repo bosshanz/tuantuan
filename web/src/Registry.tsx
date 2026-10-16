@@ -1,5 +1,6 @@
 import { Check, Download, ExternalLink, FlaskConical, Loader2, PlugZap, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { missingKeyVar } from "../../shared/auth";
 import { api } from "./api";
 import { type AuthMethodView, HarnessAuth } from "./HarnessAuth";
 
@@ -72,6 +73,21 @@ interface Job {
   log: string[];
   error: string | null;
 }
+
+interface Probe {
+  ok: boolean;
+  error?: string;
+  protocolVersion?: number;
+  agentInfo?: { name: string; title?: string | null; version: string } | null;
+  authMethods?: AuthMethodView[];
+  loggedIn?: boolean | null;
+  needsKey?: boolean;
+  secretEnv?: Record<string, string>;
+  authError?: string | null;
+  sessionError?: string | null;
+}
+
+type Operation = { kind: "install" | "remove" | "probe" | "credentials" } | { kind: "authenticate"; methodId: string };
 
 /**
  * 更多 Agent: every agent in the official ACP registry (plus clearly-marked experimental extras),
@@ -185,34 +201,82 @@ function RegistryCard({
   onChanged: () => Promise<void>;
 }) {
   const [job, setJob] = useState<Job | null>(null);
-  const [test, setTest] = useState<
-    | { ok: boolean; text: string; methods?: AuthMethodView[]; secretEnv?: Record<string, string>; needsKey?: boolean }
-    | "running"
-    | null
-  >(null);
+  const [test, setTest] = useState<Probe | null>(null);
+  const [operation, setOperation] = useState<Operation | null>(null);
+  const pending = useRef<Operation | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const hid = encodeURIComponent(a.harnessId);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => () => void (timer.current && clearInterval(timer.current)), []);
-  const install = async () => {
+  const begin = (next: Operation) => {
+    if (pending.current) return false;
+    pending.current = next;
+    setOperation(next);
+    return true;
+  };
+  const finish = () => {
+    pending.current = null;
+    setOperation(null);
+  };
+  // Keep methods visible while checking, and keep the last methods if an HTTP request fails.
+  const check = async (methodId?: string) => {
     setErr(null);
+    try {
+      const r = await (methodId
+        ? api<Probe>("POST", `/api/harnesses/${hid}/authenticate`, { methodId })
+        : api<Probe>("POST", `/api/harnesses/${hid}/test`));
+      setTest((previous) => ({
+        ...r,
+        authMethods: r.authMethods ?? previous?.authMethods,
+        secretEnv: r.secretEnv ?? previous?.secretEnv,
+      }));
+    } catch (e) {
+      setTest((previous) => ({
+        ok: false,
+        error: `${methodId ? "登录失败" : "握手失败"}：${(e as Error).message}`,
+        authMethods: previous?.authMethods,
+        secretEnv: previous?.secretEnv,
+      }));
+    }
+  };
+  const install = async () => {
+    if (!begin({ kind: "install" })) return;
+    setErr(null);
+    setTest(null);
     try {
       setJob(await api<Job>("POST", `/api/registry/install/${encodeURIComponent(a.id)}`));
     } catch (e) {
       setErr((e as Error).message);
+      finish();
       return;
     }
+    let polling = false;
     timer.current = setInterval(async () => {
+      if (polling) return;
+      polling = true;
       const j = await api<Job | null>("GET", `/api/harnesses/${hid}/install`).catch(() => null);
+      polling = false;
       if (!j) return;
       setJob(j);
       if (j.state !== "running") {
         if (timer.current) clearInterval(timer.current);
-        if (j.state === "done") await onChanged();
+        timer.current = null;
+        try {
+          if (j.state === "done") {
+            await onChanged();
+            setOperation({ kind: "probe" });
+            await check();
+          }
+        } catch (e) {
+          setErr((e as Error).message);
+        } finally {
+          finish();
+        }
       }
     }, 400);
   };
   const remove = async () => {
+    if (!begin({ kind: "remove" })) return;
     setErr(null);
     try {
       await api("DELETE", `/api/harnesses/${hid}/managed`);
@@ -221,42 +285,28 @@ function RegistryCard({
       await onChanged();
     } catch (e) {
       setErr((e as Error).message);
+    } finally {
+      finish();
     }
   };
-  const probe = async () => {
-    setTest("running");
-    type Probe = {
-      ok: boolean;
-      error?: string;
-      protocolVersion?: number;
-      agentInfo?: { name: string; title?: string; version: string };
-      authMethods?: AuthMethodView[];
-      loggedIn?: boolean | null;
-      needsKey?: boolean;
-      secretEnv?: Record<string, string>;
-    };
-    const r = await api<Probe>("POST", `/api/harnesses/${hid}/test`).catch(
-      (e): Probe => ({ ok: false, error: (e as Error).message }),
-    );
-    const auth = r.authMethods?.length
-      ? ` · 登录：${r.authMethods.map((m) => (m.vars?.length ? `${m.name}（${m.vars.join("、")}）` : m.name)).join(" / ")}`
-      : "";
-    setTest(
-      r.ok
-        ? {
-            ok: true,
-            text: `ACP v${r.protocolVersion} · ${r.agentInfo?.title ?? r.agentInfo?.name ?? "已连接"} · ${
-              r.needsKey ? "需要 API Key" : r.loggedIn ? "可以用了" : r.loggedIn === false ? "需要登录" : "已连接"
-            }${auth}`,
-            methods: r.authMethods,
-            secretEnv: r.secretEnv,
-            needsKey: r.needsKey,
-          }
-        : { ok: false, text: r.error ?? "握手失败" },
-    );
+  const probe = async (methodId?: string) => {
+    if (!begin(methodId ? { kind: "authenticate", methodId } : { kind: "probe" })) return;
+    try {
+      await check(methodId);
+    } finally {
+      finish();
+    }
   };
-  const running = job?.state === "running";
+  const busy = operation !== null;
+  const authing = operation?.kind === "authenticate" ? operation.methodId : null;
+  const running = job?.state === "running" || operation?.kind === "install";
   const installed = !!a.installedVersion && !running;
+  const requiredEnv =
+    [test?.authError, test?.sessionError, test?.error]
+      .map((error) => (error ? missingKeyVar(error) : null))
+      .find((name) => !!name) ?? undefined;
+  const ready =
+    test?.ok && test.loggedIn === true && !test.needsKey && !requiredEnv && !test.authError && !test.sessionError;
   const here = a.platforms.includes("all") || a.platforms.includes(platform);
   return (
     <article className="reg-item" data-installed={installed || undefined} aria-label={a.name}>
@@ -315,12 +365,12 @@ function RegistryCard({
               已安装 {a.installedVersion}
             </span>
             {a.updateAvailable && (
-              <button type="button" className="btn sm primary" onClick={() => void install()}>
+              <button type="button" className="btn sm primary" disabled={busy} onClick={() => void install()}>
                 更新到 {a.version}
               </button>
             )}
-            <button type="button" className="btn sm" onClick={() => void probe()} disabled={test === "running"}>
-              {test === "running" ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
+            <button type="button" className="btn sm" onClick={() => void probe()} disabled={busy}>
+              {operation?.kind === "probe" ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
               握手
             </button>
             <button
@@ -329,6 +379,7 @@ function RegistryCard({
               aria-label={`卸载 ${a.name}`}
               title="卸载"
               onClick={() => void remove()}
+              disabled={busy}
             >
               <Trash2 size={13} />
             </button>
@@ -337,7 +388,7 @@ function RegistryCard({
           <button
             type="button"
             className="btn sm"
-            disabled={!a.installable}
+            disabled={busy || !a.installable}
             title={a.installable ? "装到团团自己的目录，不需要管理员权限" : "没有适合这台电脑的安装包"}
             onClick={() => void install()}
           >
@@ -347,14 +398,60 @@ function RegistryCard({
         )}
       </div>
       {job?.state === "error" && <div className="error-text harness-sub">安装失败：{job.error}</div>}
-      {err && <div className="error-text harness-sub">{err}</div>}
-      {test && test !== "running" && (
-        <div className={test.ok && !test.needsKey ? "ok-text harness-sub" : "error-text harness-sub"} role="status">
-          {test.text}
+      {err && (
+        <div className="error-text harness-sub" role="alert">
+          {err}
         </div>
       )}
-      {test && test !== "running" && test.ok && hid && (
-        <HarnessAuth harnessId={a.harnessId} methods={test.methods} secretEnv={test.secretEnv} onChanged={probe} />
+      {test && (
+        <div className={`${ready ? "ok-text" : test.ok ? "muted" : "error-text"} harness-sub`} role="status">
+          {test.ok
+            ? `ACP v${test.protocolVersion} · ${test.agentInfo?.title ?? test.agentInfo?.name ?? "已连接"} · ${
+                test.authError
+                  ? "登录未完成"
+                  : test.needsKey || requiredEnv
+                    ? "需要 API Key"
+                    : test.loggedIn === true
+                      ? "可以用了"
+                      : test.loggedIn === false
+                        ? "需要登录"
+                        : "登录状态未知"
+              }`
+            : (test.error ?? "握手失败")}
+        </div>
+      )}
+      {test?.authError && (
+        <div className="error-text harness-sub" role="alert">
+          登录失败：{test.authError}
+        </div>
+      )}
+      {test?.sessionError && (
+        <div className="error-text harness-sub" role="alert">
+          {test.sessionError}
+        </div>
+      )}
+      {operation?.kind === "probe" && (
+        <div className="muted harness-sub" role="status">
+          正在检查登录状态…
+        </div>
+      )}
+      {authing && (
+        <div className="muted harness-sub" role="status">
+          等待「{test?.authMethods?.find((m) => m.id === authing)?.name ?? "Agent"}」登录完成…（可能会打开浏览器）
+        </div>
+      )}
+      {test && (
+        <HarnessAuth
+          harnessId={a.harnessId}
+          methods={test.authMethods}
+          secretEnv={test.secretEnv}
+          requiredEnv={requiredEnv}
+          onChanged={() => check()}
+          onAuthenticate={ready ? undefined : probe}
+          authenticating={authing}
+          disabled={busy}
+          onBusyChange={(value) => (value ? void begin({ kind: "credentials" }) : finish())}
+        />
       )}
     </article>
   );

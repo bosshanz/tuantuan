@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { serve } from "../server/app";
 import { MAX_AGENT_HOPS, RELAY_MAX_CHARS } from "../server/orchestrator";
 import type { Agent, Message, Room } from "../server/store";
+import { missingKeyVar } from "../shared/auth";
 import type { ReplayTurn } from "../shared/timeline";
 import { agentInput, MOCK_AUTH_FILE, until } from "./helpers";
 
@@ -208,22 +209,82 @@ describe("onboarding auth", () => {
     rmSync(MOCK_AUTH_FILE, { force: true });
     try {
       const t = (
-        await api<{ loggedIn: boolean; authMethods: { id: string; type: string }[] }>(
+        await api<{ loggedIn: boolean; sessionError: string | null; authMethods: { id: string; type: string }[] }>(
           "POST",
           "/api/harnesses/mock/test",
         )
       ).data;
       expect(t.loggedIn).toBe(false);
+      expect(t.sessionError).toBe("Authentication required");
       expect(t.authMethods).toEqual([expect.objectContaining({ id: "mock-login", type: "agent" })]);
       const r = (
-        await api<{ loggedIn: boolean }>("POST", "/api/harnesses/mock/authenticate", { methodId: "mock-login" })
+        await api<{ loggedIn: boolean; sessionError: string | null }>("POST", "/api/harnesses/mock/authenticate", {
+          methodId: "mock-login",
+        })
       ).data;
       expect(r.loggedIn).toBe(true);
+      expect(r.sessionError).toBeNull();
       expect((await api("POST", "/api/harnesses/mock/authenticate", { methodId: "nope" })).status).toBe(400);
     } finally {
       writeFileSync(MOCK_AUTH_FILE, "ok");
     }
   });
+
+  test("agent-driven login keeps a missing-key session diagnostic even when it contains auth.type", async () => {
+    const previous = app.store.getSetting<Record<string, Record<string, string>>>("harnessEnv", {});
+    const diagnostic =
+      "auth.type is set to 'gemini-api-key', but the GEMINI_API_KEY environment variable is not set. Set GEMINI_API_KEY before starting.";
+    app.store.setSetting("harnessEnv", {
+      ...previous,
+      mock: { ...previous.mock, MOCK_AGENT_SESSION_ERROR: diagnostic },
+    });
+    try {
+      const response = await api<{
+        ok: boolean;
+        loggedIn: boolean | null;
+        sessionError: string | null;
+        authError: string | null;
+        authMethods: { id: string; type: string; vars: string[] | null }[];
+      }>("POST", "/api/harnesses/mock/authenticate", { methodId: "mock-login" });
+      expect(response.status).toBe(200);
+      expect(response.data).toMatchObject({
+        ok: true,
+        loggedIn: false,
+        authError: null,
+        sessionError: `Internal error: ${diagnostic}`,
+        authMethods: [{ id: "mock-login", type: "agent", vars: null }],
+      });
+      expect(missingKeyVar(response.data.sessionError ?? "")).toBe("GEMINI_API_KEY");
+    } finally {
+      app.store.setSetting("harnessEnv", previous);
+    }
+  });
+
+  for (const [diagnostic, loggedIn] of [
+    ["Mock author metadata unavailable", null],
+    ["Authentication required (legacy adapter)", false],
+  ] as const)
+    test(`preserves session diagnostic and classifies ${diagnostic}`, async () => {
+      const previous = app.store.getSetting<Record<string, Record<string, string>>>("harnessEnv", {});
+      app.store.setSetting("harnessEnv", {
+        ...previous,
+        mock: { ...previous.mock, MOCK_AGENT_SESSION_ERROR: diagnostic },
+      });
+      try {
+        const response = await api<{ ok: boolean; loggedIn: boolean | null; sessionError: string | null }>(
+          "POST",
+          "/api/harnesses/mock/test",
+        );
+        expect(response.status).toBe(200);
+        expect(response.data).toMatchObject({
+          ok: true,
+          loggedIn,
+          sessionError: `Internal error: ${diagnostic}`,
+        });
+      } finally {
+        app.store.setSetting("harnessEnv", previous);
+      }
+    });
 });
 
 describe("session/load replay", () => {

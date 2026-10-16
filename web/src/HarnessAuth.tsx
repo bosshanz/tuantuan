@@ -1,5 +1,5 @@
-import { KeyRound, Loader2, SquareTerminal } from "lucide-react";
-import { useState } from "react";
+import { KeyRound, Loader2, LogIn, SquareTerminal } from "lucide-react";
+import { useRef, useState } from "react";
 import { missingKeyVar } from "../../shared/auth";
 import { api } from "./api";
 import { CopyLine } from "./Setup";
@@ -23,17 +23,32 @@ export function HarnessAuth(props: {
   methods: AuthMethodView[] | undefined;
   /** saved keys (masked) */
   secretEnv: Record<string, string> | undefined;
+  /** A missing variable explicitly named by a harness error, even without an env auth method. */
+  requiredEnv?: string;
   /** after a key change: re-handshake */
   onChanged: () => void | Promise<void>;
+  /** Callers with an ACP login flow can offer the agent's own methods here. */
+  onAuthenticate?: (methodId: string) => void | Promise<void>;
+  authenticating?: string | null;
+  disabled?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const busyChanged = (value: boolean) => {
+    setBusy(value);
+    props.onBusyChange?.(value);
+  };
   const envVars = [
     ...new Set([
       ...(props.methods ?? []).filter((m) => m.type === "env").flatMap((m) => m.vars ?? []),
+      ...(props.requiredEnv ? [props.requiredEnv] : []),
       ...Object.keys(props.secretEnv ?? {}),
     ]),
   ];
   const terminals = (props.methods ?? []).filter((m) => m.type === "terminal" && m.command);
-  if (!envVars.length && !terminals.length) return null;
+  const agents = props.onAuthenticate ? (props.methods ?? []).filter((m) => m.type === "agent") : [];
+  const disabled = !!props.disabled || busy;
+  if (!envVars.length && !terminals.length && !agents.length) return null;
   return (
     <div className="hauth">
       {envVars.map((v) => (
@@ -43,11 +58,36 @@ export function HarnessAuth(props: {
           name={v}
           hint={props.secretEnv?.[v] ?? ""}
           onChanged={props.onChanged}
+          disabled={disabled}
+          onBusyChange={busyChanged}
         />
       ))}
       {terminals.map((m) => (
-        <TerminalLogin key={m.id} harnessId={props.harnessId} method={m} />
+        <TerminalLogin
+          key={m.id}
+          harnessId={props.harnessId}
+          method={m}
+          disabled={disabled}
+          onBusyChange={busyChanged}
+        />
       ))}
+      {agents.length > 0 && (
+        <div className="auth-actions">
+          {agents.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className="btn sm primary"
+              title={m.description ?? undefined}
+              disabled={disabled}
+              onClick={() => void props.onAuthenticate?.(m.id)}
+            >
+              {props.authenticating === m.id ? <Loader2 size={13} className="spin" /> : <LogIn size={13} />}
+              用「{m.name}」登录
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -57,12 +97,18 @@ export function KeyField(props: {
   name: string;
   hint: string;
   onChanged: () => void | Promise<void>;
+  disabled?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const pending = useRef(false);
   const save = async (v: string | null) => {
+    if (pending.current || props.disabled) return;
+    pending.current = true;
     setBusy(true);
+    props.onBusyChange?.(true);
     setErr(null);
     try {
       await api("PUT", `/api/harnesses/${encodeURIComponent(props.harnessId)}/env`, { values: { [props.name]: v } });
@@ -71,7 +117,9 @@ export function KeyField(props: {
     } catch (e) {
       setErr((e as Error).message);
     } finally {
+      pending.current = false;
       setBusy(false);
+      props.onBusyChange?.(false);
     }
   };
   return (
@@ -92,14 +140,20 @@ export function KeyField(props: {
         aria-label={props.name}
         placeholder={props.hint ? `已保存 ${props.hint}` : "粘贴 API Key"}
         value={value}
+        disabled={busy || props.disabled}
         onChange={(e) => setValue(e.target.value)}
       />
-      <button type="submit" className="btn sm primary" disabled={busy || !value.trim()}>
+      <button type="submit" className="btn sm primary" disabled={busy || props.disabled || !value.trim()}>
         {busy && <Loader2 size={13} className="spin" />}
         保存
       </button>
       {props.hint && (
-        <button type="button" className="btn ghost sm" disabled={busy} onClick={() => void save(null)}>
+        <button
+          type="button"
+          className="btn ghost sm"
+          disabled={busy || props.disabled}
+          onClick={() => void save(null)}
+        >
           清除
         </button>
       )}
@@ -108,9 +162,25 @@ export function KeyField(props: {
   );
 }
 
-function TerminalLogin({ harnessId, method }: { harnessId: string; method: AuthMethodView }) {
+function TerminalLogin({
+  harnessId,
+  method,
+  disabled,
+  onBusyChange,
+}: {
+  harnessId: string;
+  method: AuthMethodView;
+  disabled: boolean;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
   const open = async () => {
+    if (pending.current || disabled) return;
+    pending.current = true;
+    setBusy(true);
+    onBusyChange(true);
     setMsg(null);
     try {
       const r = await api<{ ok: boolean; error: string | null }>(
@@ -121,13 +191,17 @@ function TerminalLogin({ harnessId, method }: { harnessId: string; method: AuthM
       setMsg(r.ok ? "已在终端打开，完成后回来重新检测" : r.error);
     } catch (e) {
       setMsg((e as Error).message);
+    } finally {
+      pending.current = false;
+      setBusy(false);
+      onBusyChange(false);
     }
   };
   return (
     <div className="hauth-term">
       <div className="row" style={{ gap: 8, alignItems: "center" }}>
-        <button type="button" className="btn sm" onClick={() => void open()}>
-          <SquareTerminal size={13} />
+        <button type="button" className="btn sm" disabled={disabled || busy} onClick={() => void open()}>
+          {busy ? <Loader2 size={13} className="spin" /> : <SquareTerminal size={13} />}
           在终端中打开「{method.name}」
         </button>
         {msg && <span className="muted hauth-msg">{msg}</span>}

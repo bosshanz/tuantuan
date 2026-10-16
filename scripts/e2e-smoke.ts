@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { chromium, type Page } from "playwright-core";
 import { serve } from "../server/app";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
+import { registryAuthSmoke } from "./e2e-registry-auth";
 import { repliesSmoke } from "./e2e-replies";
 import { schedulingSmoke } from "./e2e-scheduling";
 import { terminalSmoke } from "./e2e-terminal";
@@ -156,7 +157,8 @@ const balanceSrv = Bun.serve({
 const shotsDir = process.env.SHOTS_DIR;
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });
 // ACP registry: a local mock CDN; agents install into a throwaway managed dir.
-const registry = mockRegistry();
+const registryAuthFile = join(fakeHome, "registry-auth");
+const registry = mockRegistry({ authFile: registryAuthFile });
 process.env.TUANTUAN_REGISTRY_URL = registry.url;
 process.env.TUANTUAN_HARNESS_DIR = mkdtempSync(join(tmpdir(), "tuantuan-e2e-harnesses-"));
 const { server, app } = serve({ dbPath, staticDir: process.env.E2E_DIST ?? "web/dist" }, 0);
@@ -247,6 +249,9 @@ try {
   await page.locator(".harness-row", { hasText: "Claude Code" }).scrollIntoViewIfNeeded();
   await shot("harness");
   await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Registry login uses a separate auth file so onboarding credentials cannot mask a missing login.
+  await registryAuthSmoke(browser, `http://localhost:${server.port}`, registryAuthFile, shotsDir);
 
   // 更多 Agent: the registry list (mock CDN), search, one-click binary install (checksum), handshake.
   const more = page.locator("section", { has: page.getByRole("heading", { name: "更多 Agent" }) });
@@ -750,7 +755,13 @@ try {
   await page.getByRole("option", { name: "Mock Smart" }).click();
   await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
 
-  await page.locator('[data-shot="expand"]').last().click();
+  const lastReply = page.locator('.message-row[data-sender="agent"]').last();
+  await lastReply.hover();
+  await lastReply.getByRole("button", { name: "更多消息操作", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "消息操作", exact: true })
+    .getByRole("button", { name: "查看详情", exact: true })
+    .click();
   await page.getByRole("heading", { name: "回复详情" }).waitFor();
 
   // Let enter/exit animations finish so geometry is measured at rest.
