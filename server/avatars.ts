@@ -2,23 +2,32 @@
  * Agent avatars: a small set of hand-authored "bot" silhouettes (100×100 viewBox) filled with one
  * colour, plus two slanted eye strokes. Shared by server (defaults) and web (rendering).
  */
-export const AVATAR_SHAPES = [
+/** Current choices for new avatars and deterministic defaults. */
+export const SELECTABLE_AVATAR_SHAPES = [
   "orb",
   "cloud",
+  "clover",
+  "flower",
+  "burst",
+  "cat",
+  "dog",
+  "rabbit",
+  "panda",
+  "goat",
+  "cow",
+] as const;
+
+/** Saved avatars remain valid and renderable after leaving the picker. */
+export const AVATAR_SHAPES = [
+  ...SELECTABLE_AVATAR_SHAPES,
   "tile",
   "spark",
-  "clover",
   "bean",
-  "flower",
   "drop",
   "pill",
   "wedge",
   "gem",
-  "burst",
   "hex",
-  "cat",
-  "dog",
-  "rabbit",
 ] as const;
 export type AvatarShape = (typeof AVATAR_SHAPES)[number];
 
@@ -39,6 +48,9 @@ export const SHAPE_LABEL: Record<AvatarShape, string> = {
   cat: "小猫",
   dog: "小狗",
   rabbit: "兔子",
+  panda: "熊猫",
+  goat: "山羊",
+  cow: "小牛",
 };
 
 /** Vivid modern colours; the first ten are the default set. */
@@ -89,7 +101,7 @@ function hash(s: string): number {
 export function defaultAvatar(id: string): { shape: AvatarShape; color: string } {
   const h = hash(id);
   return {
-    shape: AVATAR_SHAPES[h % AVATAR_SHAPES.length] as AvatarShape,
+    shape: SELECTABLE_AVATAR_SHAPES[h % SELECTABLE_AVATAR_SHAPES.length] as AvatarShape,
     color: AVATAR_COLORS[(h >>> 8) % DEFAULT_COLOR_COUNT] as string,
   };
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AVATAR_COLORS, AVATAR_SHAPES, type AvatarShape, SHAPE_LABEL } from "../../server/avatars";
+import { AVATAR_COLORS, type AvatarShape, SELECTABLE_AVATAR_SHAPES, SHAPE_LABEL } from "../../server/avatars";
 import { EXPRESSIONS, type Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
 import { usePresence } from "./motion";
@@ -36,9 +36,10 @@ export function AvatarPicker(props: {
   }, [hover]);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const focusShape = SELECTABLE_AVATAR_SHAPES.find((s) => s === props.shape) ?? SELECTABLE_AVATAR_SHAPES[0];
   useEffect(() => {
     if (!open) return;
-    root.current?.querySelector<HTMLButtonElement>('.shape-opt[aria-checked="true"]')?.focus();
+    root.current?.querySelector<HTMLButtonElement>('.shape-opt[tabindex="0"]')?.focus();
     const away = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
@@ -52,7 +53,12 @@ export function AvatarPicker(props: {
     <div
       className="avatar-edit"
       ref={root}
-      onKeyDown={(e) => e.key === "Escape" && open && (e.stopPropagation(), close())}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          close();
+        }
+      }}
     >
       <button
         ref={trigger}
@@ -88,7 +94,7 @@ export function AvatarPicker(props: {
             </button>
           </div>
           <div className="shape-grid" role="radiogroup" aria-label="形状" onKeyDown={(e) => arrowNav(e, 5)}>
-            {AVATAR_SHAPES.map((s) => (
+            {SELECTABLE_AVATAR_SHAPES.map((s) => (
               // biome-ignore lint/a11y/useSemanticElements: visual swatch radios; native radio inputs cannot render the shape
               <button
                 key={s}
@@ -96,7 +102,7 @@ export function AvatarPicker(props: {
                 role="radio"
                 aria-checked={props.shape === s}
                 aria-label={SHAPE_LABEL[s]}
-                tabIndex={props.shape === s ? 0 : -1}
+                tabIndex={focusShape === s ? 0 : -1}
                 className="shape-opt"
                 onClick={() => props.onChange(s, props.color)}
                 onMouseEnter={() => setHoverShape(s)}

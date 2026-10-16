@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AVATAR_COLORS, AVATAR_SHAPES, SHAPE_LABEL } from "../../server/avatars";
+import { AVATAR_COLORS, SELECTABLE_AVATAR_SHAPES, SHAPE_LABEL } from "../../server/avatars";
 import { EXPRESSION_LABEL, EXPRESSIONS } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
 
@@ -17,7 +17,7 @@ export function AvatarShowcase() {
           动画
         </label>
         <div className="seg">
-          {[20, 32, 48, 64].map((n) => (
+          {[18, 20, 32, 36, 48, 64].map((n) => (
             <button key={n} type="button" className="btn sm" aria-pressed={size === n} onClick={() => setSize(n)}>
               {n}px
             </button>
@@ -37,7 +37,7 @@ export function AvatarShowcase() {
           </tr>
         </thead>
         <tbody>
-          {AVATAR_SHAPES.map((s, i) => (
+          {SELECTABLE_AVATAR_SHAPES.map((s, i) => (
             <tr key={s}>
               <th>{SHAPE_LABEL[s]}</th>
               {EXPRESSIONS.map((e) => (

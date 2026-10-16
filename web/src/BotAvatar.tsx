@@ -128,6 +128,48 @@ const SHAPES: Record<AvatarShape, { body: ReactNode; eyes: [number, number] }> =
     ),
     eyes: [50, 63],
   },
+  panda: {
+    body: (
+      <>
+        <circle cx="24" cy="24" r="15" />
+        <circle cx="76" cy="24" r="15" />
+        <ellipse cx="50" cy="57" rx="39" ry="35" />
+        <ellipse className="ba-cutout" cx="50" cy="57" rx="32" ry="28" />
+        <ellipse cx="37" cy="51" rx="12" ry="16" transform="rotate(24 37 51)" />
+        <ellipse cx="63" cy="51" rx="12" ry="16" transform="rotate(-24 63 51)" />
+      </>
+    ),
+    eyes: [50, 51],
+  },
+  goat: {
+    body: (
+      <>
+        <path d="M34 36C20 29 18 13 28 6C25 20 34 21 42 29Z" />
+        <path d="M66 36C80 29 82 13 72 6C75 20 66 21 58 29Z" />
+        <path d="M36 39C24 30 14 34 7 42C15 54 27 56 38 47Z" />
+        <path d="M64 39C76 30 86 34 93 42C85 54 73 56 62 47Z" />
+        <path d="M39 72Q50 76 61 72L57 87Q50 98 43 87Z" />
+        <path d="M30 34Q50 22 70 34Q79 47 67 68L59 79Q50 85 41 79L33 68Q21 47 30 34Z" />
+      </>
+    ),
+    eyes: [50, 50],
+  },
+  cow: {
+    body: (
+      <>
+        <path d="M31 32C15 32 10 18 17 10C18 22 28 16 36 25Z" />
+        <path d="M69 32C85 32 90 18 83 10C82 22 72 16 64 25Z" />
+        <ellipse cx="17" cy="43" rx="14" ry="10" transform="rotate(20 17 43)" />
+        <ellipse cx="83" cy="43" rx="14" ry="10" transform="rotate(-20 83 43)" />
+        <ellipse cx="50" cy="53" rx="31" ry="34" />
+        <rect x="24" y="56" width="52" height="35" rx="17" />
+        <rect className="ba-detail" x="29" y="62" width="42" height="23" rx="11.5" />
+        <ellipse className="ba-cutout" cx="39" cy="73" rx="3" ry="4" />
+        <ellipse className="ba-cutout" cx="61" cy="73" rx="3" ry="4" />
+      </>
+    ),
+    eyes: [50, 43],
+  },
 };
 
 /** Eyes (and mouth) per expression, drawn around the face midpoint (x, y). */
@@ -275,6 +317,7 @@ export function BotAvatar({
       viewBox="0 0 100 100"
       width={size}
       height={size}
+      data-shape={shape}
       data-expr={shown}
       data-anim={animate || shown === "happy" ? (size >= 24 ? "full" : "blink") : undefined}
       style={{ ["--c" as string]: color, ["--blink-delay" as string]: `${offset}s` }}

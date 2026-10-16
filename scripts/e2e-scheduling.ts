@@ -1,11 +1,127 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Browser } from "playwright-core";
+import type { Browser, Locator, Page } from "playwright-core";
 import type { Agent, Room, SessionView } from "../web/src/api";
 import type { ChatSnapshot } from "../web/src/chatState";
 
+function replyDisclosure(page: Page, panel: Locator) {
+  const disclosure = panel.locator(".chat-task-disclosure");
+  const expand = panel.getByRole("button", { name: "展开回复状态", exact: true });
+  const collapse = panel.getByRole("button", { name: "收起回复状态", exact: true });
+  const settled = async (expanded: boolean) =>
+    page.waitForFunction((expected) => {
+      const element = document.querySelector<HTMLElement>(".chat-task-disclosure");
+      if (!element || element.getAnimations().some((animation) => animation.playState === "running")) return false;
+      const height = element.getBoundingClientRect().height;
+      return expected ? height > 1 : height < 0.5;
+    }, expanded);
+  const assertCollapsed = async () => {
+    await expand.waitFor();
+    if ((await expand.getAttribute("aria-controls")) !== (await disclosure.getAttribute("id")))
+      throw new Error("reply disclosure toggle lost its controlled region");
+    if ((await expand.getAttribute("aria-expanded")) !== "false")
+      throw new Error("reply status is not marked collapsed");
+    if (!(await disclosure.evaluate((el) => el.hasAttribute("inert") && el.getAttribute("aria-hidden") === "true")))
+      throw new Error("closed reply disclosure remains interactive or exposed to accessibility");
+    await settled(false);
+    if (
+      (await disclosure.locator("ul.chat-task-list").count()) !== 1 ||
+      !(await disclosure.locator("[data-task-id]").count())
+    )
+      throw new Error("closing unmounted the live task list");
+    if (
+      await disclosure.evaluate((el) => {
+        const button = el.querySelector<HTMLButtonElement>("button:not(:disabled)");
+        button?.focus();
+        return !!button && document.activeElement === button;
+      })
+    )
+      throw new Error("a closed task action accepted focus");
+  };
+  const expandTasks = async () => {
+    if (await expand.count()) await expand.click();
+    await collapse.waitFor();
+    if ((await collapse.getAttribute("aria-expanded")) !== "true")
+      throw new Error("reply status is not marked expanded");
+    await settled(true);
+    if (!(await disclosure.evaluate((el) => !el.hasAttribute("inert") && el.getAttribute("aria-hidden") !== "true")))
+      throw new Error("open reply disclosure remains inert");
+  };
+  const beginMotion = async () =>
+    page.evaluate(() => {
+      const state = { frames: [] as { height: number; full: number; at: number }[] };
+      const win = window as typeof window & { replyMotion?: typeof state };
+      win.replyMotion = state;
+      const tick = (at: number) => {
+        if (win.replyMotion !== state) return;
+        const element = document.querySelector<HTMLElement>(".chat-task-disclosure");
+        const list = element?.querySelector<HTMLElement>(".chat-task-list");
+        if (element && list)
+          state.frames.push({
+            height: element.getBoundingClientRect().height,
+            full: list.getBoundingClientRect().height,
+            at,
+          });
+        requestAnimationFrame(tick);
+      };
+      tick(performance.now());
+    });
+  const finishMotion = async (label: string, animated: boolean, minimumFrames = 2) => {
+    const frames = await page.evaluate(() => {
+      const win = window as typeof window & {
+        replyMotion?: { frames: { height: number; full: number; at: number }[] };
+      };
+      const frames = win.replyMotion?.frames ?? [];
+      delete win.replyMotion;
+      return frames;
+    });
+    const middle = frames.filter((frame) => frame.height > 1 && frame.height < frame.full - 1);
+    if (animated && middle.length < minimumFrames) throw new Error(`${label} jumped without intermediate heights`);
+    if (!animated && middle.length) throw new Error(`${label} animated with reduced motion`);
+    if (Math.max(...frames.map((frame) => frame.full)) - Math.min(...frames.map((frame) => frame.full)) > 1)
+      throw new Error(`${label} resized the list instead of clipping it`);
+    console.log(`reply disclosure ${label}: ${middle.length} intermediate frames`);
+  };
+  return { disclosure, expand, collapse, settled, assertCollapsed, expandTasks, beginMotion, finishMotion };
+}
+
+async function assertParticipants(
+  panel: Locator,
+  expected: { id: string; name: string; status: RegExp; queued?: number }[],
+) {
+  const participants = panel.locator(".chat-activity-toggle .chat-activity-agent");
+  const actual = await participants.evaluateAll((elements) =>
+    elements.map((element) => ({
+      id: element.getAttribute("data-agent-id"),
+      text: (element as HTMLElement).innerText,
+      avatars: element.querySelectorAll(".avatar").length,
+      visible: element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0,
+    })),
+  );
+  if (actual.length !== expected.length || new Set(actual.map((item) => item.id)).size !== actual.length)
+    throw new Error(`compact participants are missing or duplicated: ${JSON.stringify(actual)}`);
+  for (const agent of expected) {
+    const item = actual.find((value) => value.id === agent.id);
+    if (!item?.visible || item.avatars !== 1 || !item.text.includes(agent.name) || !agent.status.test(item.text))
+      throw new Error(
+        `compact participant lost its avatar/name/state: ${JSON.stringify({ agent: agent.name, actual })}`,
+      );
+    if (agent.queued && !new RegExp(`(?:${agent.queued}\\s*项?\\s*排队|排队\\s*${agent.queued})`).test(item.text))
+      throw new Error(`queued count is not attached to ${agent.name}: ${item.text}`);
+  }
+}
+
 /** Real HTTP/WS + mock ACP. The caller provides an onboarded, idle group with two mock Agents. */
 export async function schedulingSmoke(browser: Browser, base: string, roomId: string, shotsDir?: string) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, hasTouch: true, colorScheme: "light" });
+  const videoDir = process.env.SCHEDULING_VIDEO_DIR;
+  if (videoDir) mkdirSync(videoDir, { recursive: true });
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 1000 },
+    hasTouch: true,
+    colorScheme: "light",
+    ...(videoDir ? { recordVideo: { dir: videoDir, size: { width: 1440, height: 1000 } } } : {}),
+  });
+  const video = page.video();
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   let disconnect: () => Promise<void> = async () => {
@@ -42,21 +158,17 @@ export async function schedulingSmoke(browser: Browser, base: string, roomId: st
   };
   const previousModels = new Map<string, string>();
   const replyStatus = page.getByRole("region", { name: "会话任务", exact: true });
-  const expandStatus = replyStatus.getByRole("button", { name: "展开回复状态", exact: true });
-  const collapseStatus = replyStatus.getByRole("button", { name: "收起回复状态", exact: true });
+  const {
+    disclosure,
+    expand: expandStatus,
+    collapse: collapseStatus,
+    settled,
+    assertCollapsed,
+    expandTasks,
+    beginMotion,
+    finishMotion,
+  } = replyDisclosure(page, replyStatus);
   const taskRow = (id: string) => page.locator(`[data-task-id="${id}"]`);
-  const assertCollapsed = async () => {
-    await expandStatus.waitFor();
-    if ((await expandStatus.getAttribute("aria-expanded")) !== "false")
-      throw new Error("compact reply status is not marked collapsed");
-    if (await page.locator("[data-task-id]").count()) throw new Error("collapsed reply status still renders task rows");
-  };
-  const expandTasks = async () => {
-    if (await expandStatus.count()) await expandStatus.click();
-    await collapseStatus.waitFor();
-    if ((await collapseStatus.getAttribute("aria-expanded")) !== "true")
-      throw new Error("reply status is not marked expanded");
-  };
   const input = page.getByRole("textbox", { name: "消息输入框" });
   const send = async (text: string) => {
     await input.fill(text);
@@ -83,16 +195,32 @@ export async function schedulingSmoke(browser: Browser, base: string, roomId: st
     const b = parallel.state.tasks.find((t) => t.agentId === bId);
     if (!a || !b) throw new Error("parallel tasks lost an Agent");
     await assertCollapsed();
-    await replyStatus.getByText("2 位 Agent 正在回复", { exact: true }).waitFor();
+    await assertParticipants(replyStatus, [
+      { id: aId, name: a.agentName, status: /回复/ },
+      { id: bId, name: b.agentName, status: /回复/ },
+    ]);
+    const listNode = await disclosure.locator("ul.chat-task-list").elementHandle();
+    await beginMotion();
     await expandStatus.focus();
     await page.keyboard.press("Enter");
-    await collapseStatus.waitFor();
     await expandTasks();
+    await finishMotion("expand", true);
     await taskRow(a.id).getByText("回复中", { exact: true }).waitFor();
     await taskRow(b.id).getByText("回复中", { exact: true }).waitFor();
+    if (
+      (await taskRow(a.id).locator(".avatar").count()) !== 1 ||
+      (await taskRow(b.id).locator(".avatar").count()) !== 1
+    )
+      throw new Error("expanded rows lost their Agent avatars");
+    await beginMotion();
     await collapseStatus.focus();
     await page.keyboard.press("Space");
     await assertCollapsed();
+    await finishMotion("collapse", true);
+    if (
+      !(await disclosure.locator("ul.chat-task-list").evaluate((element, original) => element === original, listNode))
+    )
+      throw new Error("disclosure replaced its task list during collapse");
     await expandTasks();
     if (await page.getByRole("button", { name: "停止", exact: true }).count())
       throw new Error("ambiguous composer stop exists for parallel tasks");
@@ -114,31 +242,108 @@ export async function schedulingSmoke(browser: Browser, base: string, roomId: st
     await taskRow(queuedTask.id).getByText("排队中", { exact: true }).waitFor();
     await collapseStatus.click();
     await assertCollapsed();
-    await replyStatus.getByText("2 位 Agent 正在回复", { exact: true }).waitFor();
-    await replyStatus.getByText("1 项排队", { exact: true }).waitFor();
-    const compactLayout = await replyStatus.evaluate(async (panel) => {
-      await document.fonts.ready;
-      const activity = panel.querySelector(".chat-activity");
-      const name = panel.querySelector(".chat-activity-label strong");
-      const status = panel.querySelector(".chat-activity-label > span");
-      if (!activity || !name || !status) throw new Error("compact reply status lost its summary elements");
-      const nameText = document.createRange();
-      nameText.selectNodeContents(name);
-      const statusText = document.createRange();
-      statusText.selectNodeContents(status);
-      return {
-        height: activity.getBoundingClientRect().height,
-        textOffset: nameText.getBoundingClientRect().bottom - statusText.getBoundingClientRect().bottom,
-      };
+    await assertParticipants(replyStatus, [
+      { id: aId, name: a.agentName, status: /回复/, queued: 1 },
+      { id: bId, name: b.agentName, status: /回复/ },
+    ]);
+    // Both keyboard and pointer paths stay reversible, and collapse immediately removes task controls from focus.
+    await expandTasks();
+    await taskRow(a.id).getByRole("button", { name: "停止任务", exact: true }).focus();
+    await collapseStatus.evaluate((element) => (element as HTMLButtonElement).click());
+    if (!(await expandStatus.evaluate((element) => element === document.activeElement)))
+      throw new Error("collapsing did not return focus from a task action to its toggle");
+    await assertCollapsed();
+    const closedAction = disclosure.locator("button:not(:disabled)").first();
+    let actionable = false;
+    try {
+      await closedAction.click({ trial: true, timeout: 150 });
+      actionable = true;
+    } catch {}
+    if (actionable) throw new Error("closed task action remained pointer-accessible");
+    await expandStatus.focus();
+    await page.keyboard.press("Tab");
+    if (await page.evaluate(() => !!document.activeElement?.closest(".chat-task-disclosure")))
+      throw new Error("Tab entered a closed reply disclosure");
+    await expandTasks();
+    const full = await disclosure.evaluate((element) => element.getBoundingClientRect().height);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await collapseStatus.click();
+      await page.waitForFunction((target) => {
+        const height = document.querySelector(".chat-task-disclosure")?.getBoundingClientRect().height ?? 0;
+        return height > target * 0.35 && height < target * 0.75;
+      }, full);
+      const before = await disclosure.evaluate((element) => element.getBoundingClientRect().height);
+      await page.keyboard.press("Enter");
+      const after = await disclosure.evaluate(
+        (element) =>
+          new Promise<number>((resolve) =>
+            requestAnimationFrame(() => resolve(element.getBoundingClientRect().height)),
+          ),
+      );
+      if (after < 1 || after >= full || Math.abs(after - before) > full * 0.4)
+        throw new Error("reply disclosure reversal jumped to an endpoint");
+      await settled(true);
+    }
+    const messages = page.locator(".messages");
+    await collapseStatus.click();
+    await assertCollapsed();
+    await messages.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
     });
-    if (compactLayout.height !== 32 || compactLayout.textOffset !== 0)
-      throw new Error(`compact reply status has misaligned summary layout: ${JSON.stringify(compactLayout)}`);
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+    );
+    await expandTasks();
+    if (await messages.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight > 3))
+      throw new Error("expanding reply status lost chat bottom anchoring");
+    await collapseStatus.click();
+    await assertCollapsed();
+    if (await messages.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight > 3))
+      throw new Error("collapsing reply status lost chat bottom anchoring");
+    if (await messages.evaluate((element) => element.scrollHeight - element.clientHeight > 80)) {
+      await messages.evaluate((element) => {
+        element.scrollTop = Math.min(60, (element.scrollHeight - element.clientHeight) / 4);
+      });
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+      );
+      const readingTop = await messages.evaluate((element) => element.scrollTop);
+      await expandTasks();
+      await collapseStatus.click();
+      await assertCollapsed();
+      if (Math.abs((await messages.evaluate((element) => element.scrollTop)) - readingTop) > 2)
+        throw new Error("reply disclosure moved the reader's history position");
+    }
+    await beginMotion();
+    await expandStatus.click();
+    await page.waitForFunction((target) => {
+      const height = document.querySelector(".chat-task-disclosure")?.getBoundingClientRect().height ?? 0;
+      return height > 1 && height < target - 1;
+    }, full);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await settled(true);
+    if (
+      await disclosure.evaluate((element) =>
+        element.getAnimations().some((animation) => animation.playState === "running"),
+      )
+    )
+      throw new Error("changing reduced motion mid-transition left an active animation");
+    await finishMotion("interrupted by reduced motion", true, 1);
+    await beginMotion();
+    await collapseStatus.click();
+    await assertCollapsed();
+    await finishMotion("reduced-motion collapse", false);
+    await beginMotion();
+    await expandTasks();
+    await finishMotion("reduced-motion expand", false);
+    await collapseStatus.click();
+    await assertCollapsed();
     const dots = replyStatus.locator(".chat-activity-dots i");
     await page.emulateMedia({ reducedMotion: "reduce" });
     const reducedAnimations = await dots.evaluateAll((items) =>
       items.map((item) => getComputedStyle(item).animationName),
     );
-    if (reducedAnimations.length !== 3 || reducedAnimations.some((animation) => animation !== "none"))
+    if (!reducedAnimations.length || reducedAnimations.some((animation) => animation !== "none"))
       throw new Error("compact reply dots still animate with reduced motion");
     await page.emulateMedia({ reducedMotion: "no-preference" });
     if (await dots.evaluateAll((items) => items.some((item) => getComputedStyle(item).animationName === "none")))
@@ -228,7 +433,7 @@ export async function schedulingSmoke(browser: Browser, base: string, roomId: st
     console.log("scheduling: targeted stops preserved independent task; reloading");
     await page.reload();
     await assertCollapsed();
-    await replyStatus.getByText(second.agentName, { exact: true }).waitFor();
+    await assertParticipants(replyStatus, [{ id: second.agentId, name: second.agentName, status: /回复/ }]);
     await page.getByRole("button", { name: "停止", exact: true }).waitFor(); // Safe single-task composer shortcut.
     const compactStop = replyStatus.getByRole("button", { name: "停止任务", exact: true });
     let compactAttempts = 0;
@@ -305,6 +510,15 @@ export async function schedulingSmoke(browser: Browser, base: string, roomId: st
     const child = handoff.state.tasks.find((t) => t.parentTaskId === source?.id);
     if (!source || !child) throw new Error("handoff lost source task ownership");
     await assertCollapsed();
+    await assertParticipants(replyStatus, [
+      { id: source.agentId, name: source.agentName, status: /等待|统筹|交接/ },
+      { id: child.agentId, name: child.agentName, status: /回复/ },
+    ]);
+    const participantOrder = await replyStatus
+      .locator(".chat-activity-agent")
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-agent-id")));
+    if (participantOrder[0] !== child.agentId)
+      throw new Error("waiting participant displaced an actively replying Agent");
     await expandTasks();
     await taskRow(source.id).getByText("统筹中", { exact: true }).waitFor();
     await taskRow(child.id).getByText("回复中", { exact: true }).waitFor();
@@ -317,13 +531,24 @@ export async function schedulingSmoke(browser: Browser, base: string, roomId: st
     await page.setViewportSize({ width: 390, height: 844 });
     if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
       throw new Error("task UI overflows narrow viewport");
+    await participantOverflowSmoke(browser, base, room.projectId, shotsDir);
     await coordinationSmoke(browser, base, room.projectId, shotsDir);
     if (errors.length) throw new Error(`scheduling browser errors: ${errors.join("; ")}`);
     console.log(
       "PASS task scheduling: compact reply status, keyboard disclosure, parallel Agents, per-Agent queue, targeted/compact stop retry, independent task survives, refresh/slow snapshot, handoff subtree, group leader results and summary",
     );
+  } catch (error) {
+    if (shotsDir)
+      await page
+        .screenshot({ path: join(shotsDir, "group-scheduling-failure.png"), animations: "disabled" })
+        .catch(() => {});
+    throw error;
   } finally {
     await page.close();
+    if (video && videoDir) {
+      await video.saveAs(join(videoDir, "reply-status-motion.webm"));
+      await video.delete();
+    }
     const remaining = (await history()).state.tasks;
     await Promise.all(
       remaining.map((task) =>
@@ -336,6 +561,102 @@ export async function schedulingSmoke(browser: Browser, base: string, roomId: st
     );
     await waitState((s) => s.state.tasks.length === 0, "cleanup");
     for (const [id, model] of previousModels) await config(id, model);
+  }
+}
+
+/** Four real active mock sessions exercise the visible cap and accessible overflow without changing the caller's room. */
+async function participantOverflowSmoke(browser: Browser, base: string, projectId: string | null, shotsDir?: string) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const agents: Agent[] = [];
+  let room: Room | undefined;
+  const post = async <T>(path: string, body: unknown): Promise<T> => {
+    const response = await fetch(`${base}/api/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`overflow fixture failed: ${path}: ${response.status}`);
+    return (await response.json()) as T;
+  };
+  const waitEmpty = async (endpoint: string) => {
+    const end = Date.now() + 25_000;
+    while (((await (await fetch(endpoint)).json()) as ChatSnapshot).state.tasks.length) {
+      if (Date.now() > end) throw new Error("overflow fixture cleanup timed out");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+  };
+  try {
+    const suffix = crypto.randomUUID().slice(0, 4);
+    for (let i = 1; i <= 4; i++)
+      agents.push(
+        await post<Agent>("agents", {
+          name: `Peer${i}${suffix}`,
+          harness: "mock",
+          configDefaults: { model: "mock-stuck" },
+        }),
+      );
+    room = await post<Room>("rooms", {
+      name: "参与者头像上限冒烟",
+      agentIds: agents.map((agent) => agent.id),
+      mainAgentId: agents[0]?.id,
+      projectId: projectId ?? undefined,
+    });
+    await post(`rooms/${room.id}/messages`, { content: "@所有人 四位参与者保持独立回复" });
+    const roomId = room.id;
+    await page.goto(`${base}/#/c/${roomId}`);
+    await page.waitForFunction(async (id) => {
+      const snapshot = await (await fetch(`/api/rooms/${id}/messages`)).json();
+      return (
+        snapshot.state.tasks.length === 4 &&
+        snapshot.state.tasks.every(
+          (task: { status: string; messageId: string | null }) => task.status === "running" && !!task.messageId,
+        )
+      );
+    }, roomId);
+    const panel = page.getByRole("region", { name: "会话任务", exact: true });
+    await replyDisclosure(page, panel).assertCollapsed();
+    const visibleIds = await panel
+      .locator(".chat-activity-agent")
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-agent-id")));
+    if (visibleIds.length !== 3 || new Set(visibleIds).size !== 3)
+      throw new Error("reply summary did not cap distinct avatars at three");
+    const visible = agents.filter((agent) => visibleIds.includes(agent.id));
+    await assertParticipants(
+      panel,
+      visible.map((agent) => ({ id: agent.id, name: agent.name, status: /回复/ })),
+    );
+    const hidden = agents.find((agent) => !visibleIds.includes(agent.id));
+    const overflow = panel.locator(".chat-activity-toggle .chat-activity-count[title]");
+    if (
+      !hidden ||
+      !(await overflow.isVisible()) ||
+      !(await overflow.getAttribute("title"))?.includes(hidden.name) ||
+      !/还有\s*1\s*位 Agent/.test(await overflow.innerText())
+    )
+      throw new Error("additional participant count is not readable with its identity");
+    if (shotsDir)
+      await page.screenshot({ path: join(shotsDir, "group-scheduling-overflow.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+    );
+    if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
+      throw new Error("three participant summaries overflow the narrow viewport");
+    await assertParticipants(
+      panel,
+      visible.map((agent) => ({ id: agent.id, name: agent.name, status: /回复/ })),
+    );
+  } finally {
+    await page.close();
+    if (room) {
+      const id = room.id;
+      const endpoint = `${base}/api/rooms/${id}/messages`;
+      const snapshot = (await (await fetch(endpoint)).json()) as ChatSnapshot;
+      await Promise.all(snapshot.state.tasks.map((task) => post(`rooms/${id}/cancel`, { taskId: task.id })));
+      await waitEmpty(endpoint);
+      await fetch(`${base}/api/rooms/${id}`, { method: "DELETE" });
+    }
+    for (const agent of agents) await fetch(`${base}/api/agents/${agent.id}`, { method: "DELETE" });
   }
 }
 
@@ -360,7 +681,7 @@ export async function coordinationSmoke(browser: Browser, base: string, projectI
       name,
       harness: "mock",
       configDefaults: { model: "mock-fast" },
-      env: member ? { MOCK_AGENT_SESSION_DELAY_MS: "700" } : {},
+      env: member ? { MOCK_AGENT_SESSION_DELAY_MS: "1400" } : {},
     });
     agentIds.push(value.id);
     return value;
@@ -403,12 +724,20 @@ export async function coordinationSmoke(browser: Browser, base: string, projectI
     const source = delegated.state.tasks.find((task) => task.agentId === lead.id && task.status === "waiting");
     if (!source) throw new Error("coordination lost its leader task");
     const status = page.getByRole("region", { name: "会话任务", exact: true });
+    await assertParticipants(status, [
+      { id: lead.id, name: lead.name, status: /等待|统筹/ },
+      { id: left.id, name: left.name, status: /回复|准备/ },
+      { id: right.id, name: right.name, status: /回复|准备/ },
+    ]);
     await status.getByRole("button", { name: "展开回复状态", exact: true }).click();
     await page.locator(`[data-task-id="${source.id}"]`).getByText("统筹中", { exact: true }).waitFor();
     if (shotsDir)
       await page.screenshot({ path: join(shotsDir, "group-coordination-waiting.png"), animations: "disabled" });
     await status.getByRole("button", { name: "收起回复状态", exact: true }).click();
-    await status.getByText(`${lead.name} 正在跟进`, { exact: true }).waitFor();
+    await status
+      .locator(`.chat-activity-agent[data-agent-id="${lead.id}"]`)
+      .getByText("正在跟进", { exact: true })
+      .waitFor();
     await status.getByRole("button", { name: "展开回复状态", exact: true }).click();
     await page.locator('[data-task-status="running"]').getByText("跟进中", { exact: true }).waitFor();
     const completed = await waitState(
