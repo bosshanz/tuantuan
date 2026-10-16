@@ -1,6 +1,6 @@
 # 团团：桌面客户端 + 独立 Harness（ACP）计划
 
-> 状态（2026-10-16）：M1、M2 完成；M3（桌面）早期已在 Linux 上端到端验证，后续功能的各平台验收按下方记录分别说明。Harness 从官方 ACP Registry 接入；新增图文渲染与放大预览已完成本机构建、完整检查和 Chrome 冒烟。本文档记录目标、决策和里程碑；当前行为以 `README.md`、`docs/product.md`、`docs/architecture.md` 为准。
+> 状态（2026-10-16）：M1、M2 完成；M3（桌面）早期已在 Linux 上端到端验证，后续功能的各平台验收按下方记录分别说明。Harness 从官方 ACP Registry 接入；新增图文渲染与放大预览已完成本机构建、完整检查和 Chrome 冒烟。本文档记录目标、决策和里程碑；当前行为以 `README.md` 及 `docs/` 下的使用文档、`docs/product.md`、`docs/architecture.md` 为准。
 
 ## 0. 决定记录
 
