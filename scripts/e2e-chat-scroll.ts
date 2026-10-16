@@ -199,8 +199,15 @@ export async function chatScrollSmoke(browser: Browser, base: string, shotsDir?:
     await input.fill(marker);
     await input.press("Enter");
     await waiting;
+    const beforeWheel = (await metrics()).top;
     await wheel(-180);
     await latest.waitFor();
+    // The wheel pauses following synchronously but Chromium applies the scroll a frame or more later;
+    // measure only after the wheel's own movement landed, or that movement looks like a forced jump.
+    await page.waitForFunction(
+      (top) => (document.querySelector(".messages")?.scrollTop ?? top) < top - 100,
+      beforeWheel,
+    );
     const pendingTop = (await metrics()).top;
     const acknowledged = page.waitForResponse(
       (response) => response.url() === `${base}${endpoint}` && response.request().method() === "POST",
