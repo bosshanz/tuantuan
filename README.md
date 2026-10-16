@@ -19,6 +19,7 @@
 - **Harness**：自动发现你自己装的版本；没有时一键装到团团自己的目录（官方 ACP Registry，固定版本、校验和、不用 sudo）；握手测试与登录引导。
 - **会话**：按项目分组；单 Agent 直接对话，多 Agent 由群主负责分工、跟进和汇总，明确 @ 成员保持直达；支持 @所有人、`handoff` 交接和引用回复。侧栏随回复完成更新预览，断线重连后补齐。
 - **消息阅读**：Markdown 支持 Mermaid 代码围栏（跟随明暗主题，可查看源码）；图表、Markdown、ACP 与工具图片可点击放大，切换适应窗口 / 原图，按 Esc 关闭。
+- **历史回看**：会话先显示最近 200 条消息，顶部可继续加载更早记录；保留阅读位置，失败可重试，重连保留已加载记录。
 - **项目终端**：会话右上角打开内嵌交互式终端（macOS / Linux），默认进入项目目录；用标签页多开独立 shell，支持新增、切换、单独结束、Ctrl+C、调整高度和平滑展开 / 收起。收起保留全部终端，刷新后重连；支持减少动态效果。
 - **服务商与用量**：给 Claude Code / Codex / 自定义 API 配置服务商（Key 只在服务端、打码显示），只读导入 CC Switch，查看本机用量和余额。
 - **Skills**：自动发现 `~/.agents`、`~/.claude`、`~/.codex`、插件和项目里的 Skills，按 Agent 勾选；可从链接或文件夹导入。
@@ -52,7 +53,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-下载 Releases 里的安装包（macOS `.dmg`、Windows `.exe`、Linux `.AppImage`），打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包（AppImage 约 157 MB），第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置（约 +300 MB）。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+**暂未发布安装包，请从源码构建**（步骤见下方「打包」：`bun install && bun run desktop:install && bun run desktop:build`，产物在 `desktop/release/`，macOS `.dmg`、Windows `.exe`、Linux `.AppImage`）。装好后打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包（AppImage 约 157 MB），第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置（约 +300 MB）。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](docs/screenshots/desktop-linux.png)
 
@@ -210,6 +211,7 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 新建 Agent 时 Harness 选「自定义 API（BYOK）」：接口格式（OpenAI Chat Completions / OpenAI Responses / Anthropic Messages）、Base URL、API Key、模型，可点「测试连接」。
 
 - 团团内置的轻量 harness，只做对话：SSE 流式、身份文档作系统提示、会话转述；多 Agent 时 `handoff` / `list_members` 以原生 function/tool call 提供（与 MCP 走同一处理逻辑）。**没有文件读写和终端。**
+- 对话上下文按完整成功轮保存，最多 20 轮；每次请求的序列化字符上限为 65,536，超限先移除完整旧轮，当前任务自身超限会提示错误。重启后继续同一上下文；新会话、成员移除或更换项目目录 / 归属会清空，失败或取消不会写入半轮。聊天记录仍可回看；字符预算不等于模型 token 窗口。
 - API Key 以明文保存在服务端 SQLite，专用接口只返回掩码（如 `sk-••••abcd`），不写日志；编辑时留空即保持原 Key。服务商 Key、管理 Key 与 Harness `env_var` 登录 Key 也保存在同一数据库；打码不代表磁盘加密。Harness 原生登录态仍由 Harness 管理。普通 Agent 环境变量属于可读写配置，不能视为专用密钥存储。系统钥匙串集成仍未实现。
 
 ## 会话设置（模型 / 权限 / 推理…）
@@ -357,6 +359,21 @@ Harness 本来就会读取的全局 / 项目技能在设置里显示「原生可
 - [docs/architecture.md](docs/architecture.md)：模块、状态归属、路由机制与取舍
 - [docs/plan-harness-acp.md](docs/plan-harness-acp.md)：ACP 改造计划、里程碑状态与决策记录
 
+
+## 已知限制
+
+- **macOS 包未签名、未公证**：没有 Developer ID 证书时只做本机 ad-hoc 签名，第一次打开需在 Finder 里右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/团团.app`。
+- **Windows 版未测试**：能打包，但还没在真实 Windows 机器上验证过。
+- **部分功能待 Mac 真机验证**：系统通知与权限申请、程序坞未读数、无边框标题栏的拖动区域，目前只在 Linux/模拟环境中测试过。
+- 界面目前只有中文。
+
+## 商标说明
+
+界面中出现的 Anthropic、OpenAI、Google、xAI、智谱、Moonshot、通义千问、DeepSeek、MiniMax 等模型厂商 Logo（来自 [@lobehub/icons](https://github.com/lobehub/lobe-icons)，MIT）仅用于标识对应厂商的模型。这些商标归各自所有者所有，本项目与这些公司没有关联，也未获其背书。
+
+## 参与贡献
+
+见 [CONTRIBUTING.md](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)、[安全策略](SECURITY.md)；第三方许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## License
 

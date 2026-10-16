@@ -23,4 +23,19 @@ describe("message merge (snapshot vs live events)", () => {
     const out = mergeMessages([msg("a", 1), msg("c", 3)], [msg("b", 2), msg("x", 0, { roomId: "other" })], "r");
     expect(out.map((m) => m.id)).toEqual(["a", "b", "c"]);
   });
+  test("uses sequence order even when timestamps tie or the clock moved backwards", () => {
+    const out = mergeMessages(
+      [msg("c", 0, { seq: 3 }), msg("b", 100, { seq: 2 }), msg("b", 100, { seq: 2 })],
+      [msg("a", 100, { seq: 1 }), msg("d", 0, { seq: 4 })],
+      "r",
+    );
+    expect(out.map((m) => m.id)).toEqual(["a", "b", "c", "d"]);
+    expect(upsertMessage(out, msg("between", 100, { seq: 0 })).map((m) => m.id)).toEqual([
+      "between",
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+  });
 });

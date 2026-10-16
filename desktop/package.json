@@ -2,8 +2,8 @@
   "name": "tuantuan-desktop",
   "productName": "团团",
   "description": "团团 Tuantuan — 多 Agent 群聊工作台",
-  "author": "Tuantuan",
-  "homepage": "https://github.com/bosshanz/tuantuan",
+  "author": "bosshanz",
+  "homepage": "https://github.com/bosshanz/tuantuan#readme",
   "private": true,
   "main": "dist/main.cjs",
   "devDependencies": {
@@ -26,5 +26,13 @@
     "dev": "bun scripts/compile.ts && electron .",
     "dist": "bun scripts/dist.ts"
   },
-  "desktopName": "tuantuan.desktop"
+  "desktopName": "tuantuan.desktop",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bosshanz/tuantuan.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bosshanz/tuantuan/issues"
+  }
 }

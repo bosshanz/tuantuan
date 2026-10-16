@@ -1,5 +1,5 @@
 import type { UIEvent, WheelEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const atBottom = (element: HTMLElement) => element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
 const syncEdges = (element: HTMLElement) => {
@@ -13,6 +13,7 @@ export function useChatScroll() {
   const listRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
   const previousTop = useRef(0);
+  const readingAnchor = useRef<{ id: string; offset: number; top: number } | null>(null);
   const [following, setFollowing] = useState(true);
   const setFollow = useCallback((value: boolean) => {
     followingRef.current = value;
@@ -41,6 +42,35 @@ export function useChatScroll() {
     element.scrollTo({ top: element.scrollTop, behavior: "instant" });
     previousTop.current = element.scrollTop;
   }, [setFollow]);
+
+  // Capture immediately before prepending, so scrolling while the request was pending is respected.
+  const preserveReadingPosition = useCallback(() => {
+    const element = listRef.current;
+    if (!element || followingRef.current) return;
+    const top = element.getBoundingClientRect().top;
+    const firstVisible = [...element.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+      (message) => message.getBoundingClientRect().bottom > top,
+    );
+    if (!firstVisible) return;
+    readingAnchor.current = {
+      id: firstVisible.dataset.messageId as string,
+      offset: firstVisible.getBoundingClientRect().top - top,
+      top: element.scrollTop,
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = listRef.current;
+    const anchor = readingAnchor.current;
+    if (!element || !anchor) return;
+    readingAnchor.current = null;
+    const message = element.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.id)}"]`);
+    element.scrollTop = message
+      ? element.scrollTop + message.getBoundingClientRect().top - element.getBoundingClientRect().top - anchor.offset
+      : anchor.top;
+    previousTop.current = element.scrollTop;
+    syncEdges(element);
+  });
 
   useEffect(() => {
     const element = listRef.current;
@@ -94,5 +124,5 @@ export function useChatScroll() {
     },
     [pause, followLatest],
   );
-  return { listRef, following, followLatest, onScroll, onWheel, onTouchMove: pause };
+  return { listRef, following, followLatest, preserveReadingPosition, onScroll, onWheel, onTouchMove: pause };
 }

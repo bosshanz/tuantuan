@@ -201,6 +201,13 @@ export async function chatScrollSmoke(browser: Browser, base: string, shotsDir?:
     await waiting;
     await wheel(-180);
     await latest.waitFor();
+    // The wheel pauses following synchronously but Chromium applies the scroll a frame or more later.
+    // Measure only once the reader is actually ~180px above the tail; scrollTop alone is not enough because
+    // the tail can still shrink (2146 -> 2024) while the wheel movement (-> 1844) is in flight.
+    await page.waitForFunction(() => {
+      const el = document.querySelector(".messages");
+      return !!el && el.scrollHeight - el.scrollTop - el.clientHeight > 100;
+    });
     const pendingTop = (await metrics()).top;
     const acknowledged = page.waitForResponse(
       (response) => response.url() === `${base}${endpoint}` && response.request().method() === "POST",

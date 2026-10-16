@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser, Locator, Page } from "playwright-core";
 import type { Agent, Room, SessionView } from "../web/src/api";
@@ -667,6 +668,9 @@ export async function coordinationSmoke(browser: Browser, base: string, projectI
   page.on("pageerror", (error) => errors.push(error.message));
   const agentIds: string[] = [];
   let room: Room | undefined;
+  // The leader's review turn is held open by the mock until we release it, so the transient
+  // "正在跟进 / 跟进中" state is asserted deterministically instead of racing a ~100 ms reply.
+  const reviewGate = join(mkdtempSync(join(tmpdir(), "tuantuan-review-gate-")), "release");
   const create = async <T>(path: string, body: unknown): Promise<T> => {
     const response = await fetch(`${base}/api/${path}`, {
       method: "POST",
@@ -681,7 +685,7 @@ export async function coordinationSmoke(browser: Browser, base: string, projectI
       name,
       harness: "mock",
       configDefaults: { model: "mock-fast" },
-      env: member ? { MOCK_AGENT_SESSION_DELAY_MS: "1400" } : {},
+      env: member ? { MOCK_AGENT_SESSION_DELAY_MS: "1400" } : { MOCK_AGENT_REVIEW_GATE: reviewGate },
     });
     agentIds.push(value.id);
     return value;
@@ -740,6 +744,7 @@ export async function coordinationSmoke(browser: Browser, base: string, projectI
       .waitFor();
     await status.getByRole("button", { name: "展开回复状态", exact: true }).click();
     await page.locator('[data-task-status="running"]').getByText("跟进中", { exact: true }).waitFor();
+    writeFileSync(reviewGate, "go");
     const completed = await waitState(
       (snapshot) =>
         snapshot.state.tasks.length === 0 &&
@@ -770,6 +775,7 @@ export async function coordinationSmoke(browser: Browser, base: string, projectI
       throw new Error("coordination summary overflows narrow viewport");
     if (errors.length) throw new Error(`coordination browser errors: ${errors.join("; ")}`);
   } finally {
+    writeFileSync(reviewGate, "go");
     await page.close();
     if (room) await fetch(`${base}/api/rooms/${room.id}`, { method: "DELETE" });
     for (const id of agentIds) await fetch(`${base}/api/agents/${id}`, { method: "DELETE" });
