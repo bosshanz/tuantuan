@@ -11,6 +11,7 @@
  * Env: MOCK_AGENT_MCP_HTTP=1 advertises HTTP MCP support (default: stdio only, the ACP baseline);
  *      MOCK_AGENT_AUTH_FILE=path requires `authenticate` (method mock-login) before session/new works.
  *      MOCK_AGENT_SESSION_DIR=path opts tests into session persistence across isolated processes.
+ *      MOCK_AGENT_SESSION_ERROR=text returns that diagnostic from session/new (test-only).
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -290,6 +291,8 @@ acp
   })
   .onRequest(acp.methods.agent.session.new, async (ctx) => {
     if (process.env.MOCK_AGENT_SESSION_DELAY_MS) await Bun.sleep(Number(process.env.MOCK_AGENT_SESSION_DELAY_MS));
+    if (process.env.MOCK_AGENT_SESSION_ERROR)
+      throw acp.RequestError.internalError(undefined, process.env.MOCK_AGENT_SESSION_ERROR);
     if (needsAuth()) throw acp.RequestError.authRequired();
     const [sessionId, s] = newSess(ctx.params.cwd, ctx.params.mcpServers);
     setTimeout(() => {

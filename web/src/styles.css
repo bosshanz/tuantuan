@@ -632,6 +632,8 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 .bot-avatar { display: block; overflow: visible; --fill: var(--c); }
 .bot-avatar .ba-body > * { fill: var(--fill); stroke: var(--fill); }
 .bot-avatar .ba-body > *:not(.ba-stroke) { stroke-width: 0; }
+.bot-avatar .ba-body > .ba-cutout { fill: #fff; stroke: none; }
+.bot-avatar .ba-body > .ba-detail { fill: none; stroke: #fff; stroke-width: 4; }
 .bot-avatar .ba-eyes line { stroke: #fff; stroke-width: 7.5; stroke-linecap: round; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .bot-avatar { --fill: color-mix(in srgb, var(--c) 86%, #ffffff); }
@@ -656,6 +658,8 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 /* ---------- bot avatar expressions & motion (transform/opacity only) ---------- */
 .bot-avatar .ba-face line, .bot-avatar .ba-face path { stroke: #fff; stroke-width: 7.5; stroke-linecap: round; fill: none; }
 .bot-avatar .ba-face .ba-dot { fill: #fff; stroke: none; }
+.bot-avatar[data-shape="panda"] .ba-mouth { stroke: var(--fill); }
+.bot-avatar[data-shape="panda"] .ba-dot.ba-mouth { fill: var(--fill); stroke: none; }
 .bot-avatar .ba-eyes line { stroke: #fff; }
 .bot-avatar .ba-root, .bot-avatar .ba-eyes, .bot-avatar .ba-look, .bot-avatar .ba-mouth, .bot-avatar .ba-body { transform-box: fill-box; transform-origin: 50% 50%; }
 .bot-avatar .ba-root { transform-origin: 50% 100%; }
@@ -1290,6 +1294,8 @@ html[data-desktop] .main-head :is(button, a, input, select, textarea, [role]) { 
 
 /* Harness sign-in: API keys + terminal logins */
 .hauth { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.hauth .auth-actions .btn { max-width: 100%; height: auto; min-height: 26px; padding-block: 4px; white-space: normal; word-break: keep-all; line-height: 1.4; }
+.hauth .btn svg { flex-shrink: 0; }
 .hauth-key { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hauth-key .input { width: 220px; height: 28px; }
 .hauth-var { font-size: var(--fs-xs); }

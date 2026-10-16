@@ -2,9 +2,10 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
-import { methods as acpMethods } from "@agentclientprotocol/sdk";
+import { methods as acpMethods, RequestError } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
+import { missingKeyVar } from "../shared/auth";
 import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
 import { messagePreview } from "../shared/roomPreview";
 import { replayTurns } from "../shared/timeline";
@@ -677,9 +678,17 @@ export function createApp(deps: AppDeps) {
         harnessOptions.set(cacheKey, { at: Date.now(), configOptions, modes, error: null });
         loggedIn = true;
       } catch (e) {
-        const msg = (e as { message?: string }).message ?? String(e);
-        if (/auth/i.test(msg)) loggedIn = false;
-        else sessionError = msg;
+        const error = e as { message?: string; code?: number } | null;
+        const msg = error?.message ?? String(e);
+        sessionError = msg;
+        if (
+          error?.code === RequestError.authRequired().code ||
+          missingKeyVar(msg) !== null ||
+          /\b(?:auth(?:entication|orization)?(?:[ _-]+is)?[ _-]+(?:required|failed)|unauthenticated|unauthorized|not authenticated)\b/i.test(
+            msg,
+          )
+        )
+          loggedIn = false;
       }
       if (keyOnly) loggedIn = false;
       return {
