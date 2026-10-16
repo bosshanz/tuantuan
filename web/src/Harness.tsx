@@ -19,6 +19,7 @@ import {
 import { useEffect, useRef } from "react";
 import type { Timeline, ToolState } from "../../shared/timeline";
 import type { PermissionAsk, SessionView, TerminalSnapshot } from "./api";
+import { PreviewImage } from "./ImagePreview";
 import { MessageMarkdown } from "./ui";
 
 /** Renders one agent reply: thoughts, text, tool calls (diff / terminal / content) and the plan. */
@@ -52,7 +53,7 @@ export function TimelineView(props: {
           return tool ? <ToolCard key={key} tool={tool} terminals={props.terminals} /> : null;
         }
         if (p.kind === "image")
-          return <img key={key} className="msg-image" src={`data:${p.mimeType};base64,${p.data}`} alt="图片" />;
+          return <PreviewImage key={key} src={`data:${p.mimeType};base64,${p.data}`} alt="图片" />;
         return (
           <div
             key={key}
@@ -128,8 +129,7 @@ function ToolContent({ c, terminals }: { c: acp.ToolCallContent; terminals: Reco
   if (c.type === "terminal") return <TerminalView t={terminals[c.terminalId]} />;
   const b = c.content;
   if (b.type === "text") return <pre>{b.text}</pre>;
-  if (b.type === "image")
-    return <img className="msg-image" src={`data:${b.mimeType};base64,${b.data}`} alt="工具图片" />;
+  if (b.type === "image") return <PreviewImage src={`data:${b.mimeType};base64,${b.data}`} alt="工具图片" />;
   if (b.type === "resource_link") return <code>{b.uri}</code>;
   return <pre>{JSON.stringify(b, null, 2)}</pre>;
 }

@@ -43,6 +43,8 @@
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
 | `web/src/useChatScroll.ts` | 聊天自动跟随意图；上滑立即暂停，消息增量和布局变化保持阅读位置，回到底部或点击「回到最新」恢复 |
+| `web/src/ui.tsx` / `MermaidBlock.tsx` / `mermaidRendering.ts` | 稳定的 Markdown renderer 保留流式更新期间的组件状态；仅显式 Mermaid 围栏按需加载渲染器。全局队列串行执行主题初始化与渲染，过期任务不落地；固定 strict、关闭 HTML labels，在渲染前拒绝配置覆盖、图片 / 图标元数据、sequence properties / details 与外部样式资源（strict 本身不阻止图内图片请求）；输出带固有尺寸的 SVG 图片隔离链接 / 事件，失败保留源码 |
+| `web/src/ImagePreview.tsx` | Mermaid、Markdown、ACP 与工具图片共用缩略图 / 原生模态 dialog，局部持有放大状态；预览通过 portal 进入 top layer，焦点循环与恢复使用 preventScroll，不改消息占位，适应窗口 / 原图可切换；Markdown 图片关联的外链独立呈现，避免嵌套交互元素 |
 | `shared/roomPreview.ts` / `web/src/roomListState.ts` | 列表快照和全局 `room.preview` 共用摘要规则；按消息 seq 与状态防回退，列表加载期间重放全局事件，重连刷新 |
 | `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，标签页各自连接独立 shell，刷新恢复项目全部终端与选中页；只在显式打开且用户尚未选择其他焦点时聚焦，正常退出状态不被迟到的 PTY 错误覆盖 |
 | `web/src/messageMerge.ts` | 历史快照与实时消息按 id 合并，保留完成态 / 较长流式文本；发送接口返回的消息立即插入 |

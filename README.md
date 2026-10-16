@@ -18,6 +18,7 @@
 - **桌面版**（macOS / Windows / Linux，Electron）或浏览器 + 本机服务。
 - **Harness**：自动发现你自己装的版本；没有时一键装到团团自己的目录（官方 ACP Registry，固定版本、校验和、不用 sudo）；握手测试与登录引导。
 - **会话**：按项目分组；单 Agent 直接对话，多 Agent 由群主负责分工、跟进和汇总，明确 @ 成员保持直达；支持 @所有人、`handoff` 交接和引用回复。侧栏随回复完成更新预览，断线重连后补齐。
+- **消息阅读**：Markdown 支持 Mermaid 代码围栏（跟随明暗主题，可查看源码）；图表、Markdown、ACP 与工具图片可点击放大，切换适应窗口 / 原图，按 Esc 关闭。
 - **项目终端**：会话右上角打开内嵌交互式终端（macOS / Linux），默认进入项目目录；用标签页多开独立 shell，支持新增、切换、单独结束、Ctrl+C、调整高度和平滑展开 / 收起。收起保留全部终端，刷新后重连；支持减少动态效果。
 - **服务商与用量**：给 Claude Code / Codex / 自定义 API 配置服务商（Key 只在服务端、打码显示），只读导入 CC Switch，查看本机用量和余额。
 - **Skills**：自动发现 `~/.agents`、`~/.claude`、`~/.codex`、插件和项目里的 Skills，按 Agent 勾选；可从链接或文件夹导入。
@@ -319,6 +320,7 @@ Harness 本来就会读取的全局 / 项目技能在设置里显示「原生可
 | --- | --- |
 | 「Harness」页显示未安装 | 在终端里 `which <命令>` 确认已安装；GUI 启动时找不到的话，在「Harness」页填绝对路径。 |
 | 发消息后提示 Authentication required | 该 Harness 没登录：按「Harness」页的登录方式在终端登录后重试。 |
+| Antigravity 只能选 Gemini，没有 Opus | Antigravity ACP 1.4.0 对第三方模型按客户端开放；团团当前只显示 Harness 实际返回的模型。登录或额度可查不等于 Opus 已开放，应以当前 Harness 返回结果为准。 |
 | Agent 想改文件但没反应 | 查看权限弹窗；提交失败可原地重试。经团团 ACP 文件接口访问的目录外路径会被拒绝。 |
 | e2e 找不到浏览器 | 设置 `CHROME_PATH` 指向本机 Chrome。 |
 

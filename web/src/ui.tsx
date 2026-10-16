@@ -1,3 +1,4 @@
+import type { Element } from "hast";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import go from "highlight.js/lib/languages/go";
@@ -7,13 +8,15 @@ import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import { User, Users } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-import Markdown from "react-markdown";
+import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import type { Agent, Room } from "./api";
 import type { Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
+import { PreviewImage } from "./ImagePreview";
+import { MermaidBlock } from "./MermaidBlock";
 import { withViewTransition } from "./motion";
 
 for (const [name, lang] of Object.entries({ bash, go, javascript, json, python, sql, typescript }))
@@ -130,38 +133,75 @@ function withMentions(children: ReactNode, names: string[]): ReactNode {
   return Array.isArray(children) ? children.map(map) : map(children, 0);
 }
 
-/** Markdown without raw HTML (react-markdown escapes it), code highlighted, @mentions as chips. */
+const MentionNames = createContext<string[]>([]);
+const markdownPlugins = [remarkGfm];
+
+function containsImage(node: Element): boolean {
+  return node.tagName === "img" || node.children.some((child) => child.type === "element" && containsImage(child));
+}
+
+// Stable renderer identities preserve open previews and in-flight diagrams during streaming updates.
+const markdownComponents: Components = {
+  p: function MentionParagraph({ children }) {
+    return <p>{withMentions(children, useContext(MentionNames))}</p>;
+  },
+  li: function MentionItem({ children }) {
+    return <li>{withMentions(children, useContext(MentionNames))}</li>;
+  },
+  a: ({ href, children, node }) =>
+    node && containsImage(node) ? (
+      <span className="md-linked-image">
+        {children}
+        {href && (
+          <a className="md-image-link" href={href} target="_blank" rel="noreferrer noopener">
+            打开链接
+          </a>
+        )}
+      </span>
+    ) : (
+      <a href={href} target="_blank" rel="noreferrer noopener">
+        {children}
+      </a>
+    ),
+  img: ({ src, alt, title }) => (src ? <PreviewImage src={src} alt={alt} title={title} /> : <span>{alt}</span>),
+  pre: ({ children, node }) => {
+    const code = node?.children[0];
+    if (
+      code?.type === "element" &&
+      code.tagName === "code" &&
+      Array.isArray(code.properties.className) &&
+      code.properties.className.includes("language-mermaid")
+    ) {
+      const source = code.children.map((child) => (child.type === "text" ? child.value : "")).join("");
+      return <MermaidBlock source={source} />;
+    }
+    return <pre>{children}</pre>;
+  },
+  code: ({ className, children }) => {
+    const lang = /language-(\w+)/.exec(className ?? "")?.[1];
+    const src = String(children ?? "");
+    if (lang && hljs.getLanguage(lang)) {
+      return (
+        <code
+          className={className}
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js escapes its input
+          dangerouslySetInnerHTML={{ __html: hljs.highlight(src, { language: lang }).value }}
+        />
+      );
+    }
+    return <code className={className}>{children}</code>;
+  },
+};
+
+/** Markdown without raw HTML, code highlighted, explicit Mermaid fences and accessible image previews. */
 export function MessageMarkdown({ text, mentionNames }: { text: string; mentionNames: string[] }) {
   return (
     <div className="md">
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          p: ({ children }) => <p>{withMentions(children, mentionNames)}</p>,
-          li: ({ children }) => <li>{withMentions(children, mentionNames)}</li>,
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer noopener">
-              {children}
-            </a>
-          ),
-          code: ({ className, children }) => {
-            const lang = /language-(\w+)/.exec(className ?? "")?.[1];
-            const src = String(children ?? "");
-            if (lang && hljs.getLanguage(lang)) {
-              return (
-                <code
-                  className={className}
-                  // biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js escapes its input
-                  dangerouslySetInnerHTML={{ __html: hljs.highlight(src, { language: lang }).value }}
-                />
-              );
-            }
-            return <code className={className}>{children}</code>;
-          },
-        }}
-      >
-        {text}
-      </Markdown>
+      <MentionNames.Provider value={mentionNames}>
+        <Markdown remarkPlugins={markdownPlugins} components={markdownComponents}>
+          {text}
+        </Markdown>
+      </MentionNames.Provider>
     </div>
   );
 }

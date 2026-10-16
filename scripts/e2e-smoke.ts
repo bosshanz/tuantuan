@@ -12,6 +12,7 @@ import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { registryAuthSmoke } from "./e2e-registry-auth";
 import { registryUsageSmoke } from "./e2e-registry-usage";
 import { repliesSmoke } from "./e2e-replies";
+import { richMediaSmoke } from "./e2e-rich-media";
 import { schedulingSmoke } from "./e2e-scheduling";
 import { terminalSmoke } from "./e2e-terminal";
 
@@ -509,6 +510,13 @@ try {
   await registryUsageSmoke(browser, `http://localhost:${server.port}`, shotsDir);
   await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   await chatScrollSmoke(browser, `http://localhost:${server.port}`, shotsDir);
+  await richMediaSmoke(
+    browser,
+    `http://localhost:${server.port}`,
+    app.store,
+    (message) => server.publish(`room:${message.roomId}`, JSON.stringify({ type: "message", message })),
+    shotsDir,
+  );
   await schedulingSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   // Auxiliary smoke pages use their own contexts; return focus before testing caret-driven completion.
   await page.bringToFront();
