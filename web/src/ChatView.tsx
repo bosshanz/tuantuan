@@ -1442,8 +1442,11 @@ function Composer(props: {
     props.onChange(next.value);
     setCaret(next.caret);
     requestAnimationFrame(() => {
-      ref.current?.focus();
-      ref.current?.setSelectionRange(next.caret, next.caret);
+      const el = ref.current;
+      // The user may have typed or replaced the draft before this frame; never move their caret then.
+      if (!el || el.value !== next.value) return;
+      el.focus();
+      el.setSelectionRange(next.caret, next.caret);
     });
   };
   const picker = commands.length

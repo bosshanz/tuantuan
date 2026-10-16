@@ -391,6 +391,12 @@ acp
     try {
       let summary: string | null = null;
       if (reviewing) {
+        // Test hook: hold the leader's review turn open until the e2e has observed the "following up" state.
+        const reviewGate = process.env.MOCK_AGENT_REVIEW_GATE;
+        if (reviewGate) {
+          await Bun.write(`${reviewGate}.waiting`, "ready");
+          while (!existsSync(reviewGate)) await sleep(10, abort.signal);
+        }
         const resultsText = coordination?.[2]?.match(/<tuantuan-results>\s*([\s\S]*?)\s*<\/tuantuan-results>/)?.[1];
         if (!resultsText) throw new Error("mock coordination review is missing member results");
         const results = JSON.parse(resultsText) as {

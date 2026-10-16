@@ -20,8 +20,8 @@
 | @agentclientprotocol/claude-agent-acp | Apache-2.0 |
 | @agentclientprotocol/codex-acp | Apache-2.0 |
 | @modelcontextprotocol/sdk | MIT |
-| @xterm/xterm、@xterm/addon-fit | MIT |
-| mermaid | MIT |
+| @xterm/xterm 6.0.0、@xterm/addon-fit 0.11.0 | MIT |
+| mermaid 12.2.0 | MIT |
 | highlight.js | BSD-3-Clause |
 | react、react-dom | MIT |
 | react-markdown、remark-gfm | MIT |
