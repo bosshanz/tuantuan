@@ -83,6 +83,8 @@ export const HARNESS_NAMES: Record<string, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   grok: "Grok",
+  "reg:antigravity-acp": "Antigravity",
+  "reg:zcode-acp": "ZCode",
   opencode: "OpenCode",
   custom: "自定义 API",
 };
@@ -245,13 +247,17 @@ function Tokens({ label, t }: { label: string; t: TokenTotals | null }) {
 function UsageCard({ u, onUpdate }: { u: HarnessUsage; onUpdate: (h: HarnessUsage[]) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const live = u.harness === "claude-code" || u.harness === "codex" || u.harness === "grok";
+  const live = u.live ?? (u.harness === "claude-code" || u.harness === "codex" || u.harness === "grok");
+  const name = u.name ?? HARNESS_NAMES[u.harness] ?? u.harness;
   const na = !live;
   const refresh = async () => {
     setBusy(true);
     setErr(null);
     try {
-      onUpdate((await api<{ harnesses: HarnessUsage[] }>("POST", `/api/usage/${u.harness}/live`)).harnesses);
+      onUpdate(
+        (await api<{ harnesses: HarnessUsage[] }>("POST", `/api/usage/${encodeURIComponent(u.harness)}/live`))
+          .harnesses,
+      );
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -262,14 +268,14 @@ function UsageCard({ u, onUpdate }: { u: HarnessUsage; onUpdate: (h: HarnessUsag
       <div className="usage-head">
         <span className="usage-name">
           <Gauge size={14} />
-          {HARNESS_NAMES[u.harness] ?? u.harness}
+          {name}
         </span>
         {u.plan && <span className="badge">{u.plan}</span>}
         {live && (
           <button
             type="button"
             className="btn ghost icon sm usage-refresh"
-            aria-label={`刷新 ${HARNESS_NAMES[u.harness]} 额度`}
+            aria-label={`刷新 ${name} 额度`}
             title="查询额度"
             disabled={busy}
             onClick={() => void refresh()}
@@ -285,7 +291,7 @@ function UsageCard({ u, onUpdate }: { u: HarnessUsage; onUpdate: (h: HarnessUsag
           {u.limits.length > 0 ? (
             <div className="limits">
               {u.limits.map((l) => (
-                <LimitBar key={l.label} l={l} />
+                <LimitBar key={`${l.label}:${l.resetsAt ?? ""}`} l={l} />
               ))}
             </div>
           ) : typeof u.creditBalanceUsd !== "number" ? (
@@ -298,8 +304,12 @@ function UsageCard({ u, onUpdate }: { u: HarnessUsage; onUpdate: (h: HarnessUsag
                 <b>${u.creditBalanceUsd.toFixed(2)}</b>
               </div>
             )}
-            <Tokens label="今天" t={u.today} />
-            <Tokens label="7 天" t={u.week} />
+            {(!u.harness.startsWith("reg:") || u.today || u.week) && (
+              <>
+                <Tokens label="今天" t={u.today} />
+                <Tokens label="7 天" t={u.week} />
+              </>
+            )}
             {typeof u.costToday === "number" && (
               <div className="tok">
                 <span className="muted">今天花费</span>
@@ -318,6 +328,7 @@ function UsageCard({ u, onUpdate }: { u: HarnessUsage; onUpdate: (h: HarnessUsag
         </div>
       )}
       {u.limitsSource && <div className="usage-src muted">来源：{u.limitsSource}</div>}
+      {u.limitsAt && <div className="usage-src muted">查询于 {new Date(u.limitsAt).toLocaleString("zh-CN")}</div>}
     </div>
   );
 }

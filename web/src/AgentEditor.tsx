@@ -666,6 +666,7 @@ interface SkillItem {
   label: string;
   enabled: boolean;
   native: boolean;
+  sources?: { key: string; label: string; native: boolean }[];
 }
 interface RemoteSkill {
   path: string;
@@ -680,7 +681,14 @@ function SkillText({ sk }: { sk: SkillItem }) {
         <span className="skill-name">{sk.name}</span>
         {sk.description && <span className="skill-desc">{sk.description}</span>}
       </span>
-      <span className={`badge skill-src src-${sk.origin}`}>{sk.label}</span>
+      <span
+        className={`badge skill-src src-${sk.origin}`}
+        title={(sk.sources ?? [{ key: sk.key, label: sk.label, native: sk.native }])
+          .map((source) => `${source.label}${source.native ? " · 原生可用" : ""}：${source.key}`)
+          .join("\n")}
+      >
+        {sk.label}
+      </span>
     </>
   );
 }
@@ -906,7 +914,7 @@ function SkillsCard({
             shownItems.length > 0 &&
             (
               [
-                ["自动加载", shownItems.filter((x) => x.native)],
+                ["原生可用", shownItems.filter((x) => x.native)],
                 ["可选", shownItems.filter((x) => !x.native)],
               ] as const
             ).map(
@@ -918,7 +926,11 @@ function SkillsCard({
                       {list.map((sk) => (
                         <li key={sk.key}>
                           {sk.native ? (
-                            <div className="skill-row" data-locked title={`由 ${harnessName} 自动加载`}>
+                            <div
+                              className="skill-row"
+                              data-locked
+                              title={`由 ${harnessName} 从已有目录自动发现，停用请修改对应原生配置或文件`}
+                            >
                               <Lock size={13} className="skill-lock" aria-hidden />
                               <SkillText sk={sk} />
                             </div>
@@ -940,6 +952,11 @@ function SkillsCard({
                 ),
             )}
         </ul>
+
+        <div className="muted skill-hint">
+          原生可用项来自 Harness 已有的全局或项目目录（包括已有链接），不会随此处取消勾选而删除。 可选项仅为这个 Agent
+          提供按需读取索引；团团不再向共享项目添加技能链接。
+        </div>
 
         {!agentId && <div className="muted skill-hint">保存后可以从链接或文件夹添加 Skill</div>}
         {agentId && (

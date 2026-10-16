@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { methods } from "@agentclientprotocol/sdk";
@@ -53,7 +53,7 @@ describe("harness env inherits user config", () => {
     expect(env.EXTRA).toBe("1");
   });
 
-  test("materializeSkills never returns isolation env; links into project dirs only", () => {
+  test("materializeSkills never returns isolation env or writes shared project links", () => {
     const data = mkdtempSync(join(tmpdir(), "he-"));
     const cwd = mkdtempSync(join(tmpdir(), "he-cwd-"));
     const skill = join(data, "agents", "a1", "skills", "x");
@@ -64,6 +64,8 @@ describe("harness env inherits user config", () => {
       expect(m.env).toEqual({});
       expect(m.env).not.toHaveProperty("CLAUDE_CONFIG_DIR");
       expect(m.env).not.toHaveProperty("CODEX_HOME");
+      expect(existsSync(join(cwd, ".agents"))).toBe(false);
+      expect(existsSync(join(cwd, ".claude"))).toBe(false);
     }
   });
 });

@@ -74,3 +74,41 @@ test("inside links, missing parents, and a symlinked project root remain usable"
   expect(p.inside("new/nested/file")).toBe(join(realpathSync(root), "new/nested/file"));
   expect(() => linked.p.inside("../outside/marker")).toThrow();
 });
+
+test("selected skill grants are read-only, realpath confined, and replaceable", async () => {
+  const skill = join(temp, "selected-skill");
+  const neighbour = join(temp, "selected-skill-neighbour");
+  mkdirSync(skill);
+  mkdirSync(neighbour);
+  writeFileSync(join(skill, "SKILL.md"), "selected body");
+  writeFileSync(join(skill, "reference.md"), "selected attachment");
+  writeFileSync(join(neighbour, "secret.md"), "not selected");
+  symlinkSync(neighbour, join(skill, "escape"), "dir");
+  const { p, files } = client();
+  await expect(files.readTextFile({ sessionId: "test", path: join(skill, "SKILL.md") })).rejects.toThrow();
+  p.setSkillReadRoots([skill]);
+  expect(await files.readTextFile({ sessionId: "test", path: join(skill, "SKILL.md") })).toEqual({
+    content: "selected body",
+  });
+  expect(await files.readTextFile({ sessionId: "test", path: join(skill, "reference.md") })).toEqual({
+    content: "selected attachment",
+  });
+  for (const path of [
+    join(neighbour, "secret.md"),
+    `${skill}/../selected-skill-neighbour/secret.md`,
+    join(skill, "escape/secret.md"),
+  ])
+    await expect(files.readTextFile({ sessionId: "test", path })).rejects.toThrow();
+  await expect(
+    files.writeTextFile({ sessionId: "test", path: join(skill, "SKILL.md"), content: "changed" }),
+  ).rejects.toThrow();
+  await expect(files.createTerminal({ sessionId: "test", command: "pwd", cwd: skill })).rejects.toThrow();
+  p.setSkillReadRoots([]);
+  await expect(files.readTextFile({ sessionId: "test", path: join(skill, "SKILL.md") })).rejects.toThrow();
+  // Legacy commands grant one file, never their parent directory.
+  p.setSkillReadRoots([join(skill, "SKILL.md")]);
+  expect(await files.readTextFile({ sessionId: "test", path: join(skill, "SKILL.md") })).toEqual({
+    content: "selected body",
+  });
+  await expect(files.readTextFile({ sessionId: "test", path: join(skill, "reference.md") })).rejects.toThrow();
+});

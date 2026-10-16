@@ -46,6 +46,17 @@ import {
   testProvider,
 } from "./providers";
 import { platformKey, Registry } from "./registry";
+import {
+  isRegistryUsageId,
+  queryRegistryQuota,
+  REGISTRY_USAGE_IDS,
+  type RegistryQuota,
+  type RegistryQuotaSnapshot,
+  RegistryUsageCollector,
+  type RegistryUsageId,
+  registryUsageSource,
+  ZCODE_070_NOTE,
+} from "./registry-usage";
 import * as skills from "./skills";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 import { TuantuanMcp } from "./tuantuan-mcp";
@@ -454,6 +465,84 @@ export function createApp(deps: AppDeps) {
     }
   }
 
+  const registryLimits = new Map<RegistryUsageId, RegistryQuotaSnapshot | null>();
+  const registryLimitsInflight = new Map<RegistryUsageId, Promise<RegistryQuotaSnapshot>>();
+  const registryQuotaKey = (id: RegistryUsageId) => `registryQuota:${id}`;
+  const registryVersion = (id: RegistryUsageId) =>
+    readManifest(id.slice(REG_PREFIX.length))?.version ?? registry.agent(id.slice(REG_PREFIX.length))?.version ?? null;
+  function cachedRegistryLimits(id: RegistryUsageId) {
+    if (!registryLimits.has(id))
+      registryLimits.set(id, store.getSetting<RegistryQuotaSnapshot | null>(registryQuotaKey(id), null));
+    return registryLimits.get(id) ?? null;
+  }
+  function registryQuotaFailure(error: unknown): RegistryQuota {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as { code?: number } | null)?.code;
+    // Persist public status, never raw stderr, auth payloads or credential-bearing exceptions.
+    const detail =
+      code === RequestError.authRequired().code || /auth|not logged|unauthorized/i.test(message)
+        ? "尚未登录或认证已失效，请先通过 Harness 的原生方式登录"
+        : /method not found|not supported|unsupported/i.test(message)
+          ? "当前 Harness 版本不支持额度查询"
+          : /timeout|超时/i.test(message)
+            ? "额度查询超时，请重试"
+            : "额度查询失败，请重试或检查 Harness 的原生状态";
+    return { limits: [], plan: null, notes: [], error: detail };
+  }
+  function syncRegistryLimits(id: RegistryUsageId, read: () => Promise<RegistryQuota>, freshAfterPending = false) {
+    const pending = registryLimitsInflight.get(id);
+    if (pending && !freshAfterPending) return pending;
+    // A successful login changes the account state. Reserve a fresh read behind any older one;
+    // manual refreshes can join this reservation, and the old snapshot cannot finish after it.
+    const ready = pending ? pending.catch(() => undefined) : Promise.resolve();
+    const job = ready
+      .then(read)
+      .catch(registryQuotaFailure)
+      .then((result) => {
+        const snapshot = { ...result, at: Date.now() };
+        registryLimits.set(id, snapshot);
+        store.setSetting(registryQuotaKey(id), snapshot);
+        return snapshot;
+      })
+      .finally(() => {
+        if (registryLimitsInflight.get(id) === job) registryLimitsInflight.delete(id);
+      });
+    registryLimitsInflight.set(id, job);
+    return job;
+  }
+  async function registryLiveLimits(id: RegistryUsageId) {
+    return syncRegistryLimits(id, async () => {
+      const spec = harnessSpec(id);
+      if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
+      const status = await detectHarness(
+        spec,
+        store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null,
+      );
+      if (!status.command) return { limits: [], plan: null, notes: [], error: "Harness 未安装或配置的路径不可用" };
+      const scratch = mkdtempSync(join(tmpdir(), "tuantuan-registry-usage-"));
+      const collector = new RegistryUsageCollector();
+      const process = new AcpProcess(
+        {
+          command: status.command,
+          args: status.args,
+          env: { ...(await loginShellEnv()), ...status.env, ...harnessSecretEnv(store, id) },
+          cwd: scratch,
+        },
+        {
+          onUpdate: collector.onUpdate,
+          requestPermission: async () => ({ outcome: { outcome: "cancelled" } }),
+        },
+      );
+      try {
+        await process.initialize(30_000);
+        return await queryRegistryQuota(id, process, collector, { version: registryVersion(id) });
+      } finally {
+        process.kill();
+        rmSync(scratch, { recursive: true, force: true });
+      }
+    });
+  }
+
   let grokCache: { at: number; v: { usage: Awaited<ReturnType<typeof grokLocalUsage>>; note: string | null } } | null =
     null;
   async function grokUsage(force = false) {
@@ -522,6 +611,29 @@ export function createApp(deps: AppDeps) {
         ...(gkLive?.error ? [gkLive.error] : gkLive ? [] : ["额度：点刷新向 Grok 查询"]),
       ],
     });
+    const configured = new Set(store.listAgents().map((agent) => agent.harness));
+    const paths = store.getSetting<Record<string, string>>("harnessPaths", {});
+    for (const id of REGISTRY_USAGE_IDS) {
+      if (!readManifest(id.slice(REG_PREFIX.length)) && !paths[id] && !configured.has(id)) continue;
+      const hit = cachedRegistryLimits(id);
+      const notes = [
+        ...(hit?.notes ?? []),
+        ...(hit?.error ? [hit.error] : hit ? [] : ["额度尚未查询；请点刷新，或在 Harness 登录/测试成功后同步"]),
+        ...(id === "reg:zcode-acp" && registryVersion(id) === "0.70.0" ? [ZCODE_070_NOTE] : []),
+      ];
+      out.push({
+        harness: id,
+        name: registry.agent(id.slice(REG_PREFIX.length))?.name ?? harnessSpec(id)?.name ?? id,
+        live: true,
+        today: null,
+        week: null,
+        limits: hit?.limits ?? [],
+        limitsAt: hit?.at ?? null,
+        limitsSource: hit ? registryUsageSource(id) : null,
+        plan: hit?.plan ?? null,
+        notes: [...new Set(notes)],
+      });
+    }
     return out;
   }
 
@@ -530,7 +642,16 @@ export function createApp(deps: AppDeps) {
     if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
     const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
     const command = status.command;
-    if (!command) return { ok: false, error: status.error, install: spec.install, login: status.login };
+    if (!command) {
+      if (isRegistryUsageId(id))
+        await syncRegistryLimits(id, async () => ({
+          limits: [],
+          plan: null,
+          notes: [],
+          error: "Harness 未安装或配置的路径不可用",
+        }));
+      return { ok: false, error: status.error, install: spec.install, login: status.login };
+    }
     const secrets = harnessSecretEnv(store, id);
     const env = { ...(await loginShellEnv()), ...status.env, ...secrets };
     // With a 服务商, probe exactly as the agent will run: same env, routing and settings tier.
@@ -543,9 +664,10 @@ export function createApp(deps: AppDeps) {
     }
     const cacheKey = optionsKey(id, useProv);
     const scratch = mkdtempSync(join(tmpdir(), "tuantuan-probe-"));
+    const usageCollector = new RegistryUsageCollector();
     const p = new AcpProcess(
       { command, args: status.args, env, cwd: scratch },
-      { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
+      { onUpdate: usageCollector.onUpdate, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
     );
     try {
       const init = await p.initialize(30_000);
@@ -652,6 +774,7 @@ export function createApp(deps: AppDeps) {
           authError = (e as Error).message;
         }
       }
+      let createdSession: acp.NewSessionResponse | null = null;
       let loggedIn: boolean | null = null;
       let sessionError: string | null = null;
       let configOptions: acp.SessionConfigOption[] = [];
@@ -673,6 +796,7 @@ export function createApp(deps: AppDeps) {
           60_000,
           "session/new 超时",
         );
+        createdSession = created;
         configOptions = created.configOptions ?? [];
         modes = created.modes ?? null;
         harnessOptions.set(cacheKey, { at: Date.now(), configOptions, modes, error: null });
@@ -691,6 +815,19 @@ export function createApp(deps: AppDeps) {
           loggedIn = false;
       }
       if (keyOnly) loggedIn = false;
+      if (isRegistryUsageId(id) && !useProv) {
+        const created = createdSession;
+        if (loggedIn === true && !authError && created)
+          await syncRegistryLimits(
+            id,
+            () => queryRegistryQuota(id, p, usageCollector, { created, version: registryVersion(id) }),
+            true,
+          );
+        else if (loggedIn === false || authError || sessionError)
+          await syncRegistryLimits(id, async () =>
+            registryQuotaFailure(new Error(authError ?? sessionError ?? "authentication required")),
+          );
+      }
       return {
         ok: true,
         protocolVersion: init.protocolVersion,
@@ -708,6 +845,7 @@ export function createApp(deps: AppDeps) {
       };
     } catch (e) {
       if (e instanceof ValidationError) throw e;
+      if (isRegistryUsageId(id) && !useProv) await syncRegistryLimits(id, async () => registryQuotaFailure(e));
       return { ok: false, error: (e as Error).message, login: spec.login };
     } finally {
       p.kill();
@@ -878,6 +1016,10 @@ export function createApp(deps: AppDeps) {
       }
       if ((id === "claude-code" || id === "codex") && sub === "live" && method === "POST") {
         await harnessLiveLimits(id);
+        return json({ harnesses: await usageOverview() });
+      }
+      if (id && isRegistryUsageId(id) && sub === "live" && method === "POST") {
+        await registryLiveLimits(id);
         return json({ harnesses: await usageOverview() });
       }
       if (id === "grok" && sub === "live" && method === "POST") {
@@ -1058,7 +1200,7 @@ export function createApp(deps: AppDeps) {
         const pid = url.searchParams.get("projectId");
         const project = pid ? store.getProject(pid) : null;
         return json({
-          items: skills.discoverSkills(dataDir, id, agent.harness, project?.cwd ?? null),
+          items: skills.discoverSkills(dataDir, id, agent.harness, project?.cwd ?? null, agent.env),
           plugins: library.pluginsForAgent(dataDir, id, agent.harness, store.listProjects()),
         });
       }
@@ -1136,18 +1278,27 @@ export function createApp(deps: AppDeps) {
       const project = id ? store.getProject(id) : null;
       if (id && !project) return json({ error: "项目不存在" }, 404);
       if (project && sub === "terminal") {
-        if (method === "GET") return json(projectTerminals.forProject(project.id));
+        if (method === "GET")
+          return json(
+            url.searchParams.get("all") === "1"
+              ? projectTerminals.list(project.id)
+              : projectTerminals.forProject(project.id),
+          );
         if (method === "POST") {
           const text = await req.text();
           const size = z
-            .object({ cols: z.number().optional(), rows: z.number().optional() })
+            .object({ cols: z.number().optional(), rows: z.number().optional(), create: z.boolean().optional() })
             .parse(text ? JSON.parse(text) : {});
           const env = await loginShellEnv();
           // Login environment loading is async; a project may have been deleted or moved meanwhile.
           if (changingProjects.has(project.id)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
           const current = store.getProject(project.id);
           if (!current) throw new ValidationError("项目不存在", 404);
-          return json(projectTerminals.open(current, env, size.cols, size.rows));
+          return json(
+            size.create
+              ? projectTerminals.create(current, env, size.cols, size.rows)
+              : projectTerminals.open(current, env, size.cols, size.rows),
+          );
         }
         if (method === "DELETE") {
           const terminalId = url.searchParams.get("terminalId");

@@ -18,7 +18,7 @@
 - **桌面版**（macOS / Windows / Linux，Electron）或浏览器 + 本机服务。
 - **Harness**：自动发现你自己装的版本；没有时一键装到团团自己的目录（官方 ACP Registry，固定版本、校验和、不用 sudo）；握手测试与登录引导。
 - **会话**：按项目分组；单 Agent 直接对话，多 Agent 由群主负责分工、跟进和汇总，明确 @ 成员保持直达；支持 @所有人、`handoff` 交接和引用回复。侧栏随回复完成更新预览，断线重连后补齐。
-- **项目终端**：会话右上角打开内嵌交互式终端（macOS / Linux），默认进入项目目录；支持 Ctrl+C、调整高度、平滑展开 / 收起及重连。每个项目复用一个 shell，收起不会结束命令；支持减少动态效果。
+- **项目终端**：会话右上角打开内嵌交互式终端（macOS / Linux），默认进入项目目录；用标签页多开独立 shell，支持新增、切换、单独结束、Ctrl+C、调整高度和平滑展开 / 收起。收起保留全部终端，刷新后重连；支持减少动态效果。
 - **服务商与用量**：给 Claude Code / Codex / 自定义 API 配置服务商（Key 只在服务端、打码显示），只读导入 CC Switch，查看本机用量和余额。
 - **Skills**：自动发现 `~/.agents`、`~/.claude`、`~/.codex`、插件和项目里的 Skills，按 Agent 勾选；可从链接或文件夹导入。
 - **通知**：「通知」页提供主开关与回复完成、需要批准、出错、需要登录或 Key 的分类开关；测试发送与签名诊断已移除。看着当前会话时不提醒，其他会话保留未读计数。
@@ -97,7 +97,7 @@ macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/r
 - 装好的 Agent 可在新建 Agent 时选择；安装完成自动握手，已有安装可点「握手」重新检查。卡片按 Harness 声明提供登录按钮、终端命令或 Key 输入框；登录期间显示等待状态，失败保留入口供重试，无法确认登录状态时明确显示未知。
 - **API Key 登录**：Agent 通过 ACP 声明 `env_var` 登录方式（如 glm-acp-agent 的 `Z_AI_API_KEY`）时，握手结果里直接出现输入框；普通登录方式在错误中明确指出缺少的 Key 变量名时，也会出现对应输入框。Key 保存在团团的数据库里（和服务商 Key 一样只在服务端、打码显示），只注入这个 Harness 的进程环境（Agent 自己的环境变量优先），保存后自动重新握手，可修改、清除。回复因为缺 Key 失败时，会话里显示「需要 API Key」并可当场填写。
 - **终端登录**：终端类登录方式（ACP `terminal`，或说明里写着 `xxx --setup` 的）提供「在终端中打开」：用团团安装的绝对路径和运行时（如 `…/bun …/dist/index.js --setup`）打开 macOS「终端」（osascript）或 Linux 的终端程序；同时总有一行可复制的完整命令。团团不把它装进 PATH。
-- 实验性：ZCode（社区桥接 `zcode-acp-server`，不在官方 Registry 里）。
+- 实验性：ZCode（社区桥接 `zcode-acp-server`，不在官方 Registry 里）。当前固定的 0.70.0 不支持团队套餐的运行时认证；旧 `builtin:bigmodel-coding-plan` 会映射到个人渠道。本机 ZCode 团队套餐能用，而桥接返回 1113 时，应先核对渠道，不能直接认定团队余额不足。团团不会静默改用个人账号或替换本机凭据。
 - `TUANTUAN_REGISTRY_URL` 换 Registry 地址，`TUANTUAN_REGISTRY_OFFLINE=1` 不联网。
 
 ![更多 Agent：从 Registry 安装并握手](docs/screenshots/harness-registry.png)
@@ -131,10 +131,10 @@ Registry 中的登录选项来自各 Harness 自己的认证方式。第三方�
 
 ## 能力
 
-- 流式回复、思考过程、工具卡片（文件 diff、终端输出）、计划清单、用量。
+- 流式回复、思考过程、工具卡片（文件 diff、终端输出）、计划清单、用量。生成时主动向上滚动会暂停跟随，保留历史阅读位置；回到底部或点击「回到最新」恢复跟随。
 - 消息气泡外的操作栏提供引用和更多操作：桌面悬停或键盘聚焦时出现，触屏和窄窗口保留可见入口。更多菜单可复制正文、复制团团消息 ID，Agent 消息还可查看详情；复制失败可重试。群聊中可引用已完成的用户或 Agent 消息，输入框显示作者与摘录，发送失败保留引用。
 - 权限请求弹窗：允许一次 / 总是允许 / 拒绝。提交期间禁止重复操作，服务端确认成功后关闭；提交失败保留弹窗并提示重试，404（请求已失效）也会关闭。
-- 经过团团 ACP `fs/*` 的文件路径按真实路径校验，拒绝工作目录外的目标与符号链接逃逸；新文件校验最近的现存父目录。ACP 终端只校验初始 `cwd`，命令仍以当前用户权限运行，可访问其他路径；Harness 自带工具也由其自身权限 / 沙箱控制。这里没有操作系统沙箱，不能将旧文档中的「文件读写和终端只能在项目目录内」理解为所有执行都被隔离。
+- 经过团团 ACP `fs/*` 的文件路径按真实路径校验，拒绝工作目录外的目标与符号链接逃逸；新文件校验最近的现存父目录。例外是当前 Agent 明确选中的 Skill 目录及其附属文件，允许只读，取消勾选后下一轮撤销；不扩大写入范围。ACP 终端只校验初始 `cwd`，命令仍以当前用户权限运行，可访问其他路径；Harness 自带工具也由其自身权限 / 沙箱控制。这里没有操作系统沙箱。
 - 慢历史快照不会覆盖期间收到的运行状态、会话与权限事件；切换会话后旧响应不进入新会话。
 - 会话开始前可在输入框旁选**模型**（Harness 通过 ACP 声明的 model 选项；BYOK 可改会话级模型 ID）。多人会话按 Agent 分别记住。中途切换走 `set_config_option`。没有模型选项时不显示。
 - Harness 提供的其他配置项（模式、推理强度等）和斜杠命令（输入 `/` 弹出）。
@@ -201,7 +201,7 @@ Harness 通过 ACP `configOptions`（及旧的 `modes`）提供设置。输入�
 - **本机（只读）**：`~/.claude`（skills、commands、agents、plugins 里的市场 / 已安装插件）、`~/.agents/skills`、`~/.codex`（skills、prompts）、每个项目的 `.claude` / `.agents`。显示来源和格式，团团从不写这些目录。
 - **导入**：粘贴 GitHub / git / SKILL.md 链接，复制到团团自己的目录（`<data>/library`），可更新、删除。
 - **插件**：Claude 插件格式（`.claude-plugin/plugin.json`，含 skills、commands、agents、MCP、hooks），显示各部分数量和每个 Harness 的支持情况。
-- **按 Agent 勾选**：Agent 编辑页「Skills 与插件」里搜索、勾选；新会话只加载勾选的：Claude Code 通过 `_meta.claudeCode.options.plugins` 加载整个插件（只对这个会话生效）；其他 Harness 拿到插件里的 Skill（链接到会话目录的 skills 目录，不覆盖同名）和 stdio MCP 服务器（ACP `mcpServers`）。
+- **按 Agent 勾选**：Agent 编辑页「Skills 与插件」里搜索、勾选。Claude Code 通过 `_meta.claudeCode.options.plugins` 加载选中插件（只对这个会话生效）；其他 Harness 拿到该 Agent 选中插件的 Skill 路径索引和 stdio MCP 服务器（ACP `mcpServers`）。已有原生技能仍由 Harness 的配置管理；缓存里存在一个插件不等于它已启用。
 
 | | Skill | 命令 | 子代理 | MCP | Hook |
 | --- | --- | --- | --- | --- | --- |
@@ -251,11 +251,13 @@ Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的
 | Grok：官方 `grok usage <session-id>` | 今天 / 7 天 token、今天花费（有价格时） | 只查最近 7 天动过的会话 |
 | Grok ACP `x.ai/billing` 扩展（点刷新） | 周期额度、重置时间、套餐、预付余额 | 沿用 Grok 自己的登录；只握手和查询，不创建会话、不发模型请求；旧版本不支持时提示更新 |
 | Grok 每轮 ACP 返回的 `_meta.usage` | 计入「团团今天」 | |
+| Antigravity 原生 `/usage` | 各模型组的额度窗口、重置时间、套餐 | 只在 Harness 声明该命令后查询，命令由 ACP 服务直接处理；API Key 等认证方式可能没有订阅额度 |
+| ZCode ACP `account/usage_stats` 扩展 | 桥接返回的个人套餐额度与状态 | 只握手和查询，不发模型请求；0.70.0 不支持团队套餐，该结果不能代表原生 ZCode 的团队余额 |
 | 余额：xAI `GET /v1/api-key`（检查 Key / 团队是否被停用，拿 team_id）+ Management API `GET /v1/billing/teams/{team_id}/prepaid/balance`（需另填 Management Key） | 预付余额（美元） | 没填 Management Key 时只显示 Key 状态 |
 | 余额：DeepSeek `/user/balance`、OpenRouter `/api/v1/credits`、Kimi `/v1/users/me/balance`、硅基流动 `/v1/user/info` | 余额 | 其它服务商显示「没有公开的余额接口」 |
 | 团团自己 | 今天每个 Harness / 服务商的轮数和 token | 来自每轮 ACP `session/prompt` 返回的 `usage` |
 
-不读钥匙串、不拿 OAuth token 调私有接口。
+已安装或已绑定 Agent 的 Antigravity / ZCode 显示对应卡片。登录或握手成功后同步查询结果，卡片可手动刷新，并显示来源、查询时间与失败原因。公开额度结果可在重启后恢复；仅打开用量页不会启动登录或模型请求。不读钥匙串、不拿 OAuth token 调私有接口。
 
 ![服务商与用量](docs/screenshots/providers.png)
 
@@ -277,8 +279,8 @@ Claude Code 用服务商时：Claude Code 会让 `~/.claude/settings.json` 里�
 
 Agent 页「Skills」是一张勾选清单（新建 Agent 时就能勾选，保存后生效），自动列出：
 
-- 用户级：`~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`，以及 `~/.claude/plugins/**/skills`（插件名取自 `.claude-plugin/plugin.json`）；
-- 项目级：右上角选中项目的 `.agents/skills`、`.claude/skills`；
+- 用户级：`~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`、Antigravity 的 `$GEMINI_HOME/config/skills` / `antigravity-cli/skills`（默认 `~/.gemini`），以及 `~/.claude/plugins/**/skills`；
+- 项目级：右上角选中项目的 `.agents/skills`、`.claude/skills`、`.opencode/skills`、`.gemini/skills`；
 - 已导入到该 Agent 的 Skills。
 
 勾选即对这个 Agent 启用（只记录路径到 `<数据目录>/agents/<id>/skills-linked.json`，不复制）。Harness 本来就会读取的位置（如 Claude Code 的 `~/.claude/skills`）显示为已勾选且不可取消——要停用请改用户自己的配置。
@@ -287,17 +289,11 @@ Agent 页「Skills」是一张勾选清单（新建 Agent 时就能勾选，保�
 
 ![Skills](docs/screenshots/skills.png)
 
-会话开始时，启用的 Skills 以符号链接放进会话目录里该 Harness 原生扫描的位置（同名已存在则跳过，不覆盖）：
+团团主动启用的 Skills 只给当前 Agent：每轮提供名称、描述和绝对路径索引，由 Harness 按需读取正文与附属文件；自定义 API 使用 `load_skill`。不再向共享项目写入技能链接，避免一个 Agent 的选择影响其他 Agent。取消勾选会撤销下一轮的索引和额外只读权限；已进入 Harness 历史的内容不会被追溯删除。
 
-| Harness | 位置 | 方式 |
-| --- | --- | --- |
-| Claude Code | `<会话目录>/.claude/skills` | 原生 |
-| Codex | `<会话目录>/.agents/skills` | 原生（`$` 调用） |
-| OpenCode | `<会话目录>/.agents/skills` | 原生 |
-| Grok Build | `<会话目录>/.agents/skills` | 未见官方说明，按通用约定 |
-| 自定义 API | 不写文件 | 模拟：系统提示列出名称和描述，`load_skill` 工具按需加载正文 |
+Harness 本来就会读取的全局 / 项目技能在设置里显示「原生可用」及实际来源，即使没有主动添加，也会出现在 `$` 菜单中。Antigravity 原生读取项目 `.agents/skills` 和 `.gemini/skills`。同一路径的符号链接合并时保留全部来源；旧版本留下但无法确认归属的项目链接不会自动删除。要停用原生技能，应修改对应 Harness 的配置或项目技能文件。
 
-不改 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`：它们同时存放 Harness 的登录信息，隔离会导致需要重新登录。会话目录里已有的 `.claude/` / `.agents/` / `.opencode/` Skills 也会被发现。
+不改 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`，保留用户原生配置和登录。前导 `/` 命令原样传递，不依赖命令声明到达的时机，不附加技能索引或首次身份文本，避免 `/usage` 等命令变成模型请求。
 
 输入框里 `/` 弹出 Harness 通过 ACP `available_commands_update` 提供的命令；`$` 显示当前会话收到的完整 Skill 清单，可滚动浏览，并按名称或描述关键词搜索（名称前缀优先，也能匹配插件名称中的片段）。正文空白后也可输入 `$`，补全时保留前后文；金额和 Markdown 代码中的 `$` 不触发补全。方向键可遍历全部结果，Tab / Enter 选择，Esc 关闭并保留草稿。清单不因补全而启用其他目录或插件中的 Skill，Harness 实际可用范围仍由其会话和配置决定。
 

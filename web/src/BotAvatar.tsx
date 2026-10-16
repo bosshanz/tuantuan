@@ -2,8 +2,11 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../../server/avatars";
 import type { Expression } from "./avatarState";
 
-/** Hand-authored silhouettes in a 100×100 box; `eyes` is where the face sits (x, y of the midpoint). */
-const SHAPES: Record<AvatarShape, { body: ReactNode; eyes: [number, number] }> = {
+/** Hand-authored silhouettes in a 100×100 box; the face anchor and spacing fit each silhouette. */
+const SHAPES: Record<
+  AvatarShape,
+  { body: ReactNode; eyes: [number, number]; eyeSpacing?: number; eyeHeight?: number }
+> = {
   orb: { body: <circle cx="50" cy="52" r="40" />, eyes: [50, 46] },
   cloud: {
     body: (
@@ -135,11 +138,13 @@ const SHAPES: Record<AvatarShape, { body: ReactNode; eyes: [number, number] }> =
         <circle cx="76" cy="24" r="15" />
         <ellipse cx="50" cy="57" rx="39" ry="35" />
         <ellipse className="ba-cutout" cx="50" cy="57" rx="32" ry="28" />
-        <ellipse cx="37" cy="51" rx="12" ry="16" transform="rotate(24 37 51)" />
-        <ellipse cx="63" cy="51" rx="12" ry="16" transform="rotate(-24 63 51)" />
+        <ellipse cx="34" cy="51" rx="11" ry="14" transform="rotate(24 34 51)" />
+        <ellipse cx="66" cy="51" rx="11" ry="14" transform="rotate(-24 66 51)" />
       </>
     ),
-    eyes: [50, 51],
+    eyes: [51, 51],
+    eyeSpacing: 16,
+    eyeHeight: 2.5,
   },
   goat: {
     body: (
@@ -172,10 +177,22 @@ const SHAPES: Record<AvatarShape, { body: ReactNode; eyes: [number, number] }> =
   },
 };
 
-/** Eyes (and mouth) per expression, drawn around the face midpoint (x, y). */
-function Face({ e, x, y }: { e: Expression; x: number; y: number }) {
-  const L = x - 10;
-  const R = x + 8;
+/** Eyes (and mouth) per expression, drawn around each shape's face anchor. */
+function Face({
+  e,
+  x,
+  y,
+  eyeSpacing = 9,
+  eyeHeight = 6,
+}: {
+  e: Expression;
+  x: number;
+  y: number;
+  eyeSpacing?: number;
+  eyeHeight?: number;
+}) {
+  const L = x - 1 - eyeSpacing;
+  const R = x - 1 + eyeSpacing;
   switch (e) {
     case "happy":
       return (
@@ -225,8 +242,8 @@ function Face({ e, x, y }: { e: Expression; x: number; y: number }) {
       return (
         <g className="ba-look">
           <g className="ba-eyes">
-            <line x1={L + 4} y1={y - 10} x2={L + 2} y2={y + 1} />
-            <line x1={R + 4} y1={y - 10} x2={R + 2} y2={y + 1} />
+            <line x1={L + 4} y1={y - eyeHeight - 4} x2={L + 2} y2={y + 1} />
+            <line x1={R + 4} y1={y - eyeHeight - 4} x2={R + 2} y2={y + 1} />
           </g>
         </g>
       );
@@ -235,8 +252,8 @@ function Face({ e, x, y }: { e: Expression; x: number; y: number }) {
         <>
           <g className="ba-look">
             <g className="ba-eyes">
-              <line x1={L + 1} y1={y - 6} x2={L - 1} y2={y + 6} />
-              <line x1={R + 1} y1={y - 6} x2={R - 1} y2={y + 6} />
+              <line x1={L + 1} y1={y - eyeHeight} x2={L - 1} y2={y + eyeHeight} />
+              <line x1={R + 1} y1={y - eyeHeight} x2={R - 1} y2={y + eyeHeight} />
             </g>
           </g>
           {e === "speaking" && <ellipse className="ba-dot ba-mouth ba-talk" cx={x - 1} cy={y + 16} rx="5" ry="3.5" />}
@@ -326,7 +343,7 @@ export function BotAvatar({
       <g className="ba-root" key={hop} data-hop={hop > 0 ? "" : undefined}>
         <g className="ba-body">{s.body}</g>
         <g className="ba-face">
-          <Face e={shown} x={x} y={y} />
+          <Face e={shown} x={x} y={y} eyeSpacing={s.eyeSpacing} eyeHeight={s.eyeHeight} />
         </g>
       </g>
     </svg>

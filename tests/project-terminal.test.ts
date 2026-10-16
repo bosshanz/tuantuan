@@ -105,6 +105,37 @@ test("ending a terminal kills its foreground, background and nested jobs while k
   await manager.remove("kill-two", two.id);
 });
 
+test("tabs in one project own independent shells, buffers and lifecycles", async () => {
+  const project = { id: "multi", cwd: root };
+  const first = manager.open(project, env);
+  const second = manager.create(project, env, 92, 29);
+  const other = manager.open({ id: "multi-other", cwd: root }, env);
+  expect(first.id).not.toBe(second.id);
+  expect(manager.open(project, env).id).toBe(first.id);
+  expect(manager.list(project.id).map((terminal) => terminal.number)).toEqual([1, 2]);
+  input(first.id, "export TT_TAB_VALUE=610000; expr $TT_TAB_VALUE + 13\n");
+  input(second.id, "printf '\\nSECOND_%s\\n' READY; test -z \"$TT_TAB_VALUE\" && printf 'not_set\\n'; stty size\n");
+  await waitFor(() => output(first.id).includes("610013"), "first tab variable");
+  await waitFor(() => output(second.id).includes("SECOND_READY"), "second tab command");
+  expect(output(second.id)).toContain("not_set\r\n");
+  expect(output(second.id)).toContain("29 92");
+  expect(output(second.id)).not.toContain("610013");
+  await expect(manager.remove("multi-other", first.id)).rejects.toThrow("终端已更换");
+  await manager.remove(project.id, first.id);
+  expect(manager.list(project.id).map((terminal) => terminal.id)).toEqual([second.id]);
+  expect(manager.get(other.id)?.status).toBe("running");
+  input(second.id, "expr 620000 + 17\n");
+  await waitFor(() => output(second.id).includes("620017"), "surviving sibling tab");
+  const third = manager.create(project, env);
+  expect(third.number).toBe(3);
+  await manager.remove(project.id);
+  expect(manager.list(project.id)).toEqual([]);
+  expect(manager.get(second.id)).toBeNull();
+  expect(manager.get(third.id)).toBeNull();
+  expect(manager.get(other.id)?.status).toBe("running");
+  await manager.remove("multi-other");
+});
+
 test("scrollback and input are bounded and invalid sizes/cwd are rejected", async () => {
   for (const [cols, rows] of [
     [0, 24],
@@ -215,6 +246,13 @@ test("API/WS restore explicit terminals, enforce local boundary, and clean up cw
   ).toBe(403);
   const meta: ProjectTerminalMeta = await (await request(path, "POST", { cols: 84, rows: 28 })).json();
   expect(meta.projectId).toBe(project.id);
+  const sibling: ProjectTerminalMeta = await (await request(path, "POST", { create: true })).json();
+  expect(sibling.id).not.toBe(meta.id);
+  expect((await (await request(`${path}?all=1`)).json()).map((terminal: ProjectTerminalMeta) => terminal.id)).toEqual([
+    meta.id,
+    sibling.id,
+  ]);
+  expect((await (await request(path, "POST")).json()).id).toBe(meta.id);
   await expect(connection(meta.id, "https://foreign.example")).rejects.toThrow("rejected");
   const first = await connection(meta.id, "http://localhost:5173");
   expect(first.events[0]?.type).toBe("snapshot");
@@ -235,10 +273,38 @@ test("API/WS restore explicit terminals, enforce local boundary, and clean up cw
   const other = mkdtempSync(join(root, "changed-"));
   expect((await request(`/api/projects/${project.id}`, "PATCH", { cwd: other })).status).toBe(200);
   expect(await (await request(path)).json()).toBeNull();
+  expect(await (await request(`${path}?all=1`)).json()).toEqual([]);
+  expect(app.projectTerminals.get(sibling.id)).toBeNull();
   const moved: ProjectTerminalMeta = await (await request(path, "POST")).json();
   expect(moved.cwd).toBe(other);
   expect((await request(`/api/projects/${project.id}`, "DELETE")).status).toBe(200);
   expect(app.projectTerminals.get(moved.id)).toBeNull();
+});
+
+test("whole-project cleanup blocks new tabs until every PTY is removed, while single-tab close allows siblings", async () => {
+  const owned = new ProjectTerminals();
+  try {
+    const project = { id: "cleanup", cwd: root };
+    const first = owned.open(project, env);
+    const other = owned.open({ id: "cleanup-other", cwd: root }, env);
+    const closingOne = owned.remove(project.id, first.id);
+    const sibling = owned.create(project, env);
+    await closingOne;
+    expect(owned.get(sibling.id)?.status).toBe("running");
+    const extra = owned.create(project, env);
+    const cleanup = owned.remove(project.id);
+    const sameCleanup = owned.remove(project.id);
+    expect(() => owned.create(project, env)).toThrow("项目终端正在关闭");
+    expect(() => owned.open(project, env)).toThrow("项目终端正在关闭");
+    await Promise.all([cleanup, sameCleanup]);
+    expect(owned.get(sibling.id)).toBeNull();
+    expect(owned.get(extra.id)).toBeNull();
+    expect(owned.list(project.id)).toEqual([]);
+    expect(owned.get(other.id)?.status).toBe("running");
+    expect(owned.create(project, env).status).toBe("running");
+  } finally {
+    await owned.shutdown();
+  }
 });
 
 test("opening during terminal close or a project cwd change/deletion returns a retryable conflict", async () => {
@@ -251,24 +317,35 @@ test("opening during terminal close or a project cwd change/deletion returns a r
   const projectPath = `/api/projects/${project.id}`;
   const terminalPath = `${projectPath}/terminal`;
   const original: ProjectTerminalMeta = await (await request(terminalPath, "POST")).json();
+  const originalSibling: ProjectTerminalMeta = await (await request(terminalPath, "POST", { create: true })).json();
   const changed = mkdtempSync(join(root, "concurrent-"));
   const patch = request(projectPath, "PATCH", { cwd: changed });
   await Bun.sleep(15);
   const duringPatch = await request(terminalPath, "POST");
   expect(duringPatch.status).toBe(409);
   expect((await duringPatch.json()).error).toContain("稍后重试");
+  const createDuringPatch = await request(terminalPath, "POST", { create: true });
+  expect(createDuringPatch.status).toBe(409);
+  expect((await createDuringPatch.json()).error).toContain("稍后重试");
   expect((await patch).status).toBe(200);
   expect(await (await request(terminalPath)).json()).toBeNull();
   const updated: ProjectTerminalMeta = await (await request(terminalPath, "POST")).json();
   expect(updated.id).not.toBe(original.id);
   expect(updated.cwd).toBe(changed);
+  expect(app.projectTerminals.get(original.id)).toBeNull();
+  expect(app.projectTerminals.get(originalSibling.id)).toBeNull();
+  const updatedSibling: ProjectTerminalMeta = await (await request(terminalPath, "POST", { create: true })).json();
 
   const deletion = request(projectPath, "DELETE");
   await Bun.sleep(15);
   const duringDeletion = await request(terminalPath, "POST");
   expect(duringDeletion.status).toBe(409);
   expect((await duringDeletion.json()).error).toContain("稍后重试");
+  const createDuringDeletion = await request(terminalPath, "POST", { create: true });
+  expect(createDuringDeletion.status).toBe(409);
+  expect((await createDuringDeletion.json()).error).toContain("稍后重试");
   expect((await deletion).status).toBe(200);
   expect((await request(terminalPath, "POST")).status).toBe(404);
   expect(app.projectTerminals.get(updated.id)).toBeNull();
+  expect(app.projectTerminals.get(updatedSibling.id)).toBeNull();
 });

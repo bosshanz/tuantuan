@@ -1,6 +1,6 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
-import { ChevronDown, RotateCcw, SquareTerminal, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, RotateCcw, SquareTerminal, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ProjectTerminalEvent, ProjectTerminalMeta } from "../../shared/project-terminal";
 import { api, type Project } from "./api";
@@ -11,8 +11,12 @@ export interface TerminalFocusRequest {
 }
 
 type Connection = "starting" | "connected" | "reconnecting" | "error";
+type Session = { meta: ProjectTerminalMeta; connection: Connection; error: string | null; attempt: number };
+const newSession = (meta: ProjectTerminalMeta): Session => ({ meta, connection: "starting", error: null, attempt: 0 });
+const tabId = (id: string) => `terminal-tab-${id}`;
+const panelId = (id: string) => `terminal-panel-${id}`;
 
-/** One project-owned shell. Hiding the dock never closes its socket or process. */
+/** Project-owned shells retain their sockets, screens and processes while hidden. */
 export default function ProjectTerminal(props: {
   project: Project;
   visible: boolean;
@@ -24,35 +28,380 @@ export default function ProjectTerminal(props: {
 }) {
   const { project, visible, height, onHeightChange } = props;
   const dock = useRef<HTMLElement>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [active, setActive] = useState<string | null>(null);
+  const sessionsNow = useRef(sessions);
+  const activeNow = useRef(active);
+  const [focusRequest, setFocusRequest] = useState(props.focusRequest);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const creatingNow = useRef(false);
+  const [closing, setClosing] = useState<{ id: string; restart: boolean } | null>(null);
+  const [maxHeight, setMaxHeight] = useState(600);
+  const drag = useRef<{ y: number; height: number } | null>(null);
+  const endpoint = `/api/projects/${encodeURIComponent(project.id)}/terminal`;
+  const selected = sessions.find((session) => session.meta.id === active);
+  useLayoutEffect(() => {
+    sessionsNow.current = sessions;
+    activeNow.current = active;
+  }, [sessions, active]);
+  useLayoutEffect(() => setFocusRequest(props.focusRequest), [props.focusRequest]);
+  const select = (id: string, focus = true) => {
+    setActive(id);
+    setFocusRequest(focus ? { origin: document.activeElement } : null);
+  };
+  useEffect(() => {
+    if (!active) return;
+    document.getElementById(tabId(active))?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    try {
+      sessionStorage.setItem(`tuantuan.terminal.active.${project.id}`, active);
+    } catch {
+      /* Private browsing may disable session storage. */
+    }
+  }, [active, project.id]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt explicitly retries loading the project sessions.
+  useEffect(() => {
+    let disposed = false;
+    setLoading(true);
+    setError(null);
+    void (async () => {
+      try {
+        let terminals = await api<ProjectTerminalMeta[]>("GET", `${endpoint}?all=1`);
+        if (!terminals.length) terminals = [await api<ProjectTerminalMeta>("POST", endpoint)];
+        if (disposed) return;
+        let remembered: string | null = null;
+        try {
+          remembered = sessionStorage.getItem(`tuantuan.terminal.active.${project.id}`);
+        } catch {
+          /* Private browsing may disable session storage. */
+        }
+        setSessions(terminals.map(newSession));
+        setActive(terminals.find((terminal) => terminal.id === remembered)?.id ?? terminals[0]?.id ?? null);
+      } catch (e) {
+        if (!disposed) setError((e as Error).message);
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [endpoint, project.id, attempt]);
+  const update = useCallback((id: string, patch: Partial<Session>) => {
+    setSessions((current) => current.map((session) => (session.meta.id === id ? { ...session, ...patch } : session)));
+  }, []);
+  const add = async () => {
+    if (creatingNow.current) return;
+    creatingNow.current = true;
+    setCreating(true);
+    setError(null);
+    const origin = document.activeElement;
+    try {
+      const meta = await api<ProjectTerminalMeta>("POST", endpoint, { create: true });
+      setSessions((current) => [...current, newSession(meta)]);
+      setActive(meta.id);
+      setFocusRequest({ origin });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      creatingNow.current = false;
+      setCreating(false);
+    }
+  };
+  const end = async (id: string, restart = false) => {
+    setClosing({ id, restart });
+    setError(null);
+    const origin = document.activeElement;
+    let remaining: Session[] | null = null;
+    try {
+      await api("DELETE", `${endpoint}?terminalId=${encodeURIComponent(id)}`);
+      const index = sessionsNow.current.findIndex((session) => session.meta.id === id);
+      remaining = sessionsNow.current.filter((session) => session.meta.id !== id);
+      if (restart) {
+        // Remove the exited tab first so a failed replacement never leaves a dead tab registered.
+        setSessions(remaining);
+        const meta = await api<ProjectTerminalMeta>("POST", endpoint, { create: true });
+        setSessions((current) => {
+          const next = [...current];
+          next.splice(index, 0, newSession(meta));
+          return next;
+        });
+        if (activeNow.current === id) {
+          const ownsFocus =
+            document.activeElement === origin ||
+            (document.activeElement === document.body &&
+              origin instanceof HTMLButtonElement &&
+              (!origin.isConnected || origin.disabled));
+          setActive(meta.id);
+          setFocusRequest(ownsFocus ? { origin: document.activeElement } : null);
+        }
+      } else {
+        const next = remaining[Math.min(index, remaining.length - 1)];
+        // Disabling the clicked close button can move focus to body while the request runs.
+        const ownsFocus =
+          document.activeElement === origin ||
+          (document.activeElement === document.body && origin instanceof HTMLButtonElement && origin.disabled);
+        if (activeNow.current === id && next) {
+          if (ownsFocus) document.getElementById(tabId(next.meta.id))?.focus();
+          select(next.meta.id, document.activeElement === document.getElementById(tabId(next.meta.id)));
+        }
+        if (remaining.length) setSessions(remaining);
+        else {
+          if (ownsFocus) dock.current?.querySelector<HTMLButtonElement>('[aria-label="收起终端"]')?.focus();
+          props.onEnded();
+        }
+      }
+    } catch (e) {
+      setError((e as Error).message);
+      // A restart can fail after the old shell was removed. Keep surviving tabs usable.
+      if (remaining && activeNow.current === id) setActive(remaining[0]?.meta.id ?? null);
+    } finally {
+      setClosing(null);
+    }
+  };
+  useEffect(() => {
+    const workspace = dock.current?.closest(".conversation-workspace");
+    if (!workspace) return;
+    const observer = new ResizeObserver(() => {
+      const max = Math.max(180, Math.min(720, workspace.clientHeight - 260));
+      setMaxHeight(max);
+      if (height > max) onHeightChange(max);
+    });
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, [height, onHeightChange]);
+
+  const restarting = !!closing?.restart && (!selected || active === closing.id);
+  const inputReady =
+    visible &&
+    !!selected &&
+    selected.connection === "connected" &&
+    selected.meta.status === "running" &&
+    !loading &&
+    !creating &&
+    closing?.id !== active;
+  const status =
+    loading || creating || restarting
+      ? "正在打开…"
+      : selected?.connection === "starting"
+        ? "正在打开…"
+        : selected?.connection === "reconnecting"
+          ? "正在重连…"
+          : selected?.connection === "error"
+            ? "连接失败"
+            : selected?.meta.status === "exited"
+              ? `已退出${selected.meta.exitCode === null ? "" : ` · ${selected.meta.exitCode}`}`
+              : "";
+  return (
+    <section
+      ref={dock}
+      className="project-terminal"
+      style={{ height }}
+      aria-label="项目终端"
+      aria-busy={
+        loading ||
+        creating ||
+        restarting ||
+        selected?.connection === "starting" ||
+        selected?.connection === "reconnecting"
+      }
+      data-ready={inputReady || undefined}
+    >
+      <hr
+        className="terminal-resize"
+        tabIndex={0}
+        aria-label="调整终端高度"
+        aria-orientation="horizontal"
+        aria-valuemin={180}
+        aria-valuemax={maxHeight}
+        aria-valuenow={height}
+        onPointerDown={(event) => {
+          drag.current = { y: event.clientY, height };
+          event.currentTarget.setPointerCapture(event.pointerId);
+          event.preventDefault();
+        }}
+        onPointerMove={(event) => {
+          if (drag.current)
+            onHeightChange(Math.max(180, Math.min(maxHeight, drag.current.height + drag.current.y - event.clientY)));
+        }}
+        onPointerUp={() => {
+          drag.current = null;
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
+        }}
+        onKeyDown={(event) => {
+          if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          onHeightChange(
+            event.key === "Home"
+              ? 180
+              : event.key === "End"
+                ? maxHeight
+                : Math.max(180, Math.min(maxHeight, height + (event.key === "ArrowUp" ? 20 : -20))),
+          );
+        }}
+      />
+      <header className="terminal-head">
+        <SquareTerminal size={16} />
+        <div className="terminal-tabs" role="tablist" aria-label="项目终端会话">
+          {sessions.map((session, index) => (
+            <div key={session.meta.id} className="terminal-tab" data-active={active === session.meta.id || undefined}>
+              <button
+                type="button"
+                role="tab"
+                id={tabId(session.meta.id)}
+                aria-controls={panelId(session.meta.id)}
+                aria-selected={active === session.meta.id}
+                tabIndex={active === session.meta.id ? 0 : -1}
+                onClick={() => select(session.meta.id)}
+                onKeyDown={(event) => {
+                  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                  event.preventDefault();
+                  const next =
+                    sessions[
+                      event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? sessions.length - 1
+                          : (index + (event.key === "ArrowRight" ? 1 : -1) + sessions.length) % sessions.length
+                    ];
+                  if (next) {
+                    document.getElementById(tabId(next.meta.id))?.focus();
+                    select(next.meta.id, false);
+                  }
+                }}
+              >
+                终端 {session.meta.number}
+              </button>
+              <button
+                type="button"
+                className="terminal-tab-close"
+                aria-label={`关闭终端 ${session.meta.number}`}
+                title={`关闭终端 ${session.meta.number}`}
+                disabled={closing !== null || creating}
+                onClick={() => void end(session.meta.id)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="btn ghost icon"
+          aria-label="新建终端"
+          title="新建终端"
+          aria-busy={creating || undefined}
+          disabled={loading || closing !== null}
+          onClick={() => void add()}
+        >
+          <Plus size={16} />
+        </button>
+        <span className="terminal-context" title={selected?.meta.cwd ?? project.cwd}>
+          {project.name}
+          <span> / {selected?.meta.shell.split(/[\\/]/).at(-1) ?? "shell"}</span>
+        </span>
+        <span className="terminal-status" role="status">
+          {status}
+        </span>
+        {((selected && (selected.meta.status === "exited" || selected.connection === "error")) ||
+          (!loading && !sessions.length)) && (
+          <button
+            type="button"
+            className="btn ghost sm"
+            disabled={closing !== null || creating}
+            onClick={() => {
+              if (!selected) setAttempt((value) => value + 1);
+              else if (selected.connection === "error") update(selected.meta.id, { attempt: selected.attempt + 1 });
+              else void end(selected.meta.id, true);
+            }}
+          >
+            <RotateCcw size={14} />
+            {selected?.meta.status === "exited" ? "重新打开" : "重试连接"}
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn ghost icon"
+          title="结束终端"
+          aria-label="结束终端"
+          disabled={!selected || closing !== null || creating}
+          onClick={() => selected && void end(selected.meta.id)}
+        >
+          <Trash2 size={15} />
+        </button>
+        <button
+          type="button"
+          className="btn ghost icon"
+          title="收起终端（Ctrl+`）"
+          aria-label="收起终端"
+          onClick={props.onHide}
+        >
+          <ChevronDown size={17} />
+        </button>
+      </header>
+      {error && (
+        <div className="terminal-error" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="terminal-sessions">
+        {sessions.map((session) => (
+          <TerminalSession
+            key={session.meta.id}
+            session={session}
+            endpoint={endpoint}
+            active={active === session.meta.id}
+            visible={visible && active === session.meta.id}
+            focusRequest={active === session.meta.id ? focusRequest : null}
+            onState={update}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TerminalSession({
+  session,
+  endpoint,
+  active,
+  visible,
+  focusRequest: requestedFocus,
+  onState,
+}: {
+  session: Session;
+  endpoint: string;
+  active: boolean;
+  visible: boolean;
+  focusRequest: TerminalFocusRequest | null;
+  onState: (id: string, patch: Partial<Session>) => void;
+}) {
+  const { meta } = session;
   const container = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
+  const fit = useRef<() => void>(() => {});
   const ready = useRef(false);
   const visibleNow = useRef(visible);
-  const focusRequest = useRef(props.focusRequest);
+  const focusRequest = useRef(requestedFocus);
   const focusedRequest = useRef<TerminalFocusRequest | null>(null);
   const focusRequested = useCallback(() => {
     const request = focusRequest.current;
     if (!visibleNow.current || !ready.current || !request || focusedRequest.current === request) return;
     focusedRequest.current = request;
-    // Opening is intentional, but a slow lazy load or reconnect must not steal a newer focus choice.
     if (document.activeElement === request.origin) terminal.current?.focus();
   }, []);
   useLayoutEffect(() => {
     visibleNow.current = visible;
-    focusRequest.current = props.focusRequest;
+    focusRequest.current = requestedFocus;
     if (terminal.current) terminal.current.options.disableStdin = !visible || !ready.current;
+    if (visible) fit.current();
     focusRequested();
-  }, [visible, props.focusRequest, focusRequested]);
-  const [meta, setMeta] = useState<ProjectTerminalMeta | null>(null);
-  const [connection, setConnection] = useState<Connection>("starting");
-  const [error, setError] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState(0);
-  const [closing, setClosing] = useState(false);
-  const [maxHeight, setMaxHeight] = useState(600);
-  const drag = useRef<{ y: number; height: number } | null>(null);
-  const endpoint = `/api/projects/${encodeURIComponent(project.id)}/terminal`;
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt explicitly restarts the connection after a user retry.
+  }, [visible, requestedFocus, focusRequested]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the session ID and retry counter own this connection; metadata updates do not replace it.
   useEffect(() => {
     const host = container.current;
     if (!host) return;
@@ -110,8 +459,12 @@ export default function ProjectTerminal(props: {
     const media = matchMedia("(prefers-color-scheme: dark)");
     media.addEventListener("change", theme);
     const resize = () => {
-      if (host.clientWidth > 0 && host.clientHeight > 0) fitAddon.fit();
+      if (host.clientWidth > 0 && host.clientHeight > 0) {
+        fitAddon.fit();
+        term.refresh(0, term.rows - 1);
+      }
     };
+    fit.current = resize;
     const observer = new ResizeObserver(resize);
     observer.observe(host);
     resize();
@@ -133,8 +486,7 @@ export default function ProjectTerminal(props: {
       if (disposed) return;
       ready.current = false;
       term.options.disableStdin = true;
-      setConnection("error");
-      setError(e instanceof Error ? e.message : String(e));
+      onState(meta.id, { connection: "error", error: e instanceof Error ? e.message : String(e) });
     };
     const connect = (id: string) => {
       if (disposed) return;
@@ -145,15 +497,15 @@ export default function ProjectTerminal(props: {
         if (message.type === "snapshot") {
           running = message.terminal.status === "running";
           failures = 0;
-          setMeta(message.terminal);
-          setError(null);
-          setConnection("connected");
+          currentMeta = message.terminal;
+          onState(meta.id, { meta: currentMeta, error: null });
           term.reset();
           term.resize(message.terminal.cols, message.terminal.rows);
           term.write(message.output, () => {
             if (disposed) return;
             ready.current = running;
             term.options.disableStdin = !ready.current || !visibleNow.current;
+            onState(meta.id, { connection: "connected" });
             resize();
             if (ready.current && socket?.readyState === WebSocket.OPEN)
               socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
@@ -165,9 +517,8 @@ export default function ProjectTerminal(props: {
           ready.current = false;
           term.options.disableStdin = true;
           // Exit is authoritative: late input/resize acknowledgements may have reported the closing PTY first.
-          setConnection("connected");
-          setError(null);
-          setMeta((current) => current && { ...current, status: "exited", exitCode: message.exitCode });
+          currentMeta = { ...currentMeta, status: "exited", exitCode: message.exitCode };
+          onState(meta.id, { meta: currentMeta, error: null, connection: "connected" });
         } else if (message.type === "error" && (running || message.error !== "终端已退出，请重新打开")) {
           fail(new Error(message.error));
         }
@@ -176,13 +527,13 @@ export default function ProjectTerminal(props: {
         ready.current = false;
         term.options.disableStdin = true;
         if (disposed) return;
-        setConnection("reconnecting");
+        onState(meta.id, { connection: "reconnecting" });
         const delay = Math.min(1000 * 2 ** failures, 5000);
         failures++;
         reconnect = setTimeout(async () => {
           try {
-            const current = await api<ProjectTerminalMeta | null>("GET", endpoint);
-            if (!current || current.id !== id) {
+            const current = await api<ProjectTerminalMeta[]>("GET", `${endpoint}?all=1`);
+            if (!current.some((terminal) => terminal.id === id)) {
               fail(new Error("终端已结束，请重新打开。"));
               return;
             }
@@ -194,14 +545,9 @@ export default function ProjectTerminal(props: {
         }, delay);
       };
     };
-    setConnection("starting");
-    setError(null);
-    setMeta(null);
-    void api<ProjectTerminalMeta>("POST", endpoint, { cols: term.cols, rows: term.rows }).then((opened) => {
-      if (disposed) return;
-      setMeta(opened);
-      connect(opened.id);
-    }, fail);
+    onState(meta.id, { connection: "starting", error: null });
+    let currentMeta = meta;
+    connect(meta.id);
     return () => {
       disposed = true;
       clearTimeout(reconnect);
@@ -210,132 +556,28 @@ export default function ProjectTerminal(props: {
       themeObserver.disconnect();
       media.removeEventListener("change", theme);
       terminal.current = null;
+      fit.current = () => {};
       ready.current = false;
       term.dispose();
     };
-  }, [endpoint, attempt]);
+  }, [endpoint, meta.id, session.attempt, focusRequested, onState]);
 
-  useEffect(() => {
-    const workspace = dock.current?.closest(".conversation-workspace");
-    if (!workspace) return;
-    const observer = new ResizeObserver(() => {
-      const max = Math.max(180, Math.min(720, workspace.clientHeight - 260));
-      setMaxHeight(max);
-      if (height > max) onHeightChange(max);
-    });
-    observer.observe(workspace);
-    return () => observer.disconnect();
-  }, [height, onHeightChange]);
-
-  const end = async (restart: boolean) => {
-    setClosing(true);
-    try {
-      if (meta) await api("DELETE", `${endpoint}?terminalId=${encodeURIComponent(meta.id)}`);
-      if (restart) setAttempt((value) => value + 1);
-      else props.onEnded();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setClosing(false);
-    }
-  };
-  const status =
-    connection === "starting"
-      ? "正在打开…"
-      : connection === "reconnecting"
-        ? "正在重连…"
-        : connection === "error"
-          ? "连接失败"
-          : meta?.status === "exited"
-            ? `已退出${meta.exitCode === null ? "" : ` · ${meta.exitCode}`}`
-            : "";
   return (
-    <section ref={dock} className="project-terminal" style={{ height }} aria-label="项目终端">
-      <hr
-        className="terminal-resize"
-        tabIndex={0}
-        aria-label="调整终端高度"
-        aria-orientation="horizontal"
-        aria-valuemin={180}
-        aria-valuemax={maxHeight}
-        aria-valuenow={height}
-        onPointerDown={(event) => {
-          drag.current = { y: event.clientY, height };
-          event.currentTarget.setPointerCapture(event.pointerId);
-          event.preventDefault();
-        }}
-        onPointerMove={(event) => {
-          if (drag.current)
-            onHeightChange(Math.max(180, Math.min(maxHeight, drag.current.height + drag.current.y - event.clientY)));
-        }}
-        onPointerUp={() => {
-          drag.current = null;
-        }}
-        onPointerCancel={() => {
-          drag.current = null;
-        }}
-        onKeyDown={(event) => {
-          if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
-          event.preventDefault();
-          onHeightChange(
-            event.key === "Home"
-              ? 180
-              : event.key === "End"
-                ? maxHeight
-                : Math.max(180, Math.min(maxHeight, height + (event.key === "ArrowUp" ? 20 : -20))),
-          );
-        }}
-      />
-      <header className="terminal-head">
-        <SquareTerminal size={16} />
-        <strong>终端</strong>
-        <span className="terminal-context" title={meta?.cwd ?? project.cwd}>
-          {project.name}
-          <span> / {meta?.shell.split(/[\\/]/).at(-1) ?? "shell"}</span>
-        </span>
-        <span className="terminal-status" role="status">
-          {status}
-        </span>
-        {(meta?.status === "exited" || connection === "error") && (
-          <button
-            type="button"
-            className="btn ghost sm"
-            onClick={() => {
-              if (connection === "error") setAttempt((value) => value + 1);
-              else void end(true);
-            }}
-            disabled={closing}
-          >
-            <RotateCcw size={14} />
-            {connection === "error" ? "重试连接" : "重新打开"}
-          </button>
-        )}
-        <button
-          type="button"
-          className="btn ghost icon"
-          title="结束终端"
-          aria-label="结束终端"
-          disabled={!meta || closing}
-          onClick={() => void end(false)}
-        >
-          <Trash2 size={15} />
-        </button>
-        <button
-          type="button"
-          className="btn ghost icon"
-          title="收起终端（Ctrl+`）"
-          aria-label="收起终端"
-          onClick={props.onHide}
-        >
-          <ChevronDown size={17} />
-        </button>
-      </header>
-      {error && (
+    <div
+      className="terminal-session"
+      id={panelId(meta.id)}
+      role="tabpanel"
+      aria-labelledby={tabId(meta.id)}
+      hidden={!active}
+      inert={!active}
+      aria-hidden={!active}
+    >
+      {session.error && (
         <div className="terminal-error" role="alert">
-          {error}
+          {session.error}
         </div>
       )}
       <div className="terminal-screen" ref={container} />
-    </section>
+    </div>
   );
 }

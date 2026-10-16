@@ -134,6 +134,7 @@ export function replayTurns(updates: acp.SessionUpdate[]): ReplayTurn[] {
   for (const t of turns)
     t.user = t.user
       .replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "")
+      .replace(/<tuantuan-skills>[\s\S]*?<\/tuantuan-skills>\s*/g, "")
       .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
       .trim();
   return turns;

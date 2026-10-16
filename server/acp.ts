@@ -14,6 +14,8 @@ export interface AcpLaunch {
   env: Record<string, string>;
   /** Directory the process starts in and every fs/terminal request must stay inside. */
   cwd: string;
+  /** Explicit Agent selections: extra read-only directories or exact legacy files. */
+  skillReadRoots?: string[];
 }
 
 export interface AcpHandlers {
@@ -44,6 +46,7 @@ export class AcpProcess {
   private stderrTail = "";
   private stopping: NodeJS.Signals | null = null;
   private root: string;
+  private skillReadRoots: { path: string; real: string; directory: boolean }[] = [];
   init: acp.InitializeResponse | null = null;
   /** Resolves (never rejects) when the process exits. */
   readonly exited: Promise<number>;
@@ -53,6 +56,7 @@ export class AcpProcess {
     private h: AcpHandlers,
   ) {
     this.root = realpathSync(launch.cwd);
+    this.setSkillReadRoots(launch.skillReadRoots ?? []);
     this.proc = Bun.spawn([launch.command, ...launch.args], {
       cwd: launch.cwd,
       env: launch.env,
@@ -176,8 +180,43 @@ export class AcpProcess {
     return target;
   }
 
+  /** Replace, rather than accumulate, grants before each prompt so unchecked skills are revoked. */
+  setSkillReadRoots(paths: string[]) {
+    this.skillReadRoots = paths.flatMap((path) => {
+      try {
+        const real = realpathSync(path);
+        return [{ path: resolve(path), real, directory: lstatSync(real).isDirectory() }];
+      } catch {
+        return []; // A removed skill must not keep its old grant.
+      }
+    });
+  }
+
+  private readable(path: string): string {
+    try {
+      return this.inside(path);
+    } catch (denied) {
+      const requested = resolve(this.launch.cwd, path);
+      const within = (candidate: string, root: string) => candidate === root || candidate.startsWith(root + sep);
+      const roots = this.skillReadRoots.filter((root) =>
+        root.directory
+          ? within(requested, root.path) || within(requested, root.real)
+          : requested === root.path || requested === root.real,
+      );
+      if (!roots.length) throw denied;
+      let real: string;
+      try {
+        real = realpathSync(requested);
+      } catch {
+        throw denied;
+      }
+      if (!roots.some((root) => (root.directory ? within(real, root.real) : real === root.real))) throw denied;
+      return real;
+    }
+  }
+
   private async readTextFile(p: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
-    const file = Bun.file(this.inside(p.path));
+    const file = Bun.file(this.readable(p.path));
     if (!(await file.exists())) throw acp.RequestError.resourceNotFound(p.path);
     let text = await file.text();
     if (p.line != null || p.limit != null) {

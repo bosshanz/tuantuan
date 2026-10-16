@@ -2,6 +2,7 @@
 export interface ProjectTerminalMeta {
   id: string;
   projectId: string;
+  number: number;
   cwd: string;
   shell: string;
   cols: number;

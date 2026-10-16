@@ -300,7 +300,7 @@ acp
         sessionId,
         update: { sessionUpdate: "available_commands_update", availableCommands: COMMANDS },
       });
-    }, 0);
+    }, Number(process.env.MOCK_AGENT_COMMAND_DELAY_MS) || 0);
     return { sessionId, configOptions: configOptions(s) };
   })
   .onRequest(acp.methods.agent.session.list, () => {
@@ -375,6 +375,7 @@ acp
     const handoffTask = fullText.match(/<tuantuan-handoff from="([^"]*)">\n?([\s\S]*?)\n?<\/tuantuan-handoff>/);
     const text = fullText
       .replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "")
+      .replace(/<tuantuan-skills>[\s\S]*?<\/tuantuan-skills>\s*/g, "")
       .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
       .trim();
     // A queued group turn carries its own request, even after newer messages have arrived.

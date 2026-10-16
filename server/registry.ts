@@ -71,7 +71,7 @@ export const EXTRA_AGENTS: (RegistryAgent & { experimental: true; note: string }
     license: "Apache-2.0",
     distribution: { npx: { package: "zcode-acp-server@0.70.0" } },
     experimental: true,
-    note: "不在官方 Registry 里，实验性",
+    note: "实验性社区桥接。0.70.0 尚不支持 ZCode 团队套餐；本机团队登录可用不代表桥接可用，1113 错误也可能来自个人 / 团队渠道不一致。",
   },
 ];
 
