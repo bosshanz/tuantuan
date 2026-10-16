@@ -9,7 +9,16 @@ const CANCEL_GRACE_MS = Number(process.env.TUANTUAN_CANCEL_GRACE_MS) || 4000;
 const RESUME_TIMEOUT_MS = 45_000;
 const CONFIG_TIMEOUT_MS = 20_000;
 
-import { CUSTOM_HARNESS, type Item, runTurn } from "./custom";
+import {
+  CUSTOM_HARNESS,
+  CUSTOM_HISTORY_MAX_CHARS,
+  commitBoundedTurn,
+  fitTurns,
+  historyChars,
+  historyForRequest,
+  type Item,
+  runTurn,
+} from "./custom";
 import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./harness";
 import { harnessProcessEnv } from "./harness-env";
 import { pluginOverlay } from "./library";
@@ -80,8 +89,8 @@ interface SessionSlot {
   identityPending: boolean;
   managedSkills: SessionView["skills"];
   harnessSkills: SessionView["skills"];
-  /** Whether this ACP session was attached to Tuantuan's room tools. */
-  tuantuanMcp: boolean;
+  /** The effective MCP config (user list + plugins + Tuantuan's own entry) the session was attached with. */
+  mcpSignature: string;
   /** Session-cumulative cost known before any turn: 0 for a fresh session, null when resumed. */
   costBase: number | null;
   /** Model named by the harness in `_meta` (Claude Code's `_claude/model` on usage_update). */
@@ -107,8 +116,6 @@ export class HarnessHost {
 
   /** Slots whose next attach should session/load (to get the harness's history) rather than resume. */
   private wantLoad = new Set<string>();
-  /** In-process BYOK chat history per (room, agent). */
-  private customHistory = new Map<string, Item[]>();
   /** Includes session warm-up: concurrent callers must never replace another turn's callback. */
   private activeTurns = new Set<string>();
 
@@ -342,7 +349,10 @@ export class HarnessHost {
     }
     const hasMcp = () =>
       !!(this.mcp?.baseUrl && this.mcp.provider?.tools({ roomId: room.id, agentId: agent.id }).length);
-    const signature = JSON.stringify([this.cwdFor(room), agent, identity, hasMcp()]);
+    // The user's MCP server rows and linked plugin files are part of the session's effective
+    // config even though neither shows up in the Agent row: a mid-initialization change must
+    // invalidate the opening instead of publishing a stale attachment.
+    const signature = JSON.stringify([this.cwdFor(room), agent, identity, hasMcp(), this.mcpFingerprint(agent)]);
     if (opening?.signature === signature) return opening.pending;
     // A cancelled caller can stop waiting while the shared warm-up finishes. A subsequent turn
     // must join that same initialization instead of racing it for the room's session mapping.
@@ -354,7 +364,13 @@ export class HarnessHost {
         this.opening.get(key)?.generation !== generation ||
         !currentRoom ||
         !currentAgent ||
-        JSON.stringify([this.cwdFor(currentRoom), currentAgent, identity, hasMcp()]) !== signature
+        JSON.stringify([
+          this.cwdFor(currentRoom),
+          currentAgent,
+          identity,
+          hasMcp(),
+          this.mcpFingerprint(currentAgent),
+        ]) !== signature
       )
         throw new ValidationError("会话配置已更改，请重试", 409);
     };
@@ -389,7 +405,14 @@ export class HarnessHost {
     const plugins = pluginOverlay(this.dataDir, agent.id, agent.harness);
     const mat = materializeSkills(this.dataDir, agent.id, agent.harness, cwd, plugins.skills, proc.acp.launch.env);
     const managedSkills = [...mat.skills, ...mat.roomSkills].map((x) => ({ name: x.name, description: x.description }));
-    if (cached && (cached.turn || cached.tuantuanMcp === !!own)) {
+    // The whole effective MCP config the session must be attached to: the user's list, plugin
+    // servers and Tuantuan's own entry. Any change re-attaches through resume/load (or session/new);
+    // an equal signature means the live session already has exactly these servers, so it is reused.
+    const mcpServers = [...this.mcpServers(agent), ...plugins.mcp];
+    if (own) mcpServers.push(own);
+    const mcpSignature = JSON.stringify(mcpServers);
+    // An active turn must not be re-attached underneath; its refresh lands on the next turn.
+    if (cached && (cached.turn || cached.mcpSignature === mcpSignature)) {
       const before = JSON.stringify(cached.view.skills);
       cached.managedSkills = managedSkills;
       cached.view.skills = pickerSkills(managedSkills, cached.harnessSkills);
@@ -423,7 +446,7 @@ export class HarnessHost {
       identityPending: false,
       managedSkills,
       harnessSkills: [],
-      tuantuanMcp: !!own,
+      mcpSignature,
       costBase: null,
       usageModel: null,
     };
@@ -436,8 +459,6 @@ export class HarnessHost {
         throw error;
       }
     };
-    const mcpServers = [...this.mcpServers(agent), ...plugins.mcp];
-    if (own) mcpServers.push(own);
     const preferLoad = this.wantLoad.delete(slotKey);
     const meta = withClaudePlugins(
       withProviderMeta(identityMeta(proc.spec, identity), agent, this.store),
@@ -561,6 +582,12 @@ export class HarnessHost {
       .map((id) => all.find((s) => s.id === id))
       .filter((s) => s !== undefined)
       .map((s) => ({ type: "http" as const, name: s.name, url: s.url, headers: [] }));
+  }
+
+  /** Identity of the MCP config that lives outside the Agent row: bound user servers and plugin
+   * servers. Used in the opening signature so mid-initialization changes cannot publish stale state. */
+  private mcpFingerprint(agent: Agent): string {
+    return JSON.stringify([...this.mcpServers(agent), ...pluginOverlay(this.dataDir, agent.id, agent.harness).mcp]);
   }
 
   /**
@@ -738,7 +765,7 @@ export class HarnessHost {
         identityPending: false,
         managedSkills,
         harnessSkills: [],
-        tuantuanMcp: false,
+        mcpSignature: "",
         costBase: null,
         usageModel: null,
       };
@@ -754,17 +781,38 @@ export class HarnessHost {
     return slot;
   }
 
-  private dmTranscript(room: Room, agent: Agent): Item[] {
-    const done = this.store
-      .recentMessages(room.id, 40)
-      .filter((m) => m.status === "done" && m.content.trim() && m.senderKind !== "system");
-    // The last human message is this turn's prompt.
-    if (done.at(-1)?.senderKind === "human") done.pop();
-    return done.map((m) =>
-      m.senderKind === "agent" && m.senderId === agent.id
-        ? { kind: "assistant" as const, text: m.content, calls: [] }
-        : { kind: "user" as const, text: m.content },
-    );
+  /**
+   * The bounded BYOK context for this room and agent. A missing row is initialized once from
+   * completed conversations only: each human task is paired with this agent's successful reply
+   * from the same run, so failed or cancelled replies never come back as context. A group starts
+   * empty (its turns carry the relay). An explicitly reset conversation persists as `[]`, which
+   * restarts must not revive.
+   */
+  private customTurns(room: Room, agent: Agent): Item[][] {
+    const stored = this.store.getCustomHistory(room.id, agent.id);
+    if (stored) return stored;
+    if (room.kind !== "dm") {
+      this.store.setCustomHistory(room.id, agent.id, []);
+      return [];
+    }
+    const runs = new Map<string, { user?: string; reply?: string }>();
+    for (const m of this.store.recentMessages(room.id, 40)) {
+      if (m.senderKind === "system" || !m.content.trim()) continue;
+      const entry = runs.get(m.runId) ?? {};
+      if (m.senderKind === "human" && m.status === "done") entry.user ??= m.content;
+      if (m.senderKind === "agent" && m.senderId === agent.id && m.status === "done") entry.reply ??= m.content;
+      runs.set(m.runId, entry);
+    }
+    const seed: Item[][] = [];
+    for (const { user, reply } of runs.values())
+      if (user !== undefined && reply !== undefined)
+        seed.push([
+          { kind: "user", text: user },
+          { kind: "assistant", text: reply, calls: [] },
+        ]);
+    const bounded = fitTurns(seed);
+    this.store.setCustomHistory(room.id, agent.id, bounded);
+    return bounded;
   }
 
   private async promptCustom(
@@ -784,18 +832,20 @@ export class HarnessHost {
     const provider = this.mcp?.provider;
     const context = { roomId: room.id, agentId: agent.id };
     const toolContext = provider?.captureContext(context) ?? context;
-    this.ensureCustom(room, agent);
-    const key = `${room.id}|${agent.id}`;
-    let history = this.customHistory.get(key);
-    if (!history) {
-      // After a restart a DM picks up its recent transcript (groups get it through the relay).
-      history = room.kind === "dm" ? this.dmTranscript(room, agent) : [];
-      this.customHistory.set(key, history);
-    }
+    // Slot identity guards the commit: a release below (project reset, member removal, room
+    // deletion) deletes it, so a late completion cannot overwrite the cleared state.
+    const slot = this.ensureCustom(room, agent);
+    const turns = this.customTurns(room, agent);
     const userText = blocks
       .filter((b): b is acp.ContentBlock & { type: "text" } => b.type === "text")
       .map((b) => b.text)
       .join("\n");
+    if (userText.length > CUSTOM_HISTORY_MAX_CHARS)
+      throw new ValidationError(
+        `当前输入 ${userText.length} 字符，超过自定义 API 的上下文预算 ${CUSTOM_HISTORY_MAX_CHARS} 字符；请缩短输入或开启新会话`,
+      );
+    // Old turns leave as whole units; runTurn re-measures every request and may drop more.
+    const history = historyForRequest(turns, userText.length);
     const mat = materializeSkills(
       this.dataDir,
       agent.id,
@@ -819,7 +869,7 @@ export class HarnessHost {
     const tools = [...(provider?.tools(toolContext) ?? []), ...skillTools];
     const skillIndex = mat.skills.map((s) => `- ${s.name}: ${s.description}`).join("\n");
     const system = identity + (skillIndex ? `\n\n可用 Skills（用 load_skill 加载正文）：\n${skillIndex}` : "");
-    return runTurn({
+    const { stopReason, newItems } = await runTurn({
       cfg,
       system,
       history,
@@ -841,6 +891,16 @@ export class HarnessHost {
       onUpdate,
       signal,
     });
+    // A failed, cancelled or reset turn never reaches the commit, so the stored context keeps the
+    // last successful one. A turn that alone exceeds the budget is reported instead of half-saving.
+    signal.throwIfAborted();
+    if (this.slots.get(`${room.id}|${agent.id}`) !== slot) throw new ValidationError("会话已重置，本轮回复未保存", 409);
+    if (historyChars([newItems]) > CUSTOM_HISTORY_MAX_CHARS)
+      throw new ValidationError(
+        `本轮对话 ${historyChars([newItems])} 字符，超过自定义 API 的上下文预算 ${CUSTOM_HISTORY_MAX_CHARS} 字符；回复已保留，但没有写入会话上下文，下一轮将从更早的记录继续`,
+      );
+    this.store.setCustomHistory(room.id, agent.id, commitBoundedTurn(turns, newItems));
+    return { stopReason };
   }
 
   async setConfig(room: Room, agent: Agent, identity: string, configId: string, value: string | boolean) {
@@ -900,7 +960,8 @@ export class HarnessHost {
       throw new ValidationError("这个 Agent 在当前会话中仍有任务正在运行，暂时不能切换会话", 409);
     if (agent.harness === CUSTOM_HARNESS) {
       if (sessionId) throw new ValidationError("自定义 API 没有会话列表");
-      this.customHistory.delete(`${room.id}|${agent.id}`); // 新会话：忘掉之前的对话
+      // 新会话：清空并落盘，重启不能复活旧聊天（空数组与“从未初始化”是两种状态）。
+      this.store.setCustomHistory(room.id, agent.id, []);
       return this.ensureCustom(room, agent).view;
     }
     this.opening.delete(slotKey);
@@ -926,7 +987,14 @@ export class HarnessHost {
     // Invalidate warm-ups before killing their processes; late completions must not reattach.
     for (const key of this.opening.keys()) if (matchesKey(key)) this.opening.delete(key);
     for (const key of this.wantLoad) if (matchesKey(key)) this.wantLoad.delete(key);
-    for (const key of this.customHistory.keys()) if (matchesKey(key)) this.customHistory.delete(key);
+    // Project directory/ownership changes, member removal and room deletion reset the BYOK
+    // conversation: the cleared state is persisted as [] so neither a restart nor the next turn
+    // can seed the old chat back from the message log. Room/agent deletion then cascades in the
+    // database; a plain shutdown only releases processes and keeps successful context.
+    if (agentId === undefined) {
+      const room = this.store.getRoom(roomId);
+      if (room) for (const id of room.agentIds) this.store.setCustomHistory(roomId, id, []);
+    } else this.store.setCustomHistory(roomId, agentId, []);
     for (const [key, slot] of this.slots) if (matches(slot)) this.slots.delete(key);
     for (const [id, pending] of this.asks) if (matches(pending.ask)) this.answer(id, null);
     for (const proc of [...this.procs.values()]) if (matches(proc)) this.dropProc(proc);

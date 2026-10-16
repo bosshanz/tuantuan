@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Message, PermissionAsk, RoomEvent, RoomState, SessionView } from "../web/src/api";
-import { type ChatSnapshot, chatReducer, emptyChat } from "../web/src/chatState";
+import { type ChatSnapshot, chatReducer, emptyChat, historyCursor } from "../web/src/chatState";
 
 const ask = (id: string): PermissionAsk => ({
   id,
@@ -11,6 +11,7 @@ const ask = (id: string): PermissionAsk => ({
 });
 const snapshot = (asks: PermissionAsk[] = []): ChatSnapshot => ({
   messages: [],
+  nextBeforeSeq: null,
   state: { activeRunId: null, queued: 0, tasks: [] },
   sessions: {},
   asks,
@@ -165,5 +166,158 @@ describe("per-Agent task state across snapshots", () => {
     const nextRoom = emptyChat("next");
     expect(chatReducer(nextRoom, stateEvent([task("old", "running")]))).toBe(nextRoom);
     expect(current.state.tasks.map((t) => t.id)).toEqual(["live"]);
+  });
+});
+
+describe("older message pages", () => {
+  const message = (seq: number, extra: Partial<Message> = {}): Message =>
+    ({ id: `m${seq}`, roomId: "r", seq, createdAt: 100, content: `${seq}`, status: "done", ...extra }) as Message;
+  const loaded = () => {
+    let current = chatReducer(emptyChat("r"), { type: "load", roomId: "r", id: 1 });
+    current = chatReducer(current, {
+      type: "snapshot",
+      roomId: "r",
+      id: 1,
+      data: { ...snapshot(), messages: [message(4), message(5)], nextBeforeSeq: 4 },
+    });
+    return current;
+  };
+
+  test("a page merges by id/seq and cannot replace live messages, state, permissions or sessions", () => {
+    let current = chatReducer(loaded(), { type: "history.load", roomId: "r", id: 2, beforeSeq: 4 });
+    current = chatReducer(current, event({ type: "message", message: message(6) }));
+    current = chatReducer(
+      current,
+      event({
+        type: "update",
+        roomId: "r",
+        messageId: "m4",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "newer text" } },
+      }),
+    );
+    current = chatReducer(
+      current,
+      event({ type: "room.state", roomId: "r", state: { activeRunId: "live", queued: 1, tasks: [] } }),
+    );
+    current = chatReducer(current, event({ type: "permission", roomId: "r", ask: ask("live") }));
+    const view = { sessionId: "live" } as SessionView;
+    current = chatReducer(current, event({ type: "session", roomId: "r", agentId: "a", view }));
+    current = chatReducer(current, {
+      type: "history.page",
+      roomId: "r",
+      id: 2,
+      data: { ...snapshot(), messages: [message(3), message(2), message(4), message(2)], nextBeforeSeq: 2 },
+    });
+    expect(current.messages.map((m) => m.seq)).toEqual([2, 3, 4, 5, 6]);
+    expect(current.messages.find((m) => m.seq === 4)?.content).toBe("newer text");
+    expect(current.state.activeRunId).toBe("live");
+    expect(current.asks.map((a) => a.id)).toEqual(["live"]);
+    expect(current.sessions.a).toBe(view);
+    expect(current.history.nextBeforeSeq).toBe(2);
+  });
+
+  test("a reconnect snapshot arriving after a page retains the older window and cursor, including exhaustion", () => {
+    let current = chatReducer(loaded(), { type: "load", roomId: "r", id: 2 });
+    current = chatReducer(current, { type: "history.load", roomId: "r", id: 3, beforeSeq: 4 });
+    current = chatReducer(current, {
+      type: "history.page",
+      roomId: "r",
+      id: 3,
+      data: { messages: [message(1), message(2), message(3)], nextBeforeSeq: null },
+    });
+    current = chatReducer(current, {
+      type: "snapshot",
+      roomId: "r",
+      id: 2,
+      data: { ...snapshot(), messages: [message(4), message(5), message(6)], nextBeforeSeq: 4 },
+    });
+    expect(current.messages.map((m) => m.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(current.history.nextBeforeSeq).toBeNull();
+  });
+
+  test("reconnect before a pending page preserves its request; duplicate/late requests and other rooms are ignored", () => {
+    let current = chatReducer(loaded(), { type: "history.load", roomId: "r", id: 2, beforeSeq: 4 });
+    expect(chatReducer(current, { type: "history.load", roomId: "r", id: 3, beforeSeq: 4 })).toBe(current);
+    current = chatReducer(current, { type: "load", roomId: "r", id: 3 });
+    current = chatReducer(current, { type: "snapshot", roomId: "r", id: 3, data: { ...snapshot(), nextBeforeSeq: 5 } });
+    expect(current.history.loading?.id).toBe(2);
+    const page = {
+      type: "history.page" as const,
+      roomId: "r",
+      id: 2,
+      data: { messages: [message(3)], nextBeforeSeq: 3 },
+    };
+    const nextRoom = emptyChat("next");
+    expect(chatReducer(nextRoom, page)).toBe(nextRoom);
+    current = chatReducer(current, page);
+    expect(current.messages.map((m) => m.seq)).toEqual([3, 4, 5]);
+    expect(chatReducer(current, page)).toBe(current);
+  });
+
+  test("a failed page leaves messages and cursor intact and can be retried", () => {
+    const before = loaded();
+    let current = chatReducer(before, { type: "history.load", roomId: "r", id: 2, beforeSeq: 4 });
+    current = chatReducer(current, { type: "history.failed", roomId: "r", id: 2, error: "temporary" });
+    expect(current.messages).toBe(before.messages);
+    expect(current.history).toMatchObject({ nextBeforeSeq: 4, loading: null, error: "temporary" });
+    current = chatReducer(current, { type: "history.load", roomId: "r", id: 3, beforeSeq: 4 });
+    expect(current.history).toMatchObject({ loading: { id: 3, beforeSeq: 4 }, error: null });
+    expect(chatReducer(current, { type: "history.failed", roomId: "r", id: 2, error: "old" })).toBe(current);
+  });
+
+  test("a reconnect after 250 unseen records fills the skipped window before older history", () => {
+    const range = (from: number, to: number) =>
+      Array.from({ length: to - from + 1 }, (_, index) => message(from + index));
+    let current = chatReducer(emptyChat("r"), { type: "load", roomId: "r", id: 1 });
+    current = chatReducer(current, {
+      type: "snapshot",
+      roomId: "r",
+      id: 1,
+      data: { ...snapshot(), messages: range(52, 451), nextBeforeSeq: 52 },
+    });
+    current = chatReducer(current, { type: "load", roomId: "r", id: 2 });
+    current = chatReducer(current, {
+      type: "snapshot",
+      roomId: "r",
+      id: 2,
+      data: { ...snapshot(), messages: range(502, 701), nextBeforeSeq: 502 },
+    });
+    expect(historyCursor(current.messages, current.history.nextBeforeSeq)).toBe(502);
+    current = chatReducer(current, { type: "history.load", roomId: "r", id: 3, beforeSeq: 502 });
+    current = chatReducer(current, {
+      type: "history.page",
+      roomId: "r",
+      id: 3,
+      data: { messages: range(302, 501), nextBeforeSeq: 302 },
+    });
+    expect(current.messages.map((m) => m.seq)).toEqual(range(52, 701).map((m) => m.seq));
+    expect(historyCursor(current.messages, current.history.nextBeforeSeq)).toBe(52);
+    current = chatReducer(current, { type: "history.load", roomId: "r", id: 4, beforeSeq: 52 });
+    current = chatReducer(current, {
+      type: "history.page",
+      roomId: "r",
+      id: 4,
+      data: { messages: range(1, 51), nextBeforeSeq: null },
+    });
+    expect(current.messages.map((m) => m.seq)).toEqual(range(1, 701).map((m) => m.seq));
+    expect(historyCursor(current.messages, current.history.nextBeforeSeq)).toBeNull();
+    // Exhaustion of older history must not hide a later reconnect gap.
+    current = chatReducer(current, { type: "load", roomId: "r", id: 5 });
+    current = chatReducer(current, {
+      type: "snapshot",
+      roomId: "r",
+      id: 5,
+      data: { ...snapshot(), messages: range(752, 951), nextBeforeSeq: 752 },
+    });
+    expect(historyCursor(current.messages, current.history.nextBeforeSeq)).toBe(752);
+    current = chatReducer(current, { type: "history.load", roomId: "r", id: 6, beforeSeq: 752 });
+    current = chatReducer(current, {
+      type: "history.page",
+      roomId: "r",
+      id: 6,
+      data: { messages: range(552, 751), nextBeforeSeq: 552 },
+    });
+    expect(current.messages.map((m) => m.seq)).toEqual(range(1, 951).map((m) => m.seq));
+    expect(historyCursor(current.messages, current.history.nextBeforeSeq)).toBeNull();
   });
 });

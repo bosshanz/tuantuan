@@ -61,6 +61,7 @@
 | Harness 进程、挂起的权限请求、终端输出 | `HarnessHost` 内存 | 进程退出即丢失；重启后用 `acp_sessions` 里的 sessionId resume / load |
 | 待执行 / 活动任务、交接父子关系、每条人类消息的负责人和交接预算 | `Orchestrator` 内存 | taskId 标识单个任务，runId 关联原始人类消息；协调 run 冻结 coordinatorId / rootTaskId，parentTaskId 表示取消依赖，reviewOf 关联待收集的分工批次；房间下每个 Agent 一个 FIFO。整轮无剩余任务后清理；服务重启不重放队列，无数据库迁移 |
 | ACP session 自身的对话历史 | Harness；当前 slot 暂存 load 回放 | `/replay` 按用户消息文本去掉本房间已有轮次，前端只读显示其余回放 |
+| BYOK 对话上下文 | SQLite（`custom_history`，按房间 / Agent） | 唯一上下文来源；按完整成功轮持久化工具调用与结果，最多 20 轮，按序列化字符预算淘汰旧轮；重启不改变上下文 |
 | 团团配置的 API / 管理 Key | SQLite（`providers.api_key` / `mgmt_key`、`agents.custom`、`settings.harnessEnv`） | 当前明文存储；服务商、BYOK 与 Harness env_var 专用公开接口返回掩码，不是磁盘加密。普通 `agents.env` 是可读写配置，不具备这些专用接口的打码契约 |
 | 原生登录凭据、模型配置 | Harness | 沿用用户 Harness 的配置与登录态；系统钥匙串集成仍未实现 |
 | 前端消息、运行状态、会话视图、权限与终端投影 | `ChatView` 的 `chatReducer` | roomId 隔离；App 按 room.id 重挂载；非权威副本，最新快照与请求期间实时事件合并，旧响应忽略 |
@@ -89,6 +90,11 @@
 | 15 | 用量的模型、缓存读写、思考 token、费用及币种 |
 | 16 | `agents.use_profile`：是否附带用户个人资料 |
 | 17 | `messages.quote`：群聊引用的服务端有界快照（原消息 id、作者、角色及摘录），旧消息为空 |
+| 18 | `custom_history`：按房间 / Agent 保存有界 BYOK 上下文，房间或 Agent 删除时外键级联清理 |
+
+BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计算完整 JSON body 的序列化字符数，上限 65,536；包含系统提示、工具定义、当前任务、工具链及 JSON 包装。超限先按完整旧轮淘汰，不截断当前任务或系统提示，不拆散工具调用与结果；当前轮自身超限则在发送前明确报错。完成轮按相同字符预算和最多 20 轮持久化；最终回复使单轮超限时保留可见回复、报告错误并保留上一成功上下文。这是字符预算，不是字节数或模型 token 窗口。
+
+`custom_history` 缺行表示尚未初始化：仅 DM 从最近 40 条转写中按同一 runId 配对人类任务与该 Agent 的成功回复，经预算裁剪后恢复一次；群聊从空开始，历史由转述携带。`[]` 是明确清空的状态，新会话、成员移除、项目目录 / 归属重置后重启也不复活旧聊天。普通停机保留成功上下文；取消、错误或 slot 已释放的迟到回复不提交半轮。
 
 头像动画只用 CSS transform：≥32px 完整动画、更小只眨眼；`prefers-reduced-motion` 全部关闭；离屏（IntersectionObserver）和标签页隐藏（`html[data-tab-hidden]`）时暂停。
 
@@ -120,6 +126,8 @@ Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建�
 
 群聊引用由 `POST messages` 的 `replyToId` 指定；`Store.insertMessage` 在写入事务中校验同房间及完成态，再生成最多 400 字符的快照。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
 
+消息分页沿用 `messages.seq` 和 `Store.recentMessages(roomId, limit, beforeSeq)`；`GET /api/rooms/:id/messages` 接受正整数 `limit`（默认 100，最多 500）与可选的排他游标 `beforeSeq`，返回按序排列的消息和 `nextBeforeSeq`（`null` 表示没有更早记录）。前端初始页为 200 条，历史页只合并消息与分页进度，不应用响应里的任务、会话或权限快照。消息按 id 去重、按 seq 排序，历史请求与最新快照分别标识和隔离；分页提交前记录当前可见消息的偏移，布局更新后恢复阅读位置。
+
 1. 人类消息写库后立即路由成独立的根任务：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 群主负责统筹。只有最后一种 run 保存 coordinatorId 和 rootTaskId，其余是直接对话。更换群主只影响新 run。同一房间不同 Agent 并行，同一 Agent 按入队顺序执行；新消息不取消旧任务，不同房间互不阻塞。
 2. `RoomState.tasks` 提供 taskId、runId、parentTaskId、agentId、messageId、请求文本与 queued / running / cancelling / waiting 状态；协调任务另带 coordination（lead / work / review）。已完成但仍有活动后代的任务显示为 waiting，保留停止剩余工作的入口。`activeRunId` 仅保留为兼容的忙碌标志，`queued` 计数任务；界面不从单个 runId 推断全部运行状态。`idle(roomId)` 等到队列、衍生交接和自动跟进全部结束。
 3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session。群聊转述只取原始请求之前、该 Agent 上次发言之后的记录；交接额外带上同一人类请求中已完成的回复。`<tuantuan-task>` 明确原始消息与引用，避免新消息或后续发言替换排队任务。每轮另附 `<tuantuan-coordination>` 指定 leader / member / direct 职责及 initial / review 阶段，不把群主职责写死在可能缓存的身份文档中。单 Agent 的新请求直接收到用户消息（含图片）；群聊缩为单人时，已有协调 run 保留职责与结果上下文直至收尾。身份文档按 Harness 传递（见 README）；不支持的 Harness 附加在会话第一条 prompt 前的 `<tuantuan-identity>` 中。
@@ -136,7 +144,7 @@ review 可继续 handoff，重复分给已结束的成员仍消耗共享的 5 �
 
 `read_result(messageId, offset)` 以 6000 字符分页读取本轮已结束的 Agent 消息，返回 nextOffset（null 表示结束）；服务端校验成员身份、活动任务归属、roomId / runId、消息类型和偏移。`list_members` 补充最多 600 字符身份说明。群聊工具列表不随 leader / member 角色变化，执行权限在 call 中校验；缩为单人后仍在运行的协调轮保留结果读取能力。
 
-Host slot 记录是否已接入团团 MCP，并将可用性纳入初始化签名；单聊加成员变群聊时，下一次空闲 attach 通过已有 resume / load 更新 mcpServers，按 Harness 能力保留会话历史。活动期间的界面查询复用现有 slot 或预热，不更换进程、回调或权限请求，下一任务再刷新。MCP 可用性相同不重复重连，单纯换群主不会刷新工具接入。
+Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio MCP、团团工具入口）；增删绑定、删除服务器、插件配置变化或单聊加成员变群聊时，下一次空闲 attach 通过已有 resume / load 更新 mcpServers，按 Harness 能力保留会话历史，不支持恢复时新建会话。活动期间的界面查询复用现有 slot 或预热，不更换进程、回调或权限请求，下一任务再刷新。配置相同不重复重连，单纯换群主不会刷新工具接入。初始化签名同时包含用户服务器记录与插件配置指纹，发布前再次核对；初始化期间的配置变更使旧结果失效，不能覆盖新 slot。
 
 交接与结果读取请求的归属在 MCP HTTP 入口读取正文之前绑定到 taskId，整个 batch 使用同一上下文；BYOK 工具回调在 prompt 开始时捕获。真正执行时核对仍是同一个未取消任务，避免旧请求延迟解析后归到下一轮。MCP endpoint 仍按房间 / Agent 注入并供 session 复用；完全在旧 prompt 结束后才新发起、且不携带轮次标识的外部调用无法区分来源，依赖 Harness 遵守 prompt 生命周期。
 

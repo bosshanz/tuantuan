@@ -36,7 +36,7 @@ import {
 } from "./api";
 import { agentActivity, messageExpression } from "./avatarState";
 import { SessionChips } from "./ConfigChips";
-import { type ChatSnapshot, chatReducer, emptyChat } from "./chatState";
+import { type ChatSnapshot, chatReducer, emptyChat, historyCursor, type MessagePage } from "./chatState";
 import type { Opt } from "./config";
 import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
 import { MissingKey } from "./HarnessAuth";
@@ -49,6 +49,7 @@ import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSu
 import { useChatScroll } from "./useChatScroll";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
+const HISTORY_PAGE_SIZE = 200;
 const ProjectTerminal = lazy(() => import("./ProjectTerminal"));
 
 function terminalWasOpen(projectId: string | null) {
@@ -86,7 +87,14 @@ export function ChatView(props: {
   onDeleted: () => void;
 }) {
   const { room, agents } = props;
-  const [{ messages, state, sessions, asks, terminals }, dispatch] = useReducer(chatReducer, room.id, emptyChat);
+  const [{ messages, state, sessions, asks, terminals, history }, dispatch] = useReducer(
+    chatReducer,
+    room.id,
+    emptyChat,
+  );
+  const historyRequest = useRef(0);
+  const historyPending = useRef(false);
+  const nextBeforeSeq = history.initialized ? historyCursor(messages, history.nextBeforeSeq) : null;
   const [answers, setAnswers] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingAnswers = useRef(new Set<string>());
   const [cancellations, setCancellations] = useState<Record<string, { pending: boolean; error: string | null }>>({});
@@ -111,7 +119,7 @@ export function ChatView(props: {
   const terminalSlot = useRef<HTMLDivElement>(null);
   const terminalButton = useRef<HTMLButtonElement>(null);
   const taskDisclosure = useRef<HTMLDivElement>(null);
-  const { listRef, following, followLatest, onScroll, onWheel, onTouchMove } = useChatScroll();
+  const { listRef, following, followLatest, preserveReadingPosition, onScroll, onWheel, onTouchMove } = useChatScroll();
   const showTerminal = useCallback(
     (open: boolean) => {
       setTerminalOpen(open);
@@ -161,7 +169,7 @@ export function ChatView(props: {
       const id = ++requestId;
       dispatch({ type: "load", roomId: room.id, id });
       try {
-        const data = await api<ChatSnapshot>("GET", `/api/rooms/${room.id}/messages?limit=200`);
+        const data = await api<ChatSnapshot>("GET", `/api/rooms/${room.id}/messages?limit=${HISTORY_PAGE_SIZE}`);
         if (!alive || id !== requestId) return;
         dispatch({ type: "snapshot", roomId: room.id, id, data });
         setLoadError(null);
@@ -189,9 +197,33 @@ export function ChatView(props: {
     });
     return () => {
       alive = false;
+      historyRequest.current++;
       off();
     };
   }, [room.id, props.subscribeEvents]);
+
+  const loadHistory = async () => {
+    const beforeSeq = nextBeforeSeq;
+    if (beforeSeq === null || history.loading || historyPending.current) return;
+    historyPending.current = true;
+    const id = ++historyRequest.current;
+    dispatch({ type: "history.load", roomId: room.id, id, beforeSeq });
+    try {
+      const data = await api<MessagePage>(
+        "GET",
+        `/api/rooms/${room.id}/messages?limit=${HISTORY_PAGE_SIZE}&beforeSeq=${beforeSeq}`,
+      );
+      if (id !== historyRequest.current) return;
+      preserveReadingPosition();
+      dispatch({ type: "history.page", roomId: room.id, id, data });
+    } catch (e) {
+      if (id !== historyRequest.current) return;
+      preserveReadingPosition();
+      dispatch({ type: "history.failed", roomId: room.id, id, error: (e as Error).message });
+    } finally {
+      if (id === historyRequest.current) historyPending.current = false;
+    }
+  };
 
   // Warm up every member's session so the model picker and slash commands are there before the first message.
   const warming = useRef(new Set<string>());
@@ -382,6 +414,22 @@ export function ChatView(props: {
 
           <div className="messages-wrap">
             <div className="messages" ref={listRef} onWheel={onWheel} onTouchMove={onTouchMove} onScroll={onScroll}>
+              {nextBeforeSeq !== null && (
+                <div className="chat-history">
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    aria-disabled={!!history.loading}
+                    onClick={() => void loadHistory()}
+                  >
+                    <History size={14} />
+                    {history.loading ? "加载中…" : "加载更早消息"}
+                  </button>
+                  <span className="chat-history-status" role={history.error ? "alert" : "status"}>
+                    {history.error ? `加载失败：${history.error}。请重试。` : ""}
+                  </span>
+                </div>
+              )}
               {messages.length === 0 && replay.length === 0 && !loadError && (
                 <div className="empty">
                   <RoomIcon room={room} agents={agents} />
@@ -416,7 +464,7 @@ export function ChatView(props: {
               )}
               {groups.map((g) =>
                 g.kind === "system" ? (
-                  <div key={g.messages[0]?.id} className="system-line" role="note">
+                  <div key={g.messages[0]?.id} className="system-line" role="note" data-message-id={g.messages[0]?.id}>
                     <span>{g.messages[0]?.content}</span>
                   </div>
                 ) : (

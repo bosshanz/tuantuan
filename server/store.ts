@@ -5,7 +5,7 @@ import { type MessageQuote, messageQuote } from "../shared/messageQuote";
 import { messagePreview, type RoomPreview } from "../shared/roomPreview";
 import { emptyTimeline, type Timeline } from "../shared/timeline";
 import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
-import { type CustomFormat, type CustomSecret, maskKey } from "./custom";
+import { type CustomFormat, type CustomSecret, type Item, maskKey } from "./custom";
 import type { ProviderSecret } from "./providers";
 
 /** SQLite is the source of truth for agents, rooms, messages and ACP session bindings. */
@@ -200,6 +200,15 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE agents ADD COLUMN use_profile INTEGER NOT NULL DEFAULT 1;`,
   // Group replies keep a bounded server-generated snapshot of the referenced message.
   `ALTER TABLE messages ADD COLUMN quote TEXT;`,
+  // BYOK conversations keep their bounded context (whole turns, see server/custom.ts) in SQLite so
+  // restarts continue the same conversation instead of re-deriving it from the message log.
+  `CREATE TABLE custom_history (
+     room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+     turns TEXT NOT NULL,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (room_id, agent_id)
+   );`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -909,6 +918,20 @@ export class Store {
       output: Number(r.output),
       total: Number(r.total),
     }));
+  }
+
+  // ---- BYOK conversation context (bounded, whole turns; null = never initialized, [] = cleared) ----
+  getCustomHistory(roomId: string, agentId: string): Item[][] | null {
+    const r = this.db
+      .query("SELECT turns FROM custom_history WHERE room_id = ? AND agent_id = ?")
+      .get(roomId, agentId) as Row | null;
+    return r ? (JSON.parse(r.turns as string) as Item[][]) : null;
+  }
+
+  setCustomHistory(roomId: string, agentId: string, turns: Item[][]) {
+    this.db
+      .query("INSERT OR REPLACE INTO custom_history VALUES (?,?,?,?)")
+      .run(roomId, agentId, JSON.stringify(turns), Date.now());
   }
 
   // ---- ACP sessions: one per (room, agent) ----

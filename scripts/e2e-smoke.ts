@@ -8,6 +8,7 @@ import { chromium, type Page } from "playwright-core";
 import { serve } from "../server/app";
 import { setSkillLinked } from "../server/skills";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
+import { chatHistorySmoke } from "./e2e-chat-history";
 import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { registryAuthSmoke } from "./e2e-registry-auth";
 import { registryUsageSmoke } from "./e2e-registry-usage";
@@ -510,6 +511,14 @@ try {
   await registryUsageSmoke(browser, `http://localhost:${server.port}`, shotsDir);
   await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   await chatScrollSmoke(browser, `http://localhost:${server.port}`, shotsDir);
+  await chatHistorySmoke(
+    browser,
+    `http://localhost:${server.port}`,
+    app.store,
+    (event) =>
+      server.publish(`room:${event.type === "message" ? event.message.roomId : event.roomId}`, JSON.stringify(event)),
+    shotsDir,
+  );
   await richMediaSmoke(
     browser,
     `http://localhost:${server.port}`,

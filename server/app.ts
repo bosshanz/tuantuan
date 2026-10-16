@@ -1429,9 +1429,27 @@ export function createApp(deps: AppDeps) {
         }
       }
       if (room && sub === "messages" && method === "GET") {
-        const limit = Math.min(Number(url.searchParams.get("limit") ?? 100) || 100, 500);
+        const limit = Math.min(
+          z.coerce
+            .number()
+            .int()
+            .positive()
+            .safe()
+            .parse(url.searchParams.get("limit") ?? 100),
+          500,
+        );
+        const beforeSeq = z
+          .string()
+          .regex(/^[1-9]\d*$/)
+          .transform(Number)
+          .pipe(z.number().int().positive().safe())
+          .optional()
+          .parse(url.searchParams.get("beforeSeq") ?? undefined);
+        const page = store.recentMessages(room.id, limit + 1, beforeSeq);
+        const messages = page.slice(-limit);
         return json({
-          messages: store.recentMessages(room.id, limit),
+          messages,
+          nextBeforeSeq: page.length > limit ? (messages[0]?.seq ?? null) : null,
           state: orchestrator.state(room.id),
           sessions: Object.fromEntries(
             room.agentIds.map((a) => [a, host.view(room.id, a)]).filter((e) => e[1] !== null),

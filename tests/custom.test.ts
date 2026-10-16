@@ -130,11 +130,10 @@ describe("BYOK custom harness", () => {
     test(`${s.f}: streams text`, async () => {
       const cfg: CustomSecret = { format: s.f, baseUrl: s.url, model: "m", apiKey: "sk-testkeyXXXX" };
       const chunks: string[] = [];
-      const history: Parameters<typeof runTurn>[0]["history"] = [];
       const r = await runTurn({
         cfg,
         system: "you are brief",
-        history,
+        history: [],
         userText: "ping",
         tools: [],
         callTool: async () => "",
@@ -145,17 +144,16 @@ describe("BYOK custom harness", () => {
       });
       expect(r.stopReason).toBe("end_turn");
       expect(chunks.join("")).toBe("pong");
-      expect(history).toHaveLength(2);
+      expect(r.newItems).toHaveLength(2);
     });
 
     test(`${s.f}: tool call handoff then finishes`, async () => {
       const cfg: CustomSecret = { format: s.f, baseUrl: s.url, model: "m", apiKey: "sk-test" };
       const toolsCalled: string[] = [];
-      const history: Parameters<typeof runTurn>[0]["history"] = [];
       const r = await runTurn({
         cfg,
         system: "",
-        history,
+        history: [],
         userText: "请 handoff 给 Alice",
         tools,
         callTool: async (name, args) => {
@@ -167,6 +165,7 @@ describe("BYOK custom harness", () => {
       });
       expect(toolsCalled).toEqual(['handoff:{"agent":"Alice","task":"写文档"}']);
       expect(r.stopReason).toBe("end_turn");
+      expect(r.newItems.at(-1)).toMatchObject({ kind: "assistant" });
     });
 
     test(`${s.f}: testConnection`, async () => {

@@ -8,8 +8,12 @@ export function upsertMessage(ms: Message[], m: Message): Message[] {
     copy[i] = newer(ms[i] as Message, m);
     return copy;
   }
-  const at = ms.findIndex((x) => x.createdAt > m.createdAt);
+  const at = ms.findIndex((x) => messageOrder(x, m) > 0);
   return at < 0 ? [...ms, m] : [...ms.slice(0, at), m, ...ms.slice(at)];
+}
+
+function messageOrder(a: Message, b: Message): number {
+  return Number.isSafeInteger(a.seq) && Number.isSafeInteger(b.seq) ? a.seq - b.seq : a.createdAt - b.createdAt;
 }
 
 /** Of two copies of one message, prefer the finished one, then the one with more streamed text. */
@@ -21,7 +25,11 @@ function newer(a: Message, b: Message): Message {
 
 /** Merge a fetched snapshot with what live events already delivered for this room. */
 export function mergeMessages(snapshot: Message[], live: Message[], roomId: string): Message[] {
-  let out = snapshot;
-  for (const m of live) if (m.roomId === roomId) out = upsertMessage(out, m);
-  return out;
+  const byId = new Map<string, Message>();
+  for (const m of [...snapshot, ...live]) {
+    if (m.roomId !== roomId) continue;
+    const previous = byId.get(m.id);
+    byId.set(m.id, previous ? newer(previous, m) : m);
+  }
+  return [...byId.values()].sort(messageOrder);
 }

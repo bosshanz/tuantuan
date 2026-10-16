@@ -50,26 +50,98 @@ interface Turn {
 const MAX_TOOL_ROUNDS = 5;
 
 /**
- * One reply turn: stream, run any tool calls, feed results back, repeat (bounded). Appends the
- * new items to `history` so the next turn continues the conversation.
+ * Bounded BYOK context. History is kept as whole completed turns (one `runTurn` each, tool calls
+ * and results paired inside) and capped by turn count and serialized size — a character budget,
+ * not a claim about any model's token window. The system prompt and the current user task are
+ * never trimmed; only complete old turns are dropped.
+ */
+export const CUSTOM_HISTORY_MAX_TURNS = 20;
+export const CUSTOM_HISTORY_MAX_CHARS = 64 * 1024;
+
+export function turnChars(items: Item[]): number {
+  return JSON.stringify(items).length;
+}
+
+export function historyChars(turns: Item[][]): number {
+  return turns.reduce((n, t) => n + turnChars(t) + 1, 0);
+}
+
+/** Old turns kept for this turn, dropping whole oldest ones so old + incoming fits (a first pass;
+ * every request is re-measured precisely inside runTurn before it is sent). */
+export function historyForRequest(turns: Item[][], incomingChars: number): Item[][] {
+  const kept = turns.slice();
+  while (
+    kept.length > 0 &&
+    (kept.length >= CUSTOM_HISTORY_MAX_TURNS || historyChars(kept) + incomingChars > CUSTOM_HISTORY_MAX_CHARS)
+  )
+    kept.shift();
+  return kept;
+}
+
+/** Drop whole oldest turns until within budget. Recovery may end up with nothing to keep; a
+ * committed turn is always within budget itself, so committing always keeps the newest. */
+export function fitTurns(turns: Item[][]): Item[][] {
+  const out = turns.slice();
+  while (out.length > 0 && (out.length > CUSTOM_HISTORY_MAX_TURNS || historyChars(out) > CUSTOM_HISTORY_MAX_CHARS))
+    out.shift();
+  return out;
+}
+
+/** Append one complete turn, then drop whole oldest turns until back within budget. */
+export function commitBoundedTurn(turns: Item[][], newItems: Item[]): Item[][] {
+  return fitTurns([...turns, newItems]);
+}
+
+/**
+ * One reply turn: stream, run any tool calls, feed results back, repeat (bounded). `history` is
+ * read-only whole old turns; the items this turn appended are returned for the caller to persist
+ * (or drop when the turn failed, was cancelled, or exceeds the context budget).
+ *
+ * Before every upstream request the exact serialized body — system, tools, old history and the
+ * current turn's tool chain — is measured against CUSTOM_HISTORY_MAX_CHARS; whole oldest old
+ * turns are dropped to fit, and a current turn that alone exceeds the budget is rejected before
+ * anything is sent. Nothing is ever truncated mid-item, so tool calls and results stay paired.
  */
 export async function runTurn(opts: {
   cfg: CustomSecret;
   system: string;
-  history: Item[];
+  history: Item[][];
   userText: string;
   tools: ToolDef[];
   callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
   onUpdate: (u: acp.SessionUpdate) => void;
   signal: AbortSignal;
-}): Promise<{ stopReason: acp.StopReason }> {
-  const items: Item[] = [...opts.history, { kind: "user", text: opts.userText }];
+}): Promise<{ stopReason: acp.StopReason; newItems: Item[] }> {
+  const oldTurnLengths = opts.history.map((t) => t.length);
+  let oldCount = opts.history.reduce((n, t) => n + t.length, 0);
+  const items: Item[] = [...opts.history.flat(), { kind: "user", text: opts.userText }];
+  const dropOldestTurn = (): boolean => {
+    const len = oldTurnLengths.shift();
+    if (len === undefined) return false;
+    items.splice(0, len);
+    oldCount -= len;
+    return true;
+  };
   for (let round = 0; ; round++) {
-    const turn = await stream(opts.cfg, opts.system, items, round < MAX_TOOL_ROUNDS ? opts.tools : [], opts);
+    const roundTools = round < MAX_TOOL_ROUNDS ? opts.tools : [];
+    for (;;) {
+      const size = JSON.stringify(request(opts.cfg, opts.system, items, roundTools).body).length;
+      if (size <= CUSTOM_HISTORY_MAX_CHARS) break;
+      if (dropOldestTurn()) continue;
+      throw new Error(
+        `本轮请求序列化后 ${size} 字符，超过自定义 API 的上下文预算 ${CUSTOM_HISTORY_MAX_CHARS} 字符；请缩短输入或开启新会话`,
+      );
+    }
+    const turn = await stream(opts.cfg, opts.system, items, roundTools, opts);
+    // The final text often sits in the same buffered chunk as [DONE]: an abort raised by the
+    // last update callback must still cancel the turn instead of committing it.
+    opts.signal.throwIfAborted();
     items.push({ kind: "assistant", text: turn.text, calls: turn.calls });
     if (turn.calls.length === 0) {
-      opts.history.splice(0, opts.history.length, ...items);
-      return { stopReason: /length|max_tokens|max_output/.test(turn.stop) ? "max_tokens" : "end_turn" };
+      return {
+        stopReason: /length|max_tokens|max_output/.test(turn.stop) ? "max_tokens" : "end_turn",
+        newItems: items.slice(oldCount),
+      };
     }
     for (const c of turn.calls) {
       opts.onUpdate({
@@ -96,6 +168,7 @@ export async function runTurn(opts: {
       });
       items.push({ kind: "tool", id: c.id, name: c.name, output });
     }
+    opts.signal.throwIfAborted();
   }
 }
 
