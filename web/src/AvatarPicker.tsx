@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AVATAR_COLORS, type AvatarShape, SELECTABLE_AVATAR_SHAPES, SHAPE_LABEL } from "../../server/avatars";
 import { EXPRESSIONS, type Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
+import { useI18n } from "./i18n";
 import { usePresence } from "./motion";
 
 /** Radio-group keyboard model: arrows move within the group, Tab leaves it. */
@@ -23,6 +24,7 @@ export function AvatarPicker(props: {
   onChange: (shape: AvatarShape, color: string) => void;
   onReset: () => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const pop = usePresence(open, 140);
   // Hovering the preview cycles through the expressions so the choice is seen alive.
@@ -66,8 +68,8 @@ export function AvatarPicker(props: {
         className="avatar-btn"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label="编辑头像"
-        title="编辑头像"
+        aria-label={t("编辑头像")}
+        title={t("编辑头像")}
         onClick={() => setOpen((v) => !v)}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => {
@@ -86,14 +88,14 @@ export function AvatarPicker(props: {
         />
       </button>
       {pop.mounted && (
-        <div className="avatar-pop" data-state={pop.state} role="dialog" aria-label="编辑头像">
+        <div className="avatar-pop" data-state={pop.state} role="dialog" aria-label={t("编辑头像")}>
           <div className="avatar-pop-head">
-            <h4>头像</h4>
+            <h4>{t("头像")}</h4>
             <button type="button" className="btn ghost sm" onClick={props.onReset}>
-              重置
+              {t("重置")}
             </button>
           </div>
-          <div className="shape-grid" role="radiogroup" aria-label="形状" onKeyDown={(e) => arrowNav(e, 5)}>
+          <div className="shape-grid" role="radiogroup" aria-label={t("形状")} onKeyDown={(e) => arrowNav(e, 5)}>
             {SELECTABLE_AVATAR_SHAPES.map((s) => (
               // biome-ignore lint/a11y/useSemanticElements: visual swatch radios; native radio inputs cannot render the shape
               <button
@@ -101,7 +103,7 @@ export function AvatarPicker(props: {
                 type="button"
                 role="radio"
                 aria-checked={props.shape === s}
-                aria-label={SHAPE_LABEL[s]}
+                aria-label={t(SHAPE_LABEL[s])}
                 tabIndex={focusShape === s ? 0 : -1}
                 className="shape-opt"
                 onClick={() => props.onChange(s, props.color)}
@@ -119,7 +121,7 @@ export function AvatarPicker(props: {
               </button>
             ))}
           </div>
-          <div className="color-grid" role="radiogroup" aria-label="颜色" onKeyDown={(e) => arrowNav(e, 7)}>
+          <div className="color-grid" role="radiogroup" aria-label={t("颜色")} onKeyDown={(e) => arrowNav(e, 7)}>
             {AVATAR_COLORS.map((c) => (
               // biome-ignore lint/a11y/useSemanticElements: visual swatch radios; native radio inputs cannot render the colour
               <button
@@ -127,7 +129,7 @@ export function AvatarPicker(props: {
                 type="button"
                 role="radio"
                 aria-checked={props.color.toLowerCase() === c}
-                aria-label={`颜色 ${c}`}
+                aria-label={t("颜色 {color}", { color: c })}
                 tabIndex={
                   props.color.toLowerCase() === c ||
                   (!AVATAR_COLORS.some((x) => x === props.color.toLowerCase()) && c === AVATAR_COLORS[0])

@@ -1,0 +1,1225 @@
+import type { MessageCatalog } from "./types";
+
+export const chatMessages = {
+  返回会话列表: {
+    "zh-TW": "返回對話清單",
+    en: "Back to conversations",
+    ja: "会話一覧に戻る",
+  },
+  收起项目终端: {
+    "zh-TW": "收起專案終端機",
+    en: "Hide project terminal",
+    ja: "プロジェクトのターミナルを閉じる",
+  },
+  打开项目终端: {
+    "zh-TW": "開啟專案終端機",
+    en: "Open project terminal",
+    ja: "プロジェクトのターミナルを開く",
+  },
+  "终端（Ctrl+`）": {
+    "zh-TW": "終端機（Ctrl+`）",
+    en: "Terminal (Ctrl+`)",
+    ja: "ターミナル（Ctrl+`）",
+  },
+  收起详情面板: {
+    "zh-TW": "收起詳細資料面板",
+    en: "Hide details panel",
+    ja: "詳細パネルを閉じる",
+  },
+  展开详情面板: {
+    "zh-TW": "展開詳細資料面板",
+    en: "Show details panel",
+    ja: "詳細パネルを開く",
+  },
+  详情面板: {
+    "zh-TW": "詳細資料面板",
+    en: "Details panel",
+    ja: "詳細パネル",
+  },
+  "消息加载失败：{reason}": {
+    "zh-TW": "訊息載入失敗：{reason}",
+    en: "Failed to load messages: {reason}",
+    ja: "メッセージの読み込みに失敗しました：{reason}",
+  },
+  "加载中…": {
+    "zh-TW": "載入中…",
+    en: "Loading…",
+    ja: "読み込み中…",
+  },
+  加载更早消息: {
+    "zh-TW": "載入更早的訊息",
+    en: "Load earlier messages",
+    ja: "以前のメッセージを読み込む",
+  },
+  "加载失败：{reason}。请重试。": {
+    "zh-TW": "載入失敗：{reason}。請重試。",
+    en: "Loading failed: {reason}. Please try again.",
+    ja: "読み込みに失敗しました：{reason}。再試行してください。",
+  },
+  开始聊天: {
+    "zh-TW": "開始聊天",
+    en: "Start chatting",
+    ja: "チャットを始める",
+  },
+  "和 {name} 打个招呼": {
+    "zh-TW": "和 {name} 打個招呼",
+    en: "Say hello to {name}",
+    ja: "{name} に挨拶しましょう",
+  },
+  "{name} 还没有绑定 Harness，": {
+    "zh-TW": "{name} 還沒有綁定 Harness，",
+    en: "{name} has no Harness configured. ",
+    ja: "{name} に Harness が設定されていません。",
+  },
+  去设置: {
+    "zh-TW": "前往設定",
+    en: "Set it up",
+    ja: "設定する",
+  },
+  或: {
+    "zh-TW": "或",
+    en: " or ",
+    ja: "、または",
+  },
+  "管理 Harness": {
+    "zh-TW": "管理 Harness",
+    en: "Manage Harnesses",
+    ja: "Harness を管理する",
+  },
+  "。": {
+    "zh-TW": "。",
+    en: ".",
+    ja: "。",
+  },
+  已删除: {
+    "zh-TW": "已刪除",
+    en: "Deleted",
+    ja: "削除済み",
+  },
+  回到最新消息: {
+    "zh-TW": "回到最新訊息",
+    en: "Go to latest message",
+    ja: "最新のメッセージに移動",
+  },
+  回到最新: {
+    "zh-TW": "回到最新",
+    en: "Latest",
+    ja: "最新へ",
+  },
+  "发消息，/ 命令 · $ Skills…": {
+    "zh-TW": "傳送訊息，/ 指令 · $ Skills…",
+    en: "Message, / commands · $ Skills…",
+    ja: "メッセージ、/ コマンド · $ Skills…",
+  },
+  "发消息…": {
+    "zh-TW": "傳送訊息…",
+    en: "Message…",
+    ja: "メッセージを入力…",
+  },
+  "授权提交失败：{reason}。请重试。": {
+    "zh-TW": "授權提交失敗：{reason}。請重試。",
+    en: "Permission response failed: {reason}. Please try again.",
+    ja: "権限の回答を送信できませんでした：{reason}。再試行してください。",
+  },
+  返回会话信息: {
+    "zh-TW": "返回對話資訊",
+    en: "Back to conversation info",
+    ja: "会話情報に戻る",
+  },
+  回复详情: {
+    "zh-TW": "回覆詳情",
+    en: "Reply details",
+    ja: "返信の詳細",
+  },
+  关闭详情面板: {
+    "zh-TW": "關閉詳細資料面板",
+    en: "Close details panel",
+    ja: "詳細パネルを閉じる",
+  },
+  "正在打开终端…": {
+    "zh-TW": "正在開啟終端機…",
+    en: "Opening terminal…",
+    ja: "ターミナルを開いています…",
+  },
+  "接 {name} 的交接：{task}": {
+    "zh-TW": "接手 {name} 的交接：{task}",
+    en: "Handoff from {name}: {task}",
+    ja: "{name} からの引き継ぎ：{task}",
+  },
+  "交接给 {name}": {
+    "zh-TW": "交接給 {name}",
+    en: "Handoff to {name}",
+    ja: "{name} に引き継ぐ",
+  },
+  正在思考: {
+    "zh-TW": "正在思考",
+    en: "Thinking",
+    ja: "思考中",
+  },
+  "（空回复）": {
+    "zh-TW": "（空回覆）",
+    en: "(Empty reply)",
+    ja: "（空の返信）",
+  },
+  回复失败: {
+    "zh-TW": "回覆失敗",
+    en: "Reply failed",
+    ja: "返信に失敗しました",
+  },
+  回复被中断: {
+    "zh-TW": "回覆遭到中斷",
+    en: "Reply interrupted",
+    ja: "返信が中断されました",
+  },
+  "群主跟进 · 已收到 {count} 份成员结果": {
+    "zh-TW": "群主跟進 · 已收到 {count} 份成員結果",
+    en: "Lead follow-up · member results received: {count}",
+    ja: "リーダーが確認中 · メンバーの結果を {count} 件受信",
+  },
+  被新消息打断: {
+    "zh-TW": "被新訊息中斷",
+    en: "Interrupted by a new message",
+    ja: "新しいメッセージにより中断",
+  },
+  已停止: {
+    "zh-TW": "已停止",
+    en: "Stopped",
+    ja: "停止済み",
+  },
+  正在停止: {
+    "zh-TW": "正在停止",
+    en: "Stopping",
+    ja: "停止中",
+  },
+  "{count} 项排队": {
+    "zh-TW": "{count} 項排隊中",
+    en: "{count} queued",
+    ja: "{count} 件待機中",
+  },
+  排队中: {
+    "zh-TW": "排隊中",
+    en: "Queued",
+    ja: "待機中",
+  },
+  等待成员结果: {
+    "zh-TW": "等待成員結果",
+    en: "Waiting for member results",
+    ja: "メンバーの結果待ち",
+  },
+  等待交接完成: {
+    "zh-TW": "等待交接完成",
+    en: "Waiting for handoff",
+    ja: "引き継ぎの完了待ち",
+  },
+  正在跟进: {
+    "zh-TW": "正在跟進",
+    en: "Following up",
+    ja: "確認中",
+  },
+  正在回复: {
+    "zh-TW": "正在回覆",
+    en: "Replying",
+    ja: "返信中",
+  },
+  正在准备: {
+    "zh-TW": "正在準備",
+    en: "Preparing",
+    ja: "準備中",
+  },
+  会话任务: {
+    "zh-TW": "對話任務",
+    en: "Conversation tasks",
+    ja: "会話のタスク",
+  },
+  收起回复状态: {
+    "zh-TW": "收起回覆狀態",
+    en: "Collapse reply status",
+    ja: "返信状況を折りたたむ",
+  },
+  展开回复状态: {
+    "zh-TW": "展開回覆狀態",
+    en: "Expand reply status",
+    ja: "返信状況を展開",
+  },
+  "还有 {count} 位 Agent：{agents}": {
+    "zh-TW": "還有 {count} 位 Agent：{agents}",
+    en: "Other Agents ({count}): {agents}",
+    ja: "ほかの Agent（{count}）：{agents}",
+  },
+  取消排队: {
+    "zh-TW": "取消排隊",
+    en: "Cancel queued task",
+    ja: "待機をキャンセル",
+  },
+  停止任务: {
+    "zh-TW": "停止任務",
+    en: "Stop task",
+    ja: "タスクを停止",
+  },
+  "未能停止 {name}：{reason}。请重试。": {
+    "zh-TW": "無法停止 {name}：{reason}。請重試。",
+    en: "Could not stop {name}: {reason}. Please try again.",
+    ja: "{name} を停止できませんでした：{reason}。再試行してください。",
+  },
+  停止中: {
+    "zh-TW": "停止中",
+    en: "Stopping",
+    ja: "停止中",
+  },
+  统筹中: {
+    "zh-TW": "統籌中",
+    en: "Coordinating",
+    ja: "調整中",
+  },
+  交接中: {
+    "zh-TW": "交接中",
+    en: "Handing off",
+    ja: "引き継ぎ中",
+  },
+  跟进中: {
+    "zh-TW": "跟進中",
+    en: "Following up",
+    ja: "確認中",
+  },
+  回复中: {
+    "zh-TW": "回覆中",
+    en: "Replying",
+    ja: "返信中",
+  },
+  准备中: {
+    "zh-TW": "準備中",
+    en: "Preparing",
+    ja: "準備中",
+  },
+  "正在准备回复…": {
+    "zh-TW": "正在準備回覆…",
+    en: "Preparing a reply…",
+    ja: "返信を準備しています…",
+  },
+  "停止失败：{reason}。请重试。": {
+    "zh-TW": "停止失敗：{reason}。請重試。",
+    en: "Failed to stop: {reason}. Please try again.",
+    ja: "停止に失敗しました：{reason}。再試行してください。",
+  },
+  "停止中…": {
+    "zh-TW": "停止中…",
+    en: "Stopping…",
+    ja: "停止中…",
+  },
+  停止: {
+    "zh-TW": "停止",
+    en: "Stop",
+    ja: "停止",
+  },
+  "引用 {name} 的消息": {
+    "zh-TW": "引用 {name} 的訊息",
+    en: "Quote from {name}",
+    ja: "{name} のメッセージを引用",
+  },
+  "· {count} 秒无响应，可停止后重试": {
+    "zh-TW": "· {count} 秒無回應，可停止後重試",
+    en: "· No response for {count}s; you can stop and retry",
+    ja: "· {count} 秒間応答がありません。停止して再試行できます",
+  },
+  "载入的 Harness 历史 · {count} 轮": {
+    "zh-TW": "載入的 Harness 歷史 · {count} 輪",
+    en: "Loaded Harness history · turns: {count}",
+    ja: "読み込んだ Harness の履歴 · {count} ターン",
+  },
+  我: {
+    "zh-TW": "我",
+    en: "Me",
+    ja: "自分",
+  },
+  状态: {
+    "zh-TW": "狀態",
+    en: "Status",
+    ja: "状態",
+  },
+  工具: {
+    "zh-TW": "工具",
+    en: "Tools",
+    ja: "ツール",
+  },
+  无: {
+    "zh-TW": "無",
+    en: "None",
+    ja: "なし",
+  },
+  时间: {
+    "zh-TW": "時間",
+    en: "Time",
+    ja: "日時",
+  },
+  "Harness 会话": {
+    "zh-TW": "Harness 對話",
+    en: "Harness session",
+    ja: "Harness セッション",
+  },
+  "{name} 的会话": {
+    "zh-TW": "{name} 的對話",
+    en: "{name}'s session",
+    ja: "{name} のセッション",
+  },
+  历史: {
+    "zh-TW": "歷史",
+    en: "History",
+    ja: "履歴",
+  },
+  "开始新的 Harness 会话（聊天记录保留）": {
+    "zh-TW": "開始新的 Harness 對話（保留聊天記錄）",
+    en: "Start a new Harness session (keeps chat history)",
+    ja: "新しい Harness セッションを開始（チャット履歴は保持）",
+  },
+  新会话: {
+    "zh-TW": "新對話",
+    en: "New session",
+    ja: "新規セッション",
+  },
+  会话: {
+    "zh-TW": "對話",
+    en: "Session",
+    ja: "セッション",
+  },
+  上下文: {
+    "zh-TW": "上下文",
+    en: "Context",
+    ja: "コンテキスト",
+  },
+  "发第一条消息时启动。": {
+    "zh-TW": "傳送第一則訊息時啟動。",
+    en: "Starts when you send the first message.",
+    ja: "最初のメッセージを送信すると開始します。",
+  },
+  "没有可恢复的会话。": {
+    "zh-TW": "沒有可恢復的對話。",
+    en: "No sessions to resume.",
+    ja: "再開できるセッションはありません。",
+  },
+  会话信息: {
+    "zh-TW": "對話資訊",
+    en: "Conversation info",
+    ja: "会話情報",
+  },
+  详情: {
+    "zh-TW": "詳情",
+    en: "Details",
+    ja: "詳細",
+  },
+  资料库: {
+    "zh-TW": "資料庫",
+    en: "Library",
+    ja: "ライブラリ",
+  },
+  成员: {
+    "zh-TW": "成員",
+    en: "Members",
+    ja: "メンバー",
+  },
+  "没有 Agent 成员。": {
+    "zh-TW": "沒有 Agent 成員。",
+    en: "No Agent members.",
+    ja: "Agent メンバーはいません。",
+  },
+  "编辑这个 Agent": {
+    "zh-TW": "編輯這個 Agent",
+    en: "Edit this Agent",
+    ja: "この Agent を編集",
+  },
+  "未绑定 Harness": {
+    "zh-TW": "未綁定 Harness",
+    en: "No Harness configured",
+    ja: "Harness 未設定",
+  },
+  " · 主 Agent": {
+    "zh-TW": " · 主 Agent",
+    en: " · Lead Agent",
+    ja: " · メイン Agent",
+  },
+  " · {count} 条回复": {
+    "zh-TW": " · {count} 則回覆",
+    en: " · Replies: {count}",
+    ja: " · 返信 {count} 件",
+  },
+  "移出 {name}": {
+    "zh-TW": "移出 {name}",
+    en: "Remove {name}",
+    ja: "{name} を外す",
+  },
+  添加成员: {
+    "zh-TW": "新增成員",
+    en: "Add member",
+    ja: "メンバーを追加",
+  },
+  "搜索 Agent": {
+    "zh-TW": "搜尋 Agent",
+    en: "Search Agents",
+    ja: "Agent を検索",
+  },
+  "没有可添加的 Agent": {
+    "zh-TW": "沒有可新增的 Agent",
+    en: "No Agents available to add",
+    ja: "追加できる Agent はありません",
+  },
+  项目: {
+    "zh-TW": "專案",
+    en: "Project",
+    ja: "プロジェクト",
+  },
+  "会话里的 Agent 都在这个文件夹里读写文件。": {
+    "zh-TW": "對話中的 Agent 都在這個資料夾裡讀寫檔案。",
+    en: "All Agents in this conversation read and write files in this folder.",
+    ja: "この会話のすべての Agent が、このフォルダー内のファイルを読み書きします。",
+  },
+  "主 Agent": {
+    "zh-TW": "主 Agent",
+    en: "Lead Agent",
+    ja: "メイン Agent",
+  },
+  "删除会话「{name}」及其全部消息？此操作不可撤销。": {
+    "zh-TW": "刪除對話「{name}」及其全部訊息？此操作無法復原。",
+    en: "Delete conversation “{name}” and all its messages? This cannot be undone.",
+    ja: "会話「{name}」とすべてのメッセージを削除しますか？この操作は取り消せません。",
+  },
+  删除会话: {
+    "zh-TW": "刪除對話",
+    en: "Delete conversation",
+    ja: "会話を削除",
+  },
+  命令: {
+    "zh-TW": "指令",
+    en: "Commands",
+    ja: "コマンド",
+  },
+  "附件 {count}": {
+    "zh-TW": "附件 {count}",
+    en: "Attachment {count}",
+    ja: "添付ファイル {count}",
+  },
+  移除图片: {
+    "zh-TW": "移除圖片",
+    en: "Remove image",
+    ja: "画像を削除",
+  },
+  "选择要 @ 的 Agent": {
+    "zh-TW": "選擇要 @ 的 Agent",
+    en: "Choose an Agent to mention",
+    ja: "メンションする Agent を選択",
+  },
+  "提及 Agent": {
+    "zh-TW": "提及 Agent",
+    en: "Mention an Agent",
+    ja: "Agent をメンション",
+  },
+  所有人: {
+    "zh-TW": "所有人",
+    en: "Everyone",
+    ja: "全員",
+  },
+  取消引用: {
+    "zh-TW": "取消引用",
+    en: "Cancel quote",
+    ja: "引用を取り消す",
+  },
+  消息输入框: {
+    "zh-TW": "訊息輸入框",
+    en: "Message input",
+    ja: "メッセージ入力",
+  },
+  添加图片: {
+    "zh-TW": "新增圖片",
+    en: "Add image",
+    ja: "画像を追加",
+  },
+  发送: {
+    "zh-TW": "傳送",
+    en: "Send",
+    ja: "送信",
+  },
+  正在准备回复: {
+    "zh-TW": "正在準備回覆",
+    en: "Preparing a reply",
+    ja: "返信を準備中",
+  },
+  "发送 · {count} 条排队中": {
+    "zh-TW": "傳送 · {count} 則排隊中",
+    en: "Send · {count} queued",
+    ja: "送信 · {count} 件待機中",
+  },
+  "发给 {name}": {
+    "zh-TW": "傳送給 {name}",
+    en: "Send to {name}",
+    ja: "{name} に送信",
+  },
+  "思考中…": {
+    "zh-TW": "思考中…",
+    en: "Thinking…",
+    ja: "思考中…",
+  },
+  思考过程: {
+    "zh-TW": "思考過程",
+    en: "Thinking process",
+    ja: "思考過程",
+  },
+  图片: {
+    "zh-TW": "圖片",
+    en: "Image",
+    ja: "画像",
+  },
+  工具图片: {
+    "zh-TW": "工具圖片",
+    en: "Tool image",
+    ja: "ツールの画像",
+  },
+  等待: {
+    "zh-TW": "等待",
+    en: "Waiting",
+    ja: "待機中",
+  },
+  执行中: {
+    "zh-TW": "執行中",
+    en: "Running",
+    ja: "実行中",
+  },
+  完成: {
+    "zh-TW": "完成",
+    en: "Completed",
+    ja: "完了",
+  },
+  失败: {
+    "zh-TW": "失敗",
+    en: "Failed",
+    ja: "失敗",
+  },
+  新文件: {
+    "zh-TW": "新檔案",
+    en: "New file",
+    ja: "新規ファイル",
+  },
+  "（终端输出不可用）": {
+    "zh-TW": "（終端機輸出無法使用）",
+    en: "(Terminal output unavailable)",
+    ja: "（ターミナルの出力を取得できません）",
+  },
+  "信号 {signal}": {
+    "zh-TW": "訊號 {signal}",
+    en: "Signal {signal}",
+    ja: "シグナル {signal}",
+  },
+  "退出 {code}": {
+    "zh-TW": "結束 {code}",
+    en: "Exit {code}",
+    ja: "終了 {code}",
+  },
+  计划: {
+    "zh-TW": "計畫",
+    en: "Plan",
+    ja: "計画",
+  },
+  工具调用: {
+    "zh-TW": "工具呼叫",
+    en: "Tool call",
+    ja: "ツール呼び出し",
+  },
+  "{name} 请求授权": {
+    "zh-TW": "{name} 請求授權",
+    en: "{name} requests permission",
+    ja: "{name} が権限を要求しています",
+  },
+  "{name} 想要：{action}": {
+    "zh-TW": "{name} 想要：{action}",
+    en: "{name} wants to: {action}",
+    ja: "{name} が実行しようとしています：{action}",
+  },
+  "上下文 {used} / {size} token{cost}": {
+    "zh-TW": "上下文 {used} / {size} token{cost}",
+    en: "Context {used} / {size} tokens{cost}",
+    ja: "コンテキスト {used} / {size} トークン{cost}",
+  },
+  推荐: {
+    "zh-TW": "推薦",
+    en: "Recommended",
+    ja: "推奨",
+  },
+  模型: {
+    "zh-TW": "模型",
+    en: "Model",
+    ja: "モデル",
+  },
+  "Agent 默认": {
+    "zh-TW": "Agent 預設",
+    en: "Agent default",
+    ja: "Agent の既定値",
+  },
+  "其他模型 ID": {
+    "zh-TW": "其他模型 ID",
+    en: "Other model ID",
+    ja: "その他のモデル ID",
+  },
+  "正在连接…": {
+    "zh-TW": "正在連線…",
+    en: "Connecting…",
+    ja: "接続中…",
+  },
+  没有可调的设置: {
+    "zh-TW": "沒有可調整的設定",
+    en: "No adjustable settings",
+    ja: "変更できる設定はありません",
+  },
+  成员设置: {
+    "zh-TW": "成員設定",
+    en: "Member settings",
+    ja: "メンバーの設定",
+  },
+  各自设置: {
+    "zh-TW": "各自設定",
+    en: "Per-Agent settings",
+    ja: "Agent ごとの設定",
+  },
+  连接中: {
+    "zh-TW": "連線中",
+    en: "Connecting",
+    ja: "接続中",
+  },
+  更多设置: {
+    "zh-TW": "更多設定",
+    en: "More settings",
+    ja: "その他の設定",
+  },
+  其他模型: {
+    "zh-TW": "其他模型",
+    en: "Other model",
+    ja: "その他のモデル",
+  },
+  返回: {
+    "zh-TW": "返回",
+    en: "Back",
+    ja: "戻る",
+  },
+  新建会话: {
+    "zh-TW": "新增對話",
+    en: "New conversation",
+    ja: "新しい会話",
+  },
+  "（可选）": {
+    "zh-TW": "（選填）",
+    en: " (optional)",
+    ja: "（任意）",
+  },
+  名称: {
+    "zh-TW": "名稱",
+    en: "Name",
+    ja: "名前",
+  },
+  会话名称: {
+    "zh-TW": "對話名稱",
+    en: "Conversation name",
+    ja: "会話の名前",
+  },
+  "Agent（已选 {count}）": {
+    "zh-TW": "Agent（已選 {count}）",
+    en: "Agents ({count} selected)",
+    ja: "Agent（{count} 件選択）",
+  },
+  "还没有 Agent": {
+    "zh-TW": "還沒有 Agent",
+    en: "No Agents yet",
+    ja: "Agent はまだありません",
+  },
+  "创建中…": {
+    "zh-TW": "建立中…",
+    en: "Creating…",
+    ja: "作成中…",
+  },
+  创建会话: {
+    "zh-TW": "建立對話",
+    en: "Create conversation",
+    ja: "会話を作成",
+  },
+  不选项目: {
+    "zh-TW": "不選專案",
+    en: "No project",
+    ja: "プロジェクトを選択しない",
+  },
+  "放进「草稿」，以后可以移到项目里": {
+    "zh-TW": "放進「草稿」，之後可以移到專案中",
+    en: "Save in Drafts; you can move it to a project later",
+    ja: "「下書き」に保存し、後でプロジェクトに移動できます",
+  },
+  "放进「草稿」": {
+    "zh-TW": "放進「草稿」",
+    en: "Save in Drafts",
+    ja: "「下書き」に保存",
+  },
+  选择项目: {
+    "zh-TW": "選擇專案",
+    en: "Select project",
+    ja: "プロジェクトを選択",
+  },
+  目录: {
+    "zh-TW": "目錄",
+    en: "Directory",
+    ja: "ディレクトリ",
+  },
+  新建目录: {
+    "zh-TW": "新增目錄",
+    en: "New directory",
+    ja: "新規ディレクトリ",
+  },
+  选择已有: {
+    "zh-TW": "選擇現有目錄",
+    en: "Choose existing",
+    ja: "既存のものを選択",
+  },
+  选择项目文件夹: {
+    "zh-TW": "選擇專案資料夾",
+    en: "Choose project folder",
+    ja: "プロジェクトフォルダーを選択",
+  },
+  新建项目: {
+    "zh-TW": "新增專案",
+    en: "New project",
+    ja: "新規プロジェクト",
+  },
+  项目名称: {
+    "zh-TW": "專案名稱",
+    en: "Project name",
+    ja: "プロジェクト名",
+  },
+  创建项目: {
+    "zh-TW": "建立專案",
+    en: "Create project",
+    ja: "プロジェクトを作成",
+  },
+  "更换目录会重置 {count} 个会话的 Agent 上下文。继续？": {
+    "zh-TW": "更換目錄會重設 {count} 個對話的 Agent 上下文。繼續？",
+    en: "Changing the directory will reset Agent context in {count} conversations. Continue?",
+    ja: "ディレクトリを変更すると、{count} 件の会話の Agent コンテキストがリセットされます。続行しますか？",
+  },
+  "删除项目「{name}」及其 {count} 个会话？目录中的文件不会删除。": {
+    "zh-TW": "刪除專案「{name}」及其 {count} 個對話？目錄中的檔案不會刪除。",
+    en: "Delete project “{name}” and its {count} conversations? Files in the directory will be kept.",
+    ja: "プロジェクト「{name}」と {count} 件の会話を削除しますか？ディレクトリ内のファイルは削除されません。",
+  },
+  "保存中…": {
+    "zh-TW": "儲存中…",
+    en: "Saving…",
+    ja: "保存中…",
+  },
+  保存: {
+    "zh-TW": "儲存",
+    en: "Save",
+    ja: "保存",
+  },
+  删除项目: {
+    "zh-TW": "刪除專案",
+    en: "Delete project",
+    ja: "プロジェクトを削除",
+  },
+  "正在打开…": {
+    "zh-TW": "正在開啟…",
+    en: "Opening…",
+    ja: "開いています…",
+  },
+  "正在重连…": {
+    "zh-TW": "正在重新連線…",
+    en: "Reconnecting…",
+    ja: "再接続中…",
+  },
+  连接失败: {
+    "zh-TW": "連線失敗",
+    en: "Connection failed",
+    ja: "接続に失敗しました",
+  },
+  已退出: {
+    "zh-TW": "已結束",
+    en: "Exited",
+    ja: "終了済み",
+  },
+  项目终端: {
+    "zh-TW": "專案終端機",
+    en: "Project terminal",
+    ja: "プロジェクトのターミナル",
+  },
+  调整终端高度: {
+    "zh-TW": "調整終端機高度",
+    en: "Resize terminal height",
+    ja: "ターミナルの高さを調整",
+  },
+  项目终端会话: {
+    "zh-TW": "專案終端機工作階段",
+    en: "Project terminal sessions",
+    ja: "プロジェクトのターミナルセッション",
+  },
+  "终端 {count}": {
+    "zh-TW": "終端機 {count}",
+    en: "Terminal {count}",
+    ja: "ターミナル {count}",
+  },
+  "关闭终端 {count}": {
+    "zh-TW": "關閉終端機 {count}",
+    en: "Close terminal {count}",
+    ja: "ターミナル {count} を閉じる",
+  },
+  新建终端: {
+    "zh-TW": "新增終端機",
+    en: "New terminal",
+    ja: "新規ターミナル",
+  },
+  重新打开: {
+    "zh-TW": "重新開啟",
+    en: "Reopen",
+    ja: "再度開く",
+  },
+  重试连接: {
+    "zh-TW": "重試連線",
+    en: "Retry connection",
+    ja: "再接続",
+  },
+  结束终端: {
+    "zh-TW": "結束終端機",
+    en: "End terminal",
+    ja: "ターミナルを終了",
+  },
+  "收起终端（Ctrl+`）": {
+    "zh-TW": "收起終端機（Ctrl+`）",
+    en: "Hide terminal (Ctrl+`)",
+    ja: "ターミナルを閉じる（Ctrl+`）",
+  },
+  收起终端: {
+    "zh-TW": "收起終端機",
+    en: "Hide terminal",
+    ja: "ターミナルを閉じる",
+  },
+  引用回复: {
+    "zh-TW": "引用回覆",
+    en: "Quote reply",
+    ja: "引用して返信",
+  },
+  更多消息操作: {
+    "zh-TW": "更多訊息操作",
+    en: "More message actions",
+    ja: "その他のメッセージ操作",
+  },
+  消息操作: {
+    "zh-TW": "訊息操作",
+    en: "Message actions",
+    ja: "メッセージの操作",
+  },
+  消息操作选项: {
+    "zh-TW": "訊息操作選項",
+    en: "Message action options",
+    ja: "メッセージの操作項目",
+  },
+  复制内容: {
+    "zh-TW": "複製內容",
+    en: "Copy content",
+    ja: "内容をコピー",
+  },
+  "复制消息 ID": {
+    "zh-TW": "複製訊息 ID",
+    en: "Copy message ID",
+    ja: "メッセージ ID をコピー",
+  },
+  查看详情: {
+    "zh-TW": "查看詳情",
+    en: "View details",
+    ja: "詳細を表示",
+  },
+  "正在复制…": {
+    "zh-TW": "正在複製…",
+    en: "Copying…",
+    ja: "コピー中…",
+  },
+  放大预览: {
+    "zh-TW": "放大預覽",
+    en: "Enlarge preview",
+    ja: "拡大プレビュー",
+  },
+  "放大预览：{name}": {
+    "zh-TW": "放大預覽：{name}",
+    en: "Enlarge preview: {name}",
+    ja: "拡大プレビュー：{name}",
+  },
+  图片预览: {
+    "zh-TW": "圖片預覽",
+    en: "Image preview",
+    ja: "画像プレビュー",
+  },
+  适应窗口: {
+    "zh-TW": "符合視窗",
+    en: "Fit to window",
+    ja: "ウィンドウに合わせる",
+  },
+  原图: {
+    "zh-TW": "原圖",
+    en: "Original size",
+    ja: "元のサイズ",
+  },
+  关闭图片预览: {
+    "zh-TW": "關閉圖片預覽",
+    en: "Close image preview",
+    ja: "画像プレビューを閉じる",
+  },
+  "图片原图，可滚动查看": {
+    "zh-TW": "原始圖片，可捲動查看",
+    en: "Original image, scroll to view",
+    ja: "元の画像。スクロールして表示できます",
+  },
+  "图片加载失败，请关闭预览后重试": {
+    "zh-TW": "圖片載入失敗，請關閉預覽後重試",
+    en: "Image failed to load. Close the preview and try again.",
+    ja: "画像を読み込めませんでした。プレビューを閉じて再試行してください。",
+  },
+  "图表更新失败，当前显示上次图表，可查看源码": {
+    "zh-TW": "圖表更新失敗，目前顯示上次圖表，可查看原始碼",
+    en: "Diagram update failed. Showing the previous version; source is available.",
+    ja: "図の更新に失敗しました。前の図を表示しています。ソースを確認できます。",
+  },
+  "图表暂时无法显示，可查看源码": {
+    "zh-TW": "圖表暫時無法顯示，可查看原始碼",
+    en: "Diagram unavailable. You can view the source.",
+    ja: "図を表示できません。ソースを確認できます。",
+  },
+  "正在更新图表…": {
+    "zh-TW": "正在更新圖表…",
+    en: "Updating diagram…",
+    ja: "図を更新中…",
+  },
+  "正在绘制图表…": {
+    "zh-TW": "正在繪製圖表…",
+    en: "Rendering diagram…",
+    ja: "図を描画中…",
+  },
+  "Mermaid 图表": {
+    "zh-TW": "Mermaid 圖表",
+    en: "Mermaid diagram",
+    ja: "Mermaid の図",
+  },
+  重试: {
+    "zh-TW": "重試",
+    en: "Retry",
+    ja: "再試行",
+  },
+  "Mermaid 源码": {
+    "zh-TW": "Mermaid 原始碼",
+    en: "Mermaid source",
+    ja: "Mermaid のソース",
+  },
+  "Agent 已删除": {
+    "zh-TW": "Agent 已刪除",
+    en: "Agent deleted",
+    ja: "Agent は削除済みです",
+  },
+  打开链接: {
+    "zh-TW": "開啟連結",
+    en: "Open link",
+    ja: "リンクを開く",
+  },
+  默认: {
+    "zh-TW": "預設",
+    en: "Default",
+    ja: "既定",
+  },
+  权限: {
+    "zh-TW": "權限",
+    en: "Permissions",
+    ja: "権限",
+  },
+  "推理 {level}": {
+    "zh-TW": "推理 {level}",
+    en: "Reasoning {level}",
+    ja: "推論 {level}",
+  },
+  正常结束: {
+    "zh-TW": "正常結束",
+    en: "Completed",
+    ja: "正常終了",
+  },
+  已取消: {
+    "zh-TW": "已取消",
+    en: "Cancelled",
+    ja: "キャンセル済み",
+  },
+  拒绝: {
+    "zh-TW": "拒絕",
+    en: "Refused",
+    ja: "拒否",
+  },
+  "达到 token 上限": {
+    "zh-TW": "已達 token 上限",
+    en: "Token limit reached",
+    ja: "トークン上限に到達",
+  },
+  达到轮次上限: {
+    "zh-TW": "已達輪次上限",
+    en: "Turn limit reached",
+    ja: "ターン数の上限に到達",
+  },
+  当前环境无法访问剪贴板: {
+    "zh-TW": "目前環境無法存取剪貼簿",
+    en: "Clipboard access is unavailable in this environment",
+    ja: "この環境ではクリップボードにアクセスできません",
+  },
+  已复制内容: {
+    "zh-TW": "已複製內容",
+    en: "Content copied",
+    ja: "内容をコピーしました",
+  },
+  "已复制消息 ID": {
+    "zh-TW": "已複製訊息 ID",
+    en: "Message ID copied",
+    ja: "メッセージ ID をコピーしました",
+  },
+  "复制失败：{reason}。请重试。": {
+    "zh-TW": "複製失敗：{reason}。請重試。",
+    en: "Copy failed: {reason}. Please try again.",
+    ja: "コピーに失敗しました：{reason}。再試行してください。",
+  },
+  "发送失败：{reason}": {
+    "zh-TW": "傳送失敗：{reason}",
+    en: "Send failed: {reason}",
+    ja: "送信に失敗しました：{reason}",
+  },
+  "终端已结束，请重新打开。": {
+    "zh-TW": "終端機已結束，請重新開啟。",
+    en: "The terminal has ended. Please reopen it.",
+    ja: "ターミナルは終了しました。再度開いてください。",
+  },
+  "{reason}": {
+    "zh-TW": "{reason}",
+    en: "{reason}",
+    ja: "{reason}",
+  },
+  推理: {
+    "zh-TW": "推理",
+    en: "Reasoning",
+    ja: "推論",
+  },
+  思考: {
+    "zh-TW": "思考",
+    en: "Thinking",
+    ja: "思考",
+  },
+  快速模式: {
+    "zh-TW": "快速模式",
+    en: "Fast mode",
+    ja: "高速モード",
+  },
+  协作模式: {
+    "zh-TW": "協作模式",
+    en: "Collaboration mode",
+    ja: "連携モード",
+  },
+  详细度: {
+    "zh-TW": "詳細程度",
+    en: "Verbosity",
+    ja: "詳細度",
+  },
+  沙箱: {
+    "zh-TW": "沙箱",
+    en: "Sandbox",
+    ja: "サンドボックス",
+  },
+  询问: {
+    "zh-TW": "詢問",
+    en: "Ask",
+    ja: "確認する",
+  },
+  自动改文件: {
+    "zh-TW": "自動修改檔案",
+    en: "Auto-edit files",
+    ja: "ファイルを自動編集",
+  },
+  自动: {
+    "zh-TW": "自動",
+    en: "Auto",
+    ja: "自動",
+  },
+  全部允许: {
+    "zh-TW": "全部允許",
+    en: "Allow all",
+    ja: "すべて許可",
+  },
+  只读: {
+    "zh-TW": "唯讀",
+    en: "Read only",
+    ja: "読み取り専用",
+  },
+  完全访问: {
+    "zh-TW": "完整存取",
+    en: "Full access",
+    ja: "フルアクセス",
+  },
+  最低: {
+    "zh-TW": "最低",
+    en: "Minimal",
+    ja: "最小",
+  },
+  低: {
+    "zh-TW": "低",
+    en: "Low",
+    ja: "低",
+  },
+  中: {
+    "zh-TW": "中",
+    en: "Medium",
+    ja: "中",
+  },
+  高: {
+    "zh-TW": "高",
+    en: "High",
+    ja: "高",
+  },
+  极高: {
+    "zh-TW": "極高",
+    en: "Extra high",
+    ja: "非常に高",
+  },
+  最高: {
+    "zh-TW": "最高",
+    en: "Maximum",
+    ja: "最大",
+  },
+  开: {
+    "zh-TW": "開",
+    en: "On",
+    ja: "オン",
+  },
+  关: {
+    "zh-TW": "關",
+    en: "Off",
+    ja: "オフ",
+  },
+  "图表过长，请查看源码": {
+    "zh-TW": "圖表過長，請查看原始碼",
+    en: "Diagram is too long. Please view the source.",
+    ja: "図が長すぎます。ソースを確認してください。",
+  },
+  "图表中的配置指令不受支持，请移除后重试": {
+    "zh-TW": "不支援圖表中的設定指令，請移除後重試",
+    en: "Configuration directives in diagrams are unsupported. Remove them and retry.",
+    ja: "図内の設定ディレクティブには対応していません。削除して再試行してください。",
+  },
+  "图表中的 HTML 和外部图片不受支持，请查看源码": {
+    "zh-TW": "不支援圖表中的 HTML 和外部圖片，請查看原始碼",
+    en: "HTML and external images in diagrams are unsupported. Please view the source.",
+    ja: "図内の HTML と外部画像には対応していません。ソースを確認してください。",
+  },
+  "图表中的资源别名不受支持，请查看源码": {
+    "zh-TW": "不支援圖表中的資源別名，請查看原始碼",
+    en: "Resource aliases in diagrams are unsupported. Please view the source.",
+    ja: "図内のリソースエイリアスには対応していません。ソースを確認してください。",
+  },
+  "图表中的外部样式资源不受支持，请查看源码": {
+    "zh-TW": "不支援圖表中的外部樣式資源，請查看原始碼",
+    en: "External style resources in diagrams are unsupported. Please view the source.",
+    ja: "図内の外部スタイルリソースには対応していません。ソースを確認してください。",
+  },
+  终端输入: { "zh-TW": "終端機輸入", en: "Terminal input", ja: "ターミナル入力" },
+  "输出过多，已暂停朗读，请手动浏览各行": {
+    "zh-TW": "輸出過多，已暫停朗讀，請手動瀏覽各行",
+    en: "Too much output to announce. Navigate to rows manually to read.",
+    ja: "出力が多すぎるため読み上げを一時停止しました。各行を手動で確認してください。",
+  },
+} satisfies MessageCatalog;

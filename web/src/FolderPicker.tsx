@@ -1,6 +1,7 @@
 import { ChevronRight, Clock, Folder, FolderOpen, GitBranch, Home, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { translateError, useI18n } from "./i18n";
 
 interface DirEntry {
   name: string;
@@ -72,9 +73,10 @@ export function FolderField(props: {
   title?: string;
   label?: string;
 }) {
+  const { t } = useI18n();
   const { pick, busy, dialog } = useFolderPicker();
   const choose = async () => {
-    const p = await pick(props.title ?? "选择文件夹", props.value || undefined);
+    const p = await pick(t(props.title ?? "选择文件夹"), props.value || undefined);
     if (p) props.onChange(p);
   };
   return (
@@ -83,11 +85,11 @@ export function FolderField(props: {
         <div className="folder-chip">
           <FolderOpen size={15} className="folder-chip-icon" />
           <span className="folder-chip-path" title={props.value}>
-            <span className="folder-chip-dir">{"\u200e" + props.value.replace(/\/[^/]+$/, "/")}</span>
+            <span className="folder-chip-dir">{`\u200e${props.value.replace(/\/[^/]+$/, "/")}`}</span>
             <b>{props.value.split("/").pop() || props.value}</b>
           </span>
           <button type="button" className="btn ghost sm" onClick={() => void choose()} disabled={busy}>
-            {busy ? <Loader2 size={13} className="spin" /> : "更改"}
+            {busy ? <Loader2 size={13} className="spin" /> : t("更改")}
           </button>
         </div>
       ) : (
@@ -96,10 +98,10 @@ export function FolderField(props: {
           className="btn folder-choose"
           onClick={() => void choose()}
           disabled={busy}
-          aria-label={props.label ?? "选择文件夹"}
+          aria-label={t(props.label ?? "选择文件夹")}
         >
           {busy ? <Loader2 size={14} className="spin" /> : <Folder size={14} />}
-          选择文件夹…
+          {t("选择文件夹…")}
         </button>
       )}
       {dialog}
@@ -108,6 +110,7 @@ export function FolderField(props: {
 }
 
 function FolderBrowser(props: { title: string; start?: string; onClose: (path: string | null) => void }) {
+  const { t } = useI18n();
   const [list, setList] = useState<DirListing | null>(null);
   const [placesList, setPlaces] = useState<Place[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -171,15 +174,26 @@ function FolderBrowser(props: { title: string; start?: string; onClose: (path: s
       role="presentation"
       onMouseDown={(e) => e.target === e.currentTarget && props.onClose(null)}
     >
-      <div className="modal folder-browser" role="dialog" aria-modal="true" aria-label={props.title} onKeyDown={onKey}>
+      <div
+        className="modal folder-browser"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(props.title)}
+        onKeyDown={onKey}
+      >
         <div className="fb-head">
-          <h3>{props.title}</h3>
-          <button type="button" className="btn ghost icon sm" aria-label="关闭" onClick={() => props.onClose(null)}>
+          <h3>{t(props.title)}</h3>
+          <button
+            type="button"
+            className="btn ghost icon sm"
+            aria-label={t("关闭")}
+            onClick={() => props.onClose(null)}
+          >
             <X size={16} />
           </button>
         </div>
         <div className="fb-body">
-          <nav className="fb-places" aria-label="常用位置">
+          <nav className="fb-places" aria-label={t("常用位置")}>
             {placesList.map((p, i) => (
               <button
                 key={p.path}
@@ -196,8 +210,10 @@ function FolderBrowser(props: { title: string; start?: string; onClose: (path: s
                 ) : (
                   <Folder size={14} />
                 )}
-                <span>{p.name}</span>
-                {p.kind === "recent" && placesList[i - 1]?.kind !== "recent" && <span className="sr-only">最近</span>}
+                <span>{p.kind === "home" ? t("主目录") : p.name}</span>
+                {p.kind === "recent" && placesList[i - 1]?.kind !== "recent" && (
+                  <span className="sr-only">{t("最近")}</span>
+                )}
               </button>
             ))}
           </nav>
@@ -212,14 +228,14 @@ function FolderBrowser(props: { title: string; start?: string; onClose: (path: s
                 </span>
               ))}
             </div>
-            <div className="fb-list" ref={listRef} role="listbox" aria-label="文件夹" tabIndex={0}>
+            <div className="fb-list" ref={listRef} role="listbox" aria-label={t("文件夹")} tabIndex={0}>
               {!list && !error && (
                 <div className="fb-empty">
                   <Loader2 size={14} className="spin" />
                 </div>
               )}
-              {error && <div className="fb-empty error-text">{error}</div>}
-              {list && list.dirs.length === 0 && <div className="fb-empty muted">没有子文件夹</div>}
+              {error && <div className="fb-empty error-text">{translateError(error)}</div>}
+              {list && list.dirs.length === 0 && <div className="fb-empty muted">{t("没有子文件夹")}</div>}
               {list?.dirs.map((d, i) => (
                 <button
                   key={d.path}
@@ -249,14 +265,14 @@ function FolderBrowser(props: { title: string; start?: string; onClose: (path: s
         <div className="fb-foot">
           <label className="fb-hidden">
             <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
-            显示隐藏
+            {t("显示隐藏")}
           </label>
           <span className="fb-current mono" title={list?.path}>
             {list?.git && <GitBranch size={12} />}
             {list ? `\u200e${list.path}\u200e` : null}
           </span>
           <button type="button" className="btn sm" onClick={() => props.onClose(null)}>
-            取消
+            {t("取消")}
           </button>
           <button
             type="button"
@@ -264,7 +280,7 @@ function FolderBrowser(props: { title: string; start?: string; onClose: (path: s
             disabled={!list}
             onClick={() => list && props.onClose(list.path)}
           >
-            选择此文件夹
+            {t("选择此文件夹")}
           </button>
         </div>
       </div>

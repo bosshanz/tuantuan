@@ -20,6 +20,7 @@ import { useEffect, useRef } from "react";
 import type { Timeline, ToolState } from "../../shared/timeline";
 import type { PermissionAsk, SessionView, TerminalSnapshot } from "./api";
 import { PreviewImage } from "./ImagePreview";
+import { intlLocale, useI18n } from "./i18n";
 import { MessageMarkdown } from "./ui";
 
 /** Renders one agent reply: thoughts, text, tool calls (diff / terminal / content) and the plan. */
@@ -29,6 +30,7 @@ export function TimelineView(props: {
   terminals: Record<string, TerminalSnapshot>;
   mentionNames: string[];
 }) {
+  const { t: tr } = useI18n();
   const { t } = props;
   const lastText = t.parts.findLastIndex((p) => p.kind === "text");
   return (
@@ -43,7 +45,7 @@ export function TimelineView(props: {
               <summary>
                 <ChevronRight size={13} className="chev" />
                 <Brain size={13} />
-                <span>{props.streaming && i === t.parts.length - 1 ? "思考中…" : "思考过程"}</span>
+                <span>{props.streaming && i === t.parts.length - 1 ? tr("思考中…") : tr("思考过程")}</span>
               </summary>
               <div className="thought-body">{p.text}</div>
             </details>
@@ -53,7 +55,7 @@ export function TimelineView(props: {
           return tool ? <ToolCard key={key} tool={tool} terminals={props.terminals} /> : null;
         }
         if (p.kind === "image")
-          return <PreviewImage key={key} src={`data:${p.mimeType};base64,${p.data}`} alt="图片" />;
+          return <PreviewImage key={key} src={`data:${p.mimeType};base64,${p.data}`} alt={tr("图片")} />;
         return (
           <div
             key={key}
@@ -125,34 +127,36 @@ export function ToolCard(props: {
 }
 
 function ToolContent({ c, terminals }: { c: acp.ToolCallContent; terminals: Record<string, TerminalSnapshot> }) {
+  const { t: tr } = useI18n();
   if (c.type === "diff") return <DiffView path={c.path} oldText={c.oldText ?? null} newText={c.newText} />;
   if (c.type === "terminal") return <TerminalView t={terminals[c.terminalId]} />;
   const b = c.content;
   if (b.type === "text") return <pre>{b.text}</pre>;
-  if (b.type === "image") return <PreviewImage src={`data:${b.mimeType};base64,${b.data}`} alt="工具图片" />;
+  if (b.type === "image") return <PreviewImage src={`data:${b.mimeType};base64,${b.data}`} alt={tr("工具图片")} />;
   if (b.type === "resource_link") return <code>{b.uri}</code>;
   return <pre>{JSON.stringify(b, null, 2)}</pre>;
 }
 
 function ToolStatus({ status, live }: { status: string; live: boolean }) {
+  const { t: tr } = useI18n();
   if (live)
     return (
       <span className="tool-status running">
         <Loader2 size={12} className="spin" />
-        {status === "pending" ? "等待" : "执行中"}
+        {status === "pending" ? tr("等待") : tr("执行中")}
       </span>
     );
   if (status === "completed")
     return (
       <span className="tool-status ok">
         <Check size={12} />
-        完成
+        {tr("完成")}
       </span>
     );
   return (
     <span className="tool-status error">
       <X size={12} />
-      失败
+      {tr("失败")}
     </span>
   );
 }
@@ -196,13 +200,14 @@ export function diffLines(a: string, b: string): DiffLine[] | null {
 }
 
 export function DiffView(props: { path: string; oldText: string | null; newText: string }) {
+  const { t: tr } = useI18n();
   const lines = diffLines(props.oldText ?? "", props.newText);
   return (
     <div className="diff">
       <div className="diff-head">
         <FileDiff size={12} />
         <span>{props.path}</span>
-        {props.oldText === null && <span className="badge ok">新文件</span>}
+        {props.oldText === null && <span className="badge ok">{tr("新文件")}</span>}
       </div>
       <pre className="diff-body">
         {lines
@@ -221,12 +226,13 @@ export function DiffView(props: { path: string; oldText: string | null; newText:
 }
 
 export function TerminalView({ t }: { t?: TerminalSnapshot }) {
+  const { t: tr } = useI18n();
   const ref = useRef<HTMLPreElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: follow output
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [t?.output]);
-  if (!t) return <pre className="term">（终端输出不可用）</pre>;
+  if (!t) return <pre className="term">{tr("（终端输出不可用）")}</pre>;
   return (
     <div className="term-wrap">
       <div className="term-head">
@@ -234,7 +240,9 @@ export function TerminalView({ t }: { t?: TerminalSnapshot }) {
         <code>{t.command}</code>
         {t.exitStatus ? (
           <span className={t.exitStatus.exitCode === 0 ? "badge ok" : "badge danger"}>
-            {t.exitStatus.signal ? `信号 ${t.exitStatus.signal}` : `退出 ${t.exitStatus.exitCode}`}
+            {t.exitStatus.signal
+              ? tr("信号 {signal}", { signal: t.exitStatus.signal })
+              : tr("退出 {code}", { code: t.exitStatus.exitCode ?? "" })}
           </span>
         ) : (
           <Loader2 size={12} className="spin" />
@@ -249,16 +257,17 @@ export function TerminalView({ t }: { t?: TerminalSnapshot }) {
 }
 
 export function PlanList({ entries }: { entries: acp.PlanEntry[] }) {
+  const { t: tr } = useI18n();
   const done = entries.filter((e) => e.status === "completed").length;
   return (
     <div className="plan">
       <div className="plan-head">
-        计划{" "}
+        {tr("计划")}{" "}
         <span className="muted">
           {done}/{entries.length}
         </span>
       </div>
-      <ul aria-label="计划">
+      <ul aria-label={tr("计划")}>
         {entries.map((e, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: plan entries are replaced wholesale
           <li key={i} className="plan-item" data-status={e.status}>
@@ -286,12 +295,13 @@ export function PermissionDialog(props: {
   error: string | null;
   onAnswer: (optionId: string | null) => void;
 }) {
+  const { t: tr } = useI18n();
   const { ask } = props;
   const first = useRef<HTMLButtonElement>(null);
   useEffect(() => first.current?.focus(), []);
   const tool: ToolState = {
     toolCallId: ask.toolCall.toolCallId,
-    title: ask.toolCall.title ?? "工具调用",
+    title: ask.toolCall.title ?? tr("工具调用"),
     kind: ask.toolCall.kind ?? "other",
     status: "pending",
     content: ask.toolCall.content ?? [],
@@ -306,7 +316,7 @@ export function PermissionDialog(props: {
         className="palette perm"
         role="alertdialog"
         aria-modal="true"
-        aria-label={`${props.agentName} 请求授权`}
+        aria-label={tr("{name} 请求授权", { name: props.agentName })}
         aria-busy={props.pending}
         onKeyDown={(e) =>
           e.key === "Escape" &&
@@ -316,9 +326,7 @@ export function PermissionDialog(props: {
       >
         <div className="perm-head">
           <ShieldQuestion size={18} />
-          <div>
-            <b>{props.agentName}</b> 想要：{tool.title}
-          </div>
+          <div>{tr("{name} 想要：{action}", { name: props.agentName, action: tool.title })}</div>
         </div>
         <div className="perm-body">
           {tool.content.length > 0 || tool.rawInput !== undefined ? (
@@ -351,14 +359,19 @@ export function PermissionDialog(props: {
 
 /** Context window usage (and cost) of one agent's session, as a compact meter. */
 export function CtxUsage({ view }: { view: SessionView }) {
+  const { t: tr, locale } = useI18n();
   const pct = view.usage && view.usage.size > 0 ? Math.min(100, (view.usage.used / view.usage.size) * 100) : null;
   if (pct === null || !view.usage) return null;
   return (
     <span
       className="ctx-usage"
-      title={`上下文 ${view.usage.used.toLocaleString()} / ${view.usage.size.toLocaleString()} token${
-        view.usage.cost ? ` · ${view.usage.cost.currency === "USD" ? "$" : ""}${view.usage.cost.amount.toFixed(3)}` : ""
-      }`}
+      title={tr("上下文 {used} / {size} token{cost}", {
+        used: view.usage.used.toLocaleString(intlLocale(locale)),
+        size: view.usage.size.toLocaleString(intlLocale(locale)),
+        cost: view.usage.cost
+          ? ` · ${view.usage.cost.currency === "USD" ? "$" : ""}${view.usage.cost.amount.toLocaleString(intlLocale(locale), { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
+          : "",
+      })}
     >
       <span className="ctx-bar">
         <i style={{ width: `${pct}%` }} />

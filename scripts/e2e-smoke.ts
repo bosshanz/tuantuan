@@ -1004,15 +1004,33 @@ try {
     throw new Error("page reloaded during live checks");
 
   // 服务商与用量: usage cards from local fixtures, add a DeepSeek profile (mock endpoint), test +
-  // balance, CC Switch import on click, then pick the profile on a Claude Code agent.
+  // balance, CC Switch import on click, then pick the profile on Claude Code / OpenCode / Pi agents.
   await page.setViewportSize({ width: 1440, height: 1100 });
   const ccAgent = await (
     await fetch(`http://localhost:${server.port}/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "架构师", harness: "claude-code", identity: "", env: {}, mcpServerIds: [] }),
+      body: JSON.stringify({
+        name: "架构师",
+        harness: "claude-code",
+        configDefaults: { model: "old-provider-model", effort: "high" },
+      }),
     })
   ).json();
+  const extraProviderAgents = await Promise.all(
+    [
+      { name: "OpenCode开发者", harness: "opencode" },
+      { name: "Pi助手", harness: "pi" },
+    ].map(async (agent) => {
+      const res = await fetch(`http://localhost:${server.port}/api/agents`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...agent, configDefaults: { model: "old-provider-model", effort: "high" } }),
+      });
+      if (!res.ok) throw new Error(`could not create ${agent.harness} provider fixture: ${await res.text()}`);
+      return res.json() as Promise<{ id: string; name: string; harness: string }>;
+    }),
+  );
   // Grok Build "installed" now (after the install checks above): a stand-in CLI that answers
   // `grok usage <id>` with the JSON captured from the real grok 1.0.52.
   {
@@ -1087,11 +1105,39 @@ for await (const line of createInterface({input:process.stdin})) {
   if ((await dlg.getByLabel("名称").inputValue()) !== "DeepSeek") throw new Error("preset did not fill the name");
   await dlg.getByLabel("API Key").fill("sk-e2e-deepseek-4242");
   const mockBase = `http://127.0.0.1:${balanceSrv.port}`;
-  await dlg.getByLabel("Claude Code 地址").fill(`${mockBase}/anthropic`);
+  await dlg.getByLabel("Anthropic 兼容地址").fill(`${mockBase}/anthropic`);
   await dlg.getByLabel("OpenAI 兼容地址").fill(`${mockBase}/v1`);
+  const compatibility = dlg.getByRole("status");
+  await dlg.getByLabel("主模型", { exact: true }).fill("  ");
+  await compatibility.getByText("Claude Code", { exact: true }).waitFor();
+  await compatibility.getByText("OpenCode", { exact: true }).waitFor({ state: "hidden" });
+  await compatibility.getByText("Pi", { exact: true }).waitFor({ state: "hidden" });
+  await dlg.getByLabel("主模型", { exact: true }).fill("deepseek-v4-pro");
+  await compatibility.getByText("OpenCode", { exact: true }).waitFor();
+  await compatibility.getByText("Pi", { exact: true }).waitFor();
+  await compatibility.getByText("Codex", { exact: true }).waitFor({ state: "hidden" });
+  await dlg.getByRole("button", { name: "Responses", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await compatibility.getByText("Codex", { exact: true }).waitFor();
+  await dlg.getByText(/选择不会转换接口/).waitFor();
+  await dlg.getByRole("button", { name: "Chat Completions", exact: true }).click();
+  await compatibility.getByText("Codex", { exact: true }).waitFor({ state: "hidden" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await compatibility.scrollIntoViewIfNeeded();
+  const formOverflow = await dlg.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return r.left < 0 || r.right > innerWidth || el.scrollWidth > el.clientWidth + 1;
+  });
+  if (formOverflow) throw new Error("provider dialog overflows the narrow viewport");
+  await shot("provider-dialog-mobile");
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await dlg.getByRole("button", { name: "保存" }).click();
   await dlg.waitFor({ state: "detached" });
   const ds = page.getByTestId("provider-DeepSeek");
+  await ds.locator(".prov-name").getByText("OpenCode", { exact: true }).waitFor();
+  await ds.locator(".prov-name").getByText("Pi", { exact: true }).waitFor();
+  if (await ds.locator(".prov-name").getByText("Codex", { exact: true }).count())
+    throw new Error("Chat Completions provider offered to Codex");
   await ds.getByText(/sk-e…4242|4242/).waitFor();
   if ((await page.content()).includes("sk-e2e-deepseek-4242")) throw new Error("API key leaked to the page");
   await ds.getByRole("button", { name: "测速" }).click();
@@ -1107,8 +1153,13 @@ for await (const line of createInterface({input:process.stdin})) {
   await page.getByTestId("provider-Kimi 包月").waitFor();
   await shot("providers");
   await ds.getByRole("button", { name: "切换 Agent" }).click();
-  await ds.getByRole("button", { name: "架构师" }).click();
-  await ds.getByText("架构师 在用").waitFor();
+  for (const a of [ccAgent, ...extraProviderAgents]) {
+    await ds.getByRole("button", { name: a.name, exact: true }).click();
+    await ds.getByRole("button", { name: a.name, exact: true }).and(page.locator("[aria-pressed=true]")).waitFor();
+    const saved = app.store.getAgent(a.id);
+    if (!saved?.providerId || saved.configDefaults.model || saved.configDefaults.effort !== "high")
+      throw new Error(`${a.name}: provider switch did not clear only the previous model default`);
+  }
   await page.goto(`http://localhost:${server.port}/#/a/${ccAgent.id}`);
   const provPick = page.getByRole("group", { name: "服务商" });
   await provPick.getByRole("button", { name: "DeepSeek" }).and(page.locator("[aria-pressed=true]")).waitFor();
@@ -1118,6 +1169,16 @@ for await (const line of createInterface({input:process.stdin})) {
   await provPick.getByRole("button", { name: "Kimi 包月" }).waitFor();
   await provPick.evaluate((el) => el.scrollIntoView({ block: "center" }));
   await shot("agent-provider");
+  for (const a of extraProviderAgents) {
+    await page.goto(`http://localhost:${server.port}/#/a/${a.id}`);
+    await provPick.getByRole("button", { name: "DeepSeek" }).and(page.locator("[aria-pressed=true]")).waitFor();
+    if (await provPick.getByRole("button", { name: "Kimi 包月" }).count())
+      throw new Error(`${a.harness}: provider without a model is selectable`);
+    await provPick.getByRole("button", { name: "本机配置" }).click();
+    await page.getByRole("button", { name: "保存修改" }).click();
+    await page.getByText("所有修改已保存").or(page.getByText("已保存")).first().waitFor();
+    if (app.store.getAgent(a.id)?.providerId) throw new Error(`${a.harness}: local provider selection was not saved`);
+  }
   await page.setViewportSize({ width: 1440, height: 900 });
 
   // 「Skills 与插件」: discovered read-only + imported (update / delete), per-harness support.
@@ -1284,12 +1345,16 @@ for await (const line of createInterface({input:process.stdin})) {
     await page.getByRole("heading", { name: "通知", exact: true }).waitFor();
     const notifyEnabled = page.getByRole("checkbox", { name: "开启通知" });
     const replyNotify = page.getByRole("checkbox", { name: "回复完成" });
+    const notificationCard = page.locator(".card", { has: page.getByRole("heading", { name: "系统通知" }) });
+    const taskPower = page.getByRole("checkbox", { name: "Agent 任务运行中阻止自动休眠" });
+    if (!(await taskPower.isDisabled())) throw new Error("browser must not offer system sleep control");
+    await page.getByText("仅桌面版支持；浏览器无法控制系统休眠。").waitFor();
     await replyNotify.waitFor();
     await notifyEnabled.uncheck();
-    if ((await page.locator(".notify-row input:disabled").count()) !== 4)
+    if ((await notificationCard.locator(".notify-row input:disabled").count()) !== 4)
       throw new Error("notification categories should be disabled with the main switch off");
     await notifyEnabled.check();
-    if (await page.locator(".notify-row input:disabled").count())
+    if (await notificationCard.locator(".notify-row input:disabled").count())
       throw new Error("notification categories should be enabled with the main switch on");
     if (!(await replyNotify.isChecked())) throw new Error("reply notification preference was lost");
     await shot("notifications");
@@ -1327,6 +1392,51 @@ for await (const line of createInterface({input:process.stdin})) {
     if ((await notes()).length !== before) throw new Error("reply notification should be off");
     await nav("通知");
     await replyNotify.check();
+
+    // The desktop bridge owns persistence; verify the rendered setting and error state
+    // independently from the native blocker tests.
+    await page.addInitScript(() => {
+      const state = () => ({
+        enabled: localStorage.getItem("test:task-power") === "true",
+        preventingSleep: false,
+        activeRooms: 0,
+      });
+      const target = window as unknown as { tuantuan: unknown; failTaskPower?: boolean };
+      target.tuantuan = {
+        taskPowerStatus: async () => state(),
+        setTaskPower: async (enabled: boolean) => {
+          if (target.failTaskPower) throw new Error("fixture save failed");
+          localStorage.setItem("test:task-power", String(enabled));
+          return state();
+        },
+      };
+    });
+    await page.reload();
+    await taskPower.waitFor();
+    await taskPower.check();
+    await nav("Harness");
+    await nav("通知");
+    await page.waitForFunction(
+      () => (document.querySelector('[aria-label="Agent 任务运行中阻止自动休眠"]') as HTMLInputElement)?.checked,
+    );
+    await page.reload();
+    await page.waitForFunction(
+      () => (document.querySelector('[aria-label="Agent 任务运行中阻止自动休眠"]') as HTMLInputElement)?.checked,
+    );
+    await shot("task-power-settings");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await taskPower.scrollIntoViewIfNeeded();
+    if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
+      throw new Error("task power settings overflow mobile viewport");
+    await shot("task-power-settings-mobile");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await taskPower.uncheck();
+    await page.evaluate(() => {
+      (window as unknown as { failTaskPower: boolean }).failTaskPower = true;
+    });
+    await taskPower.click();
+    await page.getByRole("alert").getByText("无法更新休眠设置：fixture save failed").waitFor();
+    if (await taskPower.isChecked()) throw new Error("failed desktop setting must keep the saved value");
     await nav("Harness");
   }
 

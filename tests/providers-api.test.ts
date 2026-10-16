@@ -72,6 +72,53 @@ test("providers API: create masked, edit keeps key, assign, delete falls back to
   expect(after?.providerId).toBeNull();
 });
 
+test("provider profiles drive the four supported coding harnesses and reject incompatible edits", async () => {
+  const body = {
+    name: "Shared API",
+    anthropicBaseUrl: "https://example.test/anthropic",
+    openaiBaseUrl: "https://example.test/v1",
+    apiKey: "sk-four-harnesses",
+    wireApi: "responses",
+    model: "main-model",
+  };
+  const p = await api<P>("POST", "/api/providers", body);
+  const agents: Agent[] = [];
+  for (const harness of ["claude-code", "opencode", "pi", "codex"]) {
+    const a = await api<Agent>(
+      "POST",
+      "/api/agents",
+      agentInput(`Profile-${harness}`, { harness, providerId: p.data.id }),
+    );
+    expect(a.status).toBe(201);
+    agents.push(a.data);
+  }
+  const wrongProtocol = await api<{ error: string }>("PUT", `/api/providers/${p.data.id}`, {
+    ...body,
+    wireApi: "chat",
+  });
+  expect(wrongProtocol.status).toBe(400);
+  expect(wrongProtocol.data.error).toContain("Profile-codex");
+  const missingModel = await api<{ error: string }>("PUT", `/api/providers/${p.data.id}`, { ...body, model: "" });
+  expect(missingModel.status).toBe(400);
+  expect(missingModel.data.error).toContain("Profile-pi");
+  expect(app.store.getProvider(p.data.id)?.model).toBe("main-model");
+  expect(app.store.getProvider(p.data.id)?.wireApi).toBe("responses");
+  await api("DELETE", `/api/providers/${p.data.id}`);
+  for (const a of agents) expect(app.store.getAgent(a.id)?.providerId).toBeNull();
+
+  const noModel = await api<P>("POST", "/api/providers", { ...body, model: "" });
+  for (const harness of ["opencode", "pi"]) {
+    const a = await api<{ error: string }>(
+      "POST",
+      "/api/agents",
+      agentInput(`No-model-${harness}`, { harness, providerId: noModel.data.id }),
+    );
+    expect(a.status).toBe(400);
+    expect(a.data.error).toContain("主模型");
+  }
+  await api("DELETE", `/api/providers/${noModel.data.id}`);
+});
+
 test("usage API: per-turn ACP usage is logged; OpenCode has no quota placeholder, Grok offers billing refresh", async () => {
   const a = await api<Agent>("POST", "/api/agents", agentInput("U"));
   const pj = await api<Project>("POST", "/api/projects", { name: "u", cwd: WORKSPACES });

@@ -14,15 +14,55 @@
 
 ## 服务商与用量
 
-左侧「服务商」页保存可复用的 API 服务商（名称、图标、Claude Code 地址、OpenAI 兼容地址、Key、主模型 / 快速模型、接口格式）。预设：Anthropic、OpenAI、xAI Grok、DeepSeek、Kimi、智谱 GLM、通义千问、MiniMax、硅基流动、OpenRouter、自定义。每个服务商可以「测速」（带 Key 请求 `/models`，显示延迟）、查「余额」（只有公开接口的才有），并用「切换 Agent」一键改用它。
+左侧「服务商」页保存可复用的 API 服务商（名称、图标、Anthropic 兼容地址、OpenAI 兼容地址、Key、主模型 / 快速模型、接口格式）。预设：Anthropic、OpenAI、xAI Grok、DeepSeek、Kimi、智谱 GLM、通义千问、MiniMax、硅基流动、OpenRouter、自定义。每个服务商可以「测速」（带 Key 请求 `/models`，显示延迟）、查「余额」（只有公开接口的才有），并用「切换 Agent」一键改用它。表单和卡片按当前地址、格式与模型显示可用 Harness。
+
+| Harness | 自定义 API 要求 |
+| --- | --- |
+| Claude Code | Anthropic 兼容地址 |
+| OpenCode、Pi | Anthropic 或 OpenAI 兼容地址，必须填写主模型 ID |
+| Codex | OpenAI 兼容地址，且服务商实际支持 Responses |
+| 自定义 API（仅对话） | Anthropic 或 OpenAI 兼容地址 |
+
+「接口格式」只决定 OpenAI 兼容地址使用 Chat Completions 还是 Responses，不做协议转换。两个地址同时填写时，OpenCode、Pi 和自定义 API 优先使用 OpenAI 地址；Claude Code 使用 Anthropic 地址。其余 Harness 继续使用自身配置与登录。
 
 Agent 页的「服务商」默认是 **本机配置**：完全沿用你自己的登录、CC Switch 和环境变量。选了服务商后只影响这个 Agent 的 Harness 进程：
 
 - Claude Code：进程环境里设置 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_*_MODEL`，并去掉继承来的其它 `ANTHROPIC_*`。
 - Codex：初始化后通过 ACP `providers/set` 指定地址和 Key（只在进程内存里，不需要 `codex login`）；模型合并进 `CODEX_CONFIG`（保留 developer_instructions）。codex-acp 只支持 Responses 接口，所以只有「接口格式 = Responses」的服务商可选。
-- 自定义 API（BYOK）：直接用服务商的地址和 Key。
+- OpenCode：通过进程内的 `OPENCODE_CONFIG_CONTENT` 注册团团服务商及模型，沿用当前版本的配置格式；保留用户其他配置。
+- Pi：通过 `pi-acp` 的启动入口加载临时 provider 扩展，并传入主模型；地址、Key 从该进程环境读取。保留原生配置目录、Skills、扩展与会话；不会写入用户的 `models.json` 或 `settings.json`。
+- 自定义 API（BYOK）：直接用服务商的地址、Key 和对应接口格式。
 
-团团从不写 `~/.claude`、`~/.codex`。Key 只存在团团数据库里，接口和页面只返回打码后的 `sk-••••1234`。编辑服务商后，用它的 Agent 下一轮会自动重启进程用上新设置；删除后这些 Agent 回到「本机配置」。
+快速模型在支持自动使用它的 Harness 中生效；Pi 将它列为可选模型。切换服务商会清除 Agent 的旧默认模型，其他默认设置保留。
+
+Pi 对目录中已识别的模型使用其输入类型、上下文窗口和输出上限；未识别模型仍按文本模型、128,000 / 8,192 的保守占位接入，不猜测图片或思考能力。扩展的价格字段仍为占位值，团团不据此估算费用；当前 pi-acp 只报告上下文占用，不报告费用。
+
+### 模型能力目录与思考等级
+
+团团用 [models.dev](https://models.dev) 的模型目录与 Pi AI 的协议兼容规则，为 Claude Code、OpenCode、Pi、Codex 配置自定义模型的思考能力。随包快照包含 231 个服务商、8,902 个模型，可离线使用。识别优先匹配当前协议的官方接口地址，其次使用所选预设；同名模型在不同服务商上的可用等级可以不同。目录未识别的模型保留 Harness 原生行为，不按名称相似程度猜参数。
+
+服务商表单展开「模型能力来源」，可为主模型和快速模型分别搜索、关联完整的 `provider/model` 引用，供自定义别名使用。关联只提供思考档位、上下文等能力，不改变请求中的模型 ID、接口地址或 Key；留空恢复按地址和预设自动识别。快速模型留空或与主模型相同时沿用主模型的来源。
+
+新会话的「团团推荐」按目录中实际可用的 `high → medium → low → on → minimal → xhigh → max` 顺序选择，并通过 Harness 真实支持的 ACP 选项应用。优先级为：会话明确设置 → Agent 默认设置 → 已识别的明确原生配置 → 团团推荐 → Harness 默认值。恢复会话和切换模型时重放明确选择；新推荐不覆盖旧会话。当前模型暂不支持的选择仍保存，切回兼容模型时恢复，界面显示 Harness 实际采用的值。
+
+原生选择保护包括 Codex 的 `CODEX_CONFIG.model_reasoning_effort`、简单用户 `config.toml` 的同名设置，以及 Claude Code 的 `CLAUDE_CODE_EFFORT_LEVEL` / `MAX_THINKING_TOKENS=0`。Codex 遇到项目 / profile 配置、用户自定义模型目录或无法可靠解析的配置时保留原生实际值。Pi 用户或项目 `settings.json` 明确设置 `defaultThinkingLevel` 时也保留原生实际值；不会把未经 Harness 信任的项目设置提升为进程覆盖。这些读取不修改文件。
+
+| Harness | 思考配置与边界 |
+| --- | --- |
+| Claude Code | 保留原生 Claude 模型能力；自定义模型按目录限制真实 effort 选项。原生 ACP 没有 `off` 选项，团团不增加关闭按钮；仅开关能力的模型不伪造 effort 档位。 |
+| OpenCode | 按 V1 / V2 配置格式生成模型 variants 与协议参数，关闭沿用原生 `none` ID。1.19.0 的 Kimi Anthropic 请求由 OpenCode 自身附加固定 `effort: high`，界面仍只有开 / 关两档。 |
+| Pi | 使用目录能力及 Pi AI 的兼容字段；仅支持开关时，原生 `high` 选项显示为「开」，不表示额外的高强度档位。Anthropic 预算通过公开请求钩子约束在目录和当前输出额度内，容纳不下时停止请求并报错。 |
+| Codex | 仍要求 Responses；原生内置模型与用户自定义模型目录优先。可适配的目录外模型使用无密钥临时目录；同一服务商配置混合内置模型与目录外模型时，本次不注入临时目录。内置模型保护名单按 Codex 0.160.1 固定，临时目录保留该版本的通用编码指令与用户指令覆盖，进程退出后清理。 |
+
+在服务商页点击「同步模型能力」才会更新本机目录。它只向 `https://models.dev/api.json` 请求公共数据，不携带服务商凭据、模型 ID 或聊天内容；启动、搜索和对话不自动联网同步。下载限制为 30 秒、15 MB，校验仅保留模型能力字段，剔除 headers、body、npm 等配置。下载、校验或保存失败均保留旧目录并可重试；成功后持久化到团团数据库。正在运行的进程继续使用已捕获的目录，新房间 / 新进程使用新目录，不打断当前任务。
+
+目录数据与 Pi AI 适配参考均采用 MIT 许可，来源和许可证见 [server/data/NOTICE.md](../server/data/NOTICE.md)。实际可用档位仍以当前 Harness 返回为准；本机模拟请求只证明选项和请求契约，不等同于真实模型效果验证。
+
+### 配置与用量
+
+OpenCode V2 的原生 provider 策略可能高于进程配置。如果它禁止了团团注册的 `tuantuan` 服务商，团团会显示 Harness 的拒绝错误，保留原策略；需由原生配置的管理者允许后重试。
+
+团团不会为服务商修改 Harness 的用户配置文件。Key 保存在团团数据库，传入对应子进程；接口和页面只返回打码后的 `sk-••••1234`。Pi 临时扩展与启动脚本不含 Key，进程退出后清理。编辑服务商后，用它的 Agent 下一轮会自动重启进程用上新设置；若修改会让已绑定 Agent 缺少必需地址、格式或模型，保存会说明受影响的 Agent。删除服务商后这些 Agent 回到「本机配置」。
 
 **从 CC Switch 导入**：点按钮后才去只读打开 `~/.cc-switch/cc-switch.db`（旧版为 `config.json`），列出 Claude / Codex 的配置，勾选后导入，不会修改 CC Switch。
 

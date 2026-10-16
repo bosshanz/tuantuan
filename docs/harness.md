@@ -37,7 +37,7 @@
 
 「Harness」页的「握手测试」会报告是否已登录。未登录时，如果 Harness 通过 ACP 声明了自带的登录流程（如 Codex 的 ChatGPT / API Key、Grok 的 grok.com、OpenCode 的 opencode-login），点「用「…」登录」由 Harness 自己完成（可能会打开浏览器），完成后自动重新检测；否则复制旁边的登录命令到终端执行，再点「重新检测」。所有 Agent 共用同一份 Harness 登录。
 
-Registry 中的登录选项来自各 Harness 自己的认证方式。第三方服务商在支持该接入方式的 Agent 设置里选择，目前为 Claude Code、Codex 和自定义 API；不能把一个 Harness 的登录选项当成任意服务商都兼容。
+Registry 中的登录选项来自各 Harness 自己的认证方式。第三方服务商可在 Claude Code、OpenCode、Pi、Codex 和自定义 API 的 Agent 设置里选择，具体地址、格式和模型要求见[服务商](providers.md)；不能把一个 Harness 的登录选项当成任意服务商都兼容。
 
 > Claude Code 的适配器没有声明登录方式，而且未登录时也能建会话，所以「已登录」只代表握手和建会话成功；真正发消息时没登录会提示去终端运行 `claude` 登录。
 

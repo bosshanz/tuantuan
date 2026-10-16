@@ -2,6 +2,7 @@ import { Check, Loader2, LogIn, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Agent, api, type HarnessStatus, type Room } from "./api";
 import { type AuthMethodView, HarnessAuth } from "./HarnessAuth";
+import { translateError, useI18n } from "./i18n";
 import { RegistryIcon } from "./Registry";
 import { CopyLine, InstallPanel } from "./Setup";
 
@@ -24,6 +25,7 @@ const SHORT: Record<string, string> = { "claude-code": "Claude", codex: "Codex",
  * Everything else (providers, skills, identity, models) lives on its own pages.
  */
 export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | null) => Promise<void> }) {
+  const { t } = useI18n();
   const [list, setList] = useState<HarnessStatus[] | null>(null);
   const [pick, setPick] = useState<string | null>(null);
   const [probe, setProbe] = useState<Probe | "running" | null>(null);
@@ -102,10 +104,10 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
     <>
       <header className="main-head">
         <div className="title">
-          <h2>开始使用团团</h2>
+          <h2>{t("开始使用团团")}</h2>
         </div>
         <button type="button" className="btn ghost sm" onClick={() => void props.onDone(null)}>
-          跳过
+          {t("跳过")}
         </button>
       </header>
       <div className="page">
@@ -114,7 +116,7 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
             <li className="onb-step" data-state={step > 1 ? "done" : "active"}>
               <div className="onb-step-head">
                 <span className="num">{step > 1 ? <Check size={13} /> : 1}</span>
-                <h3>选一个 Harness</h3>
+                <h3>{t("选一个 Harness")}</h3>
               </div>
               <fieldset className="onb-grid" aria-label="Harness">
                 {!list && <Loader2 size={16} className="spin" />}
@@ -127,9 +129,9 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                     onClick={() => setPick(c.id)}
                   >
                     <RegistryIcon id={c.registryId} name={c.name} size={22} />
-                    <span className="onb-card-name">{c.name}</span>
+                    <span className="onb-card-name">{t(c.name)}</span>
                     <span className={c.command ? "onb-card-state ok-text" : "onb-card-state"}>
-                      {c.command ? "已安装" : "未安装"}
+                      {c.command ? t("已安装") : t("未安装")}
                     </span>
                   </button>
                 ))}
@@ -149,13 +151,17 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
             <li className="onb-step" data-state={step > 2 ? "done" : step === 2 ? "active" : "todo"}>
               <div className="onb-step-head">
                 <span className="num">{step > 2 ? <Check size={13} /> : 2}</span>
-                <h3>登录</h3>
+                <h3>{t("登录")}</h3>
                 {step >= 2 && probe === "running" && <Loader2 size={14} className="spin muted" />}
-                {signedIn && <span className="ok-text onb-note">已就绪</span>}
+                {signedIn && <span className="ok-text onb-note">{t("已就绪")}</span>}
               </div>
               {step === 2 && probe && probe !== "running" && (
                 <div className="onb-detail">
-                  {!probe.ok && <div className="error-text">连不上：{probe.error}</div>}
+                  {!probe.ok && (
+                    <div className="error-text">
+                      {t("连不上：{error}", { error: translateError(probe.error ?? "") })}
+                    </div>
+                  )}
                   {probe.ok && (probe.loggedIn === false || probe.needsKey) && (
                     <>
                       <div className="row onb-actions">
@@ -169,12 +175,12 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                               onClick={() => pick && void check(pick, m.id)}
                             >
                               <LogIn size={13} />
-                              用「{m.name}」登录
+                              {t("用「{name}」登录", { name: t(m.name) })}
                             </button>
                           ))}
                         <button type="button" className="btn ghost sm" onClick={() => pick && void check(pick)}>
                           <RefreshCw size={13} />
-                          重新检测
+                          {t("重新检测")}
                         </button>
                       </div>
                       <HarnessAuth
@@ -186,14 +192,14 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                         }}
                       />
                       {login && !probe.authMethods?.some((m) => m.type !== "agent") && (
-                        <CopyLine label="或在终端运行" text={login} />
+                        <CopyLine label={t("或在终端运行")} text={login} />
                       )}
                     </>
                   )}
                   {probe.ok === false && (
                     <button type="button" className="btn ghost sm" onClick={() => pick && void check(pick)}>
                       <RefreshCw size={13} />
-                      重试
+                      {t("重试")}
                     </button>
                   )}
                 </div>
@@ -203,7 +209,7 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
             <li className="onb-step" data-state={step === 3 ? "active" : "todo"}>
               <div className="onb-step-head">
                 <span className="num">3</span>
-                <h3>给第一个 Agent 起名</h3>
+                <h3>{t("给第一个 Agent 起名")}</h3>
               </div>
               {step === 3 && (
                 <form
@@ -215,7 +221,7 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                 >
                   <input
                     className="input"
-                    aria-label="Agent 名称"
+                    aria-label={t("Agent 名称")}
                     value={name}
                     maxLength={32}
                     onChange={(e) => {
@@ -225,11 +231,11 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                   />
                   <button type="submit" className="btn primary" disabled={busy || !name.trim()}>
                     {busy && <Loader2 size={14} className="spin" />}
-                    创建并开始会话
+                    {t("创建并开始会话")}
                   </button>
                 </form>
               )}
-              {error && <div className="error-text onb-detail">{error}</div>}
+              {error && <div className="error-text onb-detail">{translateError(error)}</div>}
             </li>
           </ol>
         </div>

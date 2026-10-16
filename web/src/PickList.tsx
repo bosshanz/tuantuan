@@ -1,5 +1,6 @@
 import { Search } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { useI18n } from "./i18n";
 
 export interface PickItem {
   id: string;
@@ -21,6 +22,7 @@ export function PickList(props: {
   searchPlaceholder: string;
   emptyText: string;
 }) {
+  const { t } = useI18n();
   const [q, setQ] = useState("");
   const s = q.trim().toLowerCase();
   const match = (i: PickItem) =>
@@ -34,12 +36,12 @@ export function PickList(props: {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder={props.searchPlaceholder}
-            aria-label={props.searchPlaceholder}
+            placeholder={t(props.searchPlaceholder)}
+            aria-label={t(props.searchPlaceholder)}
           />
         </div>
       )}
-      {total === 0 && <div className="pick-empty">{props.emptyText}</div>}
+      {total === 0 && <div className="pick-empty">{t(props.emptyText)}</div>}
       {props.groups.map((g, gi) => {
         const items = g.items.filter(match);
         return (
@@ -64,7 +66,9 @@ export function PickList(props: {
                 {i.trailing}
               </label>
             ))}
-            {s && items.length === 0 && g.items.length > 0 && <div className="pick-empty">没有匹配「{q}」的项</div>}
+            {s && items.length === 0 && g.items.length > 0 && (
+              <div className="pick-empty">{t("没有匹配「{query}」的项", { query: q })}</div>
+            )}
             {g.footer}
           </div>
         );

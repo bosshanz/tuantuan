@@ -2,6 +2,7 @@ import { Check, ChevronDown, ChevronLeft, Folder, FolderOpen, Inbox } from "luci
 import { useRef, useState } from "react";
 import { type Agent, api, type Project, type Room } from "./api";
 import { Popover } from "./ConfigChips";
+import { translateError, useI18n } from "./i18n";
 import { PickList } from "./PickList";
 import { AgentAvatar } from "./ui";
 
@@ -18,6 +19,7 @@ export function NewRoom({
   onCreated: (r: Room) => void;
   onBack: () => void;
 }) {
+  const { t: tr } = useI18n();
   const [project, setProject] = useState(projectId);
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
@@ -50,46 +52,48 @@ export function NewRoom({
   return (
     <>
       <header className="main-head">
-        <button type="button" className="btn ghost icon back-btn" onClick={onBack} aria-label="返回">
+        <button type="button" className="btn ghost icon back-btn" onClick={onBack} aria-label={tr("返回")}>
           <ChevronLeft size={18} />
         </button>
         <div className="title">
-          <h2>新建会话</h2>
+          <h2>{tr("新建会话")}</h2>
         </div>
       </header>
       <form className="page" onSubmit={submit}>
         <div className="page-inner form-page" style={{ maxWidth: 600 }}>
           <div className="field">
             <span className="label">
-              项目<span className="muted">（可选）</span>
+              {tr("项目")}
+              <span className="muted">{tr("（可选）")}</span>
             </span>
             <ProjectPicker projects={projects} value={project} onChange={setProject} />
           </div>
           <label className="field">
             <span className="label">
-              名称<span className="muted">（可选）</span>
+              {tr("名称")}
+              <span className="muted">{tr("（可选）")}</span>
             </span>
             <input
               className="input"
-              aria-label="会话名称"
+              aria-label={tr("会话名称")}
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={64}
-              placeholder={autoName || "会话名称"}
+              placeholder={autoName || tr("会话名称")}
             />
           </label>
           <div className="field">
-            <span className="label">Agent（已选 {selected.length}）</span>
+            <span className="label">{tr("Agent（已选 {count}）", { count: selected.length })}</span>
             <PickList
               mode="multi"
-              searchPlaceholder="搜索 Agent"
-              emptyText="还没有 Agent"
+              searchPlaceholder={tr("搜索 Agent")}
+              emptyText={tr("还没有 Agent")}
               groups={[
                 {
                   items: agents.map((a) => ({
                     id: a.id,
                     title: a.name,
-                    description: a.identity.slice(0, 80) || (a.harness ? a.harness : "未绑定 Harness"),
+                    description: a.identity.slice(0, 80) || (a.harness ? a.harness : tr("未绑定 Harness")),
                     leading: <AgentAvatar agent={a} size={24} />,
                     plain: true,
                   })),
@@ -102,10 +106,10 @@ export function NewRoom({
           <div className={`collapse${selected.length > 1 ? " open" : ""}`}>
             <div>
               <label className="field">
-                <span className="label">主 Agent</span>
+                <span className="label">{tr("主 Agent")}</span>
                 <select
                   className="select"
-                  aria-label="主 Agent"
+                  aria-label={tr("主 Agent")}
                   value={mainId}
                   onChange={(e) => setMain(e.target.value)}
                   tabIndex={selected.length > 1 ? 0 : -1}
@@ -121,12 +125,12 @@ export function NewRoom({
           </div>
           {error && (
             <div className="form-error" role="alert">
-              {error}
+              {translateError(error)}
             </div>
           )}
           <div className="form-actions">
             <button type="submit" className="btn primary" disabled={saving || selected.length === 0}>
-              {saving ? "创建中…" : "创建会话"}
+              {saving ? tr("创建中…") : tr("创建会话")}
             </button>
           </div>
         </div>
@@ -146,13 +150,14 @@ export function ProjectPicker(props: {
   none?: { id: string; label: string; desc: string; hint: string };
   className?: string;
 }) {
+  const { t: tr } = useI18n();
   const btn = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const none = props.none ?? {
     id: DRAFTS,
-    label: "不选项目",
-    desc: "放进「草稿」，以后可以移到项目里",
-    hint: "放进「草稿」",
+    label: tr("不选项目"),
+    desc: tr("放进「草稿」，以后可以移到项目里"),
+    hint: tr("放进「草稿」"),
   };
   const DRAFTS_ID = none.id;
   const real = props.projects.filter((p) => p.id !== DRAFTS);
@@ -186,7 +191,7 @@ export function ProjectPicker(props: {
         ref={btn}
         type="button"
         className={`select proj-picker ${props.className ?? ""}`}
-        aria-label="项目"
+        aria-label={tr("项目")}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
@@ -200,10 +205,10 @@ export function ProjectPicker(props: {
         <Popover
           anchor={btn.current}
           onClose={() => setOpen(false)}
-          label="选择项目"
+          label={tr("选择项目")}
           width={Math.max(btn.current?.offsetWidth ?? 0, 240)}
         >
-          <div role="listbox" aria-label="项目" className="opt-list">
+          <div role="listbox" aria-label={tr("项目")} className="opt-list">
             {row(DRAFTS_ID, <Inbox size={14} />, none.label, none.desc)}
             {real.map((p) =>
               row(p.id, p.id === current?.id ? <FolderOpen size={14} /> : <Folder size={14} />, p.name, p.cwd ?? ""),

@@ -12,6 +12,16 @@
 
 厂商 Logo 是各公司的商标，仅用于标识对应模型；MIT 许可只覆盖 SVG 文件本身，不授予商标权。
 
+## 模型目录与适配参考
+
+| 来源 | 用途 | 许可证 |
+| --- | --- | --- |
+| [models.dev](https://github.com/anomalyco/models.dev) | 随包模型能力快照；来源与更新时间记在快照中 | [MIT](server/data/models-dev.LICENSE) |
+| [Pi AI 1.0.4](https://github.com/earendil-works/pi/tree/main/packages/ai) | 思考等级、协议兼容字段与预算适配参考 | [MIT](server/data/pi-ai.LICENSE) |
+| [Codex 0.160.1](https://github.com/openai/codex/tree/rust-v0.160.1) | 目录外模型使用的完整通用编码指令 | [Apache-2.0](server/provider-codex-prompt-0.160.1.LICENSE)；[来源说明](server/provider-codex-prompt-0.160.1.NOTICE) |
+
+目录快照不包含可执行配置；Pi SDK 由用户的 Pi Harness 加载，未作为新的团团请求依赖引入。详见 [模型数据说明](server/data/NOTICE.md)。
+
 ## 运行时依赖
 
 | 组件 | 许可证 |

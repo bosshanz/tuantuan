@@ -25,6 +25,7 @@ import { BrandMark } from "./BrandMark";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
 import { agentSubtitle, defaultsSummary } from "./config";
+import { setLocale, translateError, useI18n } from "./i18n";
 import { LibraryPage } from "./Library";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
@@ -38,6 +39,7 @@ import { SetupPage } from "./Setup";
 import { AgentAvatar, RoomIcon, roomSubtitle, useHashRoute } from "./ui";
 
 export function App() {
+  const { t } = useI18n();
   const [meta, setMeta] = useState<Meta | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [{ rooms }, dispatchRooms] = useReducer(roomListReducer, { rooms: [], loading: null });
@@ -59,17 +61,29 @@ export function App() {
   const palette = usePresence(paletteOpen, 140);
   const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
   const [profileLoaded, setProfileLoaded] = useState(false);
-  // Display name: 个人资料 (server-side); the old per-browser name is the fallback until one is set.
-  const userName = profile.name.trim() || localStorage.getItem("agent-hub:user") || "我";
-  useEffect(() => {
-    void api<Profile>("GET", "/api/profile")
-      .then((p) => {
-        setProfile(p);
-        applyAppearance(p);
-      })
-      .catch(() => {})
-      .finally(() => setProfileLoaded(true));
+  const profileRevision = useRef(0);
+  const applyProfile = useCallback((p: Profile) => {
+    ++profileRevision.current;
+    setProfile(p);
+    applyAppearance(p);
+    setLocale(p.language);
   }, []);
+  const reloadProfile = useCallback(async () => {
+    const revision = ++profileRevision.current;
+    try {
+      const p = await api<Profile>("GET", "/api/profile");
+      if (revision === profileRevision.current) applyProfile(p);
+    } catch {
+      // Keep the last confirmed profile while the server is unavailable.
+    } finally {
+      setProfileLoaded(true);
+    }
+  }, [applyProfile]);
+  // Display name: 个人资料 (server-side); the old per-browser name is the fallback until one is set.
+  const userName = profile.name.trim() || localStorage.getItem("agent-hub:user") || t("我");
+  useEffect(() => {
+    void reloadProfile();
+  }, [reloadProfile]);
   const [route, go] = useHashRoute();
   const listeners = useRef(new Set<(e: WsEvent) => void>());
   const ws = useRef<ReturnType<typeof connectWs> | null>(null);
@@ -106,16 +120,20 @@ export function App() {
     ws.current = connectWs(
       (e) => {
         if (e.type === "activity" || e.type === "room.preview") dispatchRooms({ type: "event", event: e });
+        if (e.type === "profile.updated") applyProfile(e.profile);
         for (const l of listeners.current) l(e);
       },
       (online) => {
         setConnected(online);
         // Catch events missed before the first socket opened or while it was disconnected.
-        if (online) void reload();
+        if (online) {
+          void reload();
+          void reloadProfile();
+        }
       },
     );
     return () => ws.current?.close();
-  }, [reload]);
+  }, [reload, reloadProfile, applyProfile]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -178,24 +196,30 @@ export function App() {
   });
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
-  const fullPage = section === "setup" || section === "harness" || section === "providers" || section === "library";
+  const fullPage =
+    section === "setup" ||
+    section === "harness" ||
+    section === "providers" ||
+    section === "library" ||
+    section === "notify" ||
+    section === "profile";
   const mobileView = fullPage || detailId ? "main" : "list";
-  const harnessName = (id: string) => meta?.harnesses.find((h) => h.id === id)?.name ?? id;
+  const harnessName = (id: string) => t(meta?.harnesses.find((h) => h.id === id)?.name ?? id);
 
   if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
     <div className={`shell ${fullPage ? "no-list" : ""}`} data-mobile={mobileView}>
-      <aside className="side" aria-label="侧栏">
+      <aside className="side" aria-label={t("侧栏")}>
         <div className="side-top">
-          <span className="side-brand" title="团团 Tuantuan">
+          <span className="side-brand" title={t("团团 Tuantuan")}>
             <BrandMark size={26} />
           </span>
           <span className="spacer" />
           <button
             type="button"
             className="side-icon"
-            aria-label="搜索"
-            title="搜索（⌘K / Ctrl+K）"
+            aria-label={t("搜索")}
+            title={t("搜索（⌘K / Ctrl+K）")}
             onClick={() => setPaletteOpen(true)}
           >
             <Search size={17} />
@@ -203,8 +227,8 @@ export function App() {
           <button
             type="button"
             className="side-icon"
-            aria-label="新建会话"
-            title={agents.length ? "新建会话" : "先创建一个 Agent"}
+            aria-label={t("新建会话")}
+            title={agents.length ? t("新建会话") : t("先创建一个 Agent")}
             onClick={() => go(agents.length ? "c/new" : "a/new")}
           >
             <Plus size={18} />
@@ -215,10 +239,10 @@ export function App() {
             <>
               {loaded && agents.length === 0 && (
                 <div className="list-empty first-run">
-                  <b>还没有 Agent</b>
-                  <span>创建一个，就能开始会话。</span>
+                  <b>{t("还没有 Agent")}</b>
+                  <span>{t("创建一个，就能开始会话。")}</span>
                   <button type="button" className="btn primary sm" onClick={() => go("a/new")}>
-                    创建 Agent
+                    {t("创建 Agent")}
                   </button>
                 </div>
               )}
@@ -236,12 +260,12 @@ export function App() {
                   />
                 ))}
               <div className="side-section-head">
-                <span>项目</span>
+                <span>{t("项目")}</span>
                 <button
                   type="button"
                   className="side-section-add"
-                  aria-label="新建项目"
-                  title="新建项目"
+                  aria-label={t("新建项目")}
+                  title={t("新建项目")}
                   onClick={() => go("p/new")}
                 >
                   <Plus size={14} />
@@ -274,7 +298,7 @@ export function App() {
                           <button
                             type="button"
                             className="btn ghost icon xs"
-                            aria-label={`${p.name} 设置`}
+                            aria-label={t("{name} 设置", { name: p.name })}
                             onClick={() => go(`p/${p.id}`)}
                           >
                             <Settings2 size={13} />
@@ -282,7 +306,7 @@ export function App() {
                           <button
                             type="button"
                             className="btn ghost icon xs"
-                            aria-label={`在 ${p.name} 新建会话`}
+                            aria-label={t("在 {name} 新建会话", { name: p.name })}
                             disabled={agents.length === 0}
                             onClick={() => go(`c/new/${p.id}`)}
                           >
@@ -292,7 +316,7 @@ export function App() {
                       </div>
                       <div className="collapse">
                         <div className="side-group-rooms">
-                          {list.length === 0 && <div className="side-group-empty">还没有会话</div>}
+                          {list.length === 0 && <div className="side-group-empty">{t("还没有会话")}</div>}
                           {list.map((r) => (
                             <RoomRow
                               key={r.id}
@@ -313,12 +337,12 @@ export function App() {
             <>
               <button type="button" className="side-back" onClick={() => go("c")}>
                 <ChevronLeft size={15} />
-                会话
+                {t("会话")}
               </button>
-              <div className="side-section-title">设置</div>
+              <div className="side-section-title">{t("设置")}</div>
               <SideNav
                 icon={<UserRound size={17} />}
-                label="个人资料"
+                label={t("个人资料")}
                 current={section === "profile"}
                 onClick={() => go("profile")}
               />
@@ -333,7 +357,7 @@ export function App() {
                     {agents.map((a) => {
                       const full = a.harness
                         ? [harnessName(a.harness), ...defaultsSummary(a.configDefaults)].join(" · ")
-                        : "未绑定 Harness";
+                        : t("未绑定 Harness");
                       return (
                         <button
                           type="button"
@@ -350,7 +374,7 @@ export function App() {
                               {a.harness ? (
                                 agentSubtitle(harnessName(a.harness), a.configDefaults)
                               ) : (
-                                <span className="warn-text">未绑定 Harness</span>
+                                <span className="warn-text">{t("未绑定 Harness")}</span>
                               )}
                             </span>
                           </span>
@@ -366,7 +390,7 @@ export function App() {
                       <span className="side-agent-plus">
                         <Plus size={14} />
                       </span>
-                      新建 Agent
+                      {t("新建 Agent")}
                     </button>
                   </div>
                 </div>
@@ -379,19 +403,19 @@ export function App() {
               />
               <SideNav
                 icon={<Blocks size={17} />}
-                label="Skills 与插件"
+                label={t("Skills 与插件")}
                 current={section === "library"}
                 onClick={() => go("library")}
               />
               <SideNav
                 icon={<Gauge size={17} />}
-                label="服务商与用量"
+                label={t("服务商与用量")}
                 current={section === "providers"}
                 onClick={() => go("providers")}
               />
               <SideNav
                 icon={<Bell size={17} />}
-                label="通知"
+                label={t("通知")}
                 current={section === "notify"}
                 onClick={() => go("notify")}
               />
@@ -402,8 +426,8 @@ export function App() {
           <button
             type="button"
             className="side-me"
-            title={`${userName} · 个人资料`}
-            aria-label="个人资料"
+            title={t("{name} · 个人资料", { name: userName })}
+            aria-label={t("个人资料")}
             onClick={() => go("profile")}
           >
             <UserRound size={17} />
@@ -415,13 +439,13 @@ export function App() {
             onClick={() => go(section === "rooms" ? "a" : "c")}
           >
             <Settings2 size={15} />
-            设置
+            {t("设置")}
           </button>
           <span
             className={`dot ${connected ? "ok" : "bad"}`}
-            title={connected ? "实时连接正常" : "实时连接已断开，正在重连…"}
+            title={connected ? t("实时连接正常") : t("实时连接已断开，正在重连…")}
           >
-            <span className="sr-only">{connected ? "已连接" : "重连中"}</span>
+            <span className="sr-only">{connected ? t("已连接") : t("重连中")}</span>
           </span>
         </div>
       </aside>
@@ -430,9 +454,9 @@ export function App() {
         <div className="pane" key={`${section}/${projectPage ?? ""}/${detailId ?? ""}`}>
           {loadError && (
             <div className="form-error" role="alert" style={{ margin: 12 }}>
-              加载失败：{loadError}
+              {t("加载失败：{error}", { error: translateError(loadError) })}
               <button type="button" className="btn sm" onClick={() => void reload()}>
-                重试
+                {t("重试")}
               </button>
             </div>
           )}
@@ -460,7 +484,7 @@ export function App() {
             />
           )}
           {projectPage && projectPage !== "new" && loaded && !editingProject && (
-            <NotFound what="项目" onBack={() => go("c")} />
+            <NotFound what={t("项目")} onBack={() => go("c")} />
           )}
           {section === "rooms" && !detailId && loaded && <Welcome agents={agents} rooms={rooms} meta={meta} go={go} />}
           {route[0] === "c" && detailId === "new" && (
@@ -476,7 +500,7 @@ export function App() {
               }}
             />
           )}
-          {section === "rooms" && roomId && loaded && !room && <NotFound what="会话" onBack={() => go("c")} />}
+          {section === "rooms" && roomId && loaded && !room && <NotFound what={t("会话")} onBack={() => go("c")} />}
           {room && (
             <ChatView
               key={room.id}
@@ -509,17 +533,17 @@ export function App() {
           {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
           {section === "library" && meta && <LibraryPage meta={meta} />}
           {section === "notify" && <NotificationsPage />}
-          {section === "profile" && profileLoaded && <ProfilePage profile={profile} onChange={setProfile} />}
+          {section === "profile" && profileLoaded && <ProfilePage profile={profile} onChange={applyProfile} />}
           {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
           {section === "agents" && !detailId && loaded && (
             <div className="empty">
               <div className="empty-icon">
                 <Bot size={24} />
               </div>
-              <h2>{agents.length ? "选择一个 Agent 进行编辑" : "创建你的第一个 Agent"}</h2>
+              <h2>{agents.length ? t("选择一个 Agent 进行编辑") : t("创建你的第一个 Agent")}</h2>
               <button type="button" className="btn primary" onClick={() => go("a/new")}>
                 <Plus size={16} />
-                新建 Agent
+                {t("新建 Agent")}
               </button>
             </div>
           )}
@@ -597,9 +621,10 @@ function SideNav(props: { icon: React.ReactNode; label: string; current: boolean
 
 /** Conversation row: big avatar, title, last message. */
 function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; unread: number; onOpen: () => void }) {
+  const { t, locale } = useI18n();
   const { r } = props;
   const preview = r.last
-    ? `${r.last.sender && r.agentIds.length > 1 ? `${r.last.sender}：` : ""}${previewText(r.last)}`
+    ? `${r.last.sender && r.agentIds.length > 1 ? `${r.last.sender}：` : ""}${previewText(r.last, locale)}`
     : roomSubtitle(r, props.agents);
   return (
     <button
@@ -611,14 +636,14 @@ function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; unread: nu
     >
       <span className="side-room-icon">
         <RoomIcon room={r} agents={props.agents} size={40} busy={!!r.busy} />
-        {r.busy && <span className="busy-dot" title="正在回复" />}
+        {r.busy && <span className="busy-dot" title={t("正在回复")} />}
       </span>
       <span className="li-body">
         <span className="li-title">{r.name}</span>
         <span className="li-sub">{preview}</span>
       </span>
       {props.unread > 0 && !props.current && (
-        <span className="unread" title={`${props.unread} 条未读`}>
+        <span className="unread" title={t("{count} 条未读", { count: props.unread })}>
           {props.unread > 99 ? "99+" : props.unread}
         </span>
       )}
@@ -627,6 +652,7 @@ function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; unread: nu
 }
 
 function ListPane(props: { title: string; action: React.ReactNode; onSearch: () => void; children: React.ReactNode }) {
+  const { t } = useI18n();
   return (
     <aside className="list-pane">
       <div className="pane-head">
@@ -636,7 +662,7 @@ function ListPane(props: { title: string; action: React.ReactNode; onSearch: () 
       <div className="pane-search">
         <Search size={15} />
         <button type="button" className="input search-trigger" onClick={props.onSearch}>
-          搜索会话与 Agent
+          {t("搜索会话与 Agent")}
           <kbd className="combo">
             {IS_MAC ? <Command size={10} /> : <span>Ctrl</span>}
             <span>K</span>
@@ -659,17 +685,18 @@ function Welcome({
   meta: Meta | null;
   go: (p: string) => void;
 }) {
+  const { t } = useI18n();
   const steps = [
     {
       done: agents.some((a) => a.harness),
-      title: "接入 Harness，绑定到 Agent",
-      cta: "Harness 管理",
+      title: t("接入 Harness，绑定到 Agent"),
+      cta: t("Harness 管理"),
       path: "harness",
     },
     {
       done: rooms.length > 0,
-      title: "开始一个会话",
-      cta: "新建会话",
+      title: t("开始一个会话"),
+      cta: t("新建会话"),
       path: "c/new",
       needs: agents.length > 0,
     },
@@ -678,7 +705,7 @@ function Welcome({
     <>
       <header className="main-head chat-head">
         <div className="title-pill static">
-          <h2>{agents.length === 0 ? "开始" : "团团"}</h2>
+          <h2>{agents.length === 0 ? t("开始") : t("团团")}</h2>
         </div>
       </header>
       <div className="welcome-body">
@@ -686,7 +713,7 @@ function Welcome({
           <div className="empty-icon">
             <Sparkles size={24} />
           </div>
-          <h2>{agents.length === 0 ? "欢迎使用团团" : "选择一个会话"}</h2>
+          <h2>{agents.length === 0 ? t("欢迎使用团团") : t("选择一个会话")}</h2>
           <ol className="steps">
             {steps.map((s, i) => (
               <li key={s.title} className={`step ${s.done ? "done" : ""}`}>
@@ -712,12 +739,13 @@ function Welcome({
 }
 
 function NotFound({ what, onBack }: { what: string; onBack: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="empty">
-      <h2>{what}不存在</h2>
-      <p>它可能已被删除。</p>
+      <h2>{t("找不到{what}", { what })}</h2>
+      <p>{t("它可能已被删除。")}</p>
       <button type="button" className="btn" onClick={onBack}>
-        返回列表
+        {t("返回列表")}
       </button>
     </div>
   );

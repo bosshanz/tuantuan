@@ -2,6 +2,7 @@ import { ChevronLeft, FolderPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Project } from "./api";
 import { FolderField } from "./FolderPicker";
+import { translateError, useI18n } from "./i18n";
 
 function DirField(props: {
   pick: boolean;
@@ -10,19 +11,20 @@ function DirField(props: {
   setCwd: (v: string) => void;
   preview: string;
 }) {
+  const { t: tr } = useI18n();
   return (
     <div className="field dir-field">
-      <span className="label">目录</span>
-      <fieldset className="segmented" aria-label="目录">
+      <span className="label">{tr("目录")}</span>
+      <fieldset className="segmented" aria-label={tr("目录")}>
         <button type="button" aria-pressed={!props.pick} onClick={() => props.setPick(false)}>
-          新建目录
+          {tr("新建目录")}
         </button>
         <button type="button" aria-pressed={props.pick} onClick={() => props.setPick(true)}>
-          选择已有
+          {tr("选择已有")}
         </button>
       </fieldset>
       {props.pick ? (
-        <FolderField value={props.cwd} onChange={props.setCwd} title="选择项目文件夹" />
+        <FolderField value={props.cwd} onChange={props.setCwd} title={tr("选择项目文件夹")} />
       ) : (
         <div className="folder-chip ghosted">
           <FolderPlus size={15} className="folder-chip-icon" />
@@ -46,6 +48,7 @@ function slug(name: string): string {
 }
 
 export function NewProject(props: { workspacesRoot: string; onCreated: (p: Project) => void; onBack: () => void }) {
+  const { t: tr } = useI18n();
   const [name, setName] = useState("");
   const [pick, setPick] = useState(false);
   const [cwd, setCwd] = useState("");
@@ -66,20 +69,20 @@ export function NewProject(props: { workspacesRoot: string; onCreated: (p: Proje
   return (
     <>
       <header className="main-head">
-        <button type="button" className="btn ghost icon back-btn" onClick={props.onBack} aria-label="返回">
+        <button type="button" className="btn ghost icon back-btn" onClick={props.onBack} aria-label={tr("返回")}>
           <ChevronLeft size={18} />
         </button>
         <div className="title">
-          <h2>新建项目</h2>
+          <h2>{tr("新建项目")}</h2>
         </div>
       </header>
       <form className="page" onSubmit={submit}>
         <div className="page-inner form-page" style={{ maxWidth: 600 }}>
           <label className="field">
-            <span className="label">名称</span>
+            <span className="label">{tr("名称")}</span>
             <input
               className="input"
-              aria-label="项目名称"
+              aria-label={tr("项目名称")}
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={64}
@@ -98,12 +101,12 @@ export function NewProject(props: { workspacesRoot: string; onCreated: (p: Proje
           />
           {error && (
             <div className="form-error" role="alert">
-              {error}
+              {translateError(error)}
             </div>
           )}
           <div className="form-actions">
             <button type="submit" className="btn primary" disabled={saving || !name.trim() || (pick && !cwd.trim())}>
-              {saving ? "创建中…" : "创建项目"}
+              {saving ? tr("创建中…") : tr("创建项目")}
             </button>
           </div>
         </div>
@@ -119,6 +122,7 @@ export function ProjectSettings(props: {
   onDeleted: () => void;
   onBack: () => void;
 }) {
+  const { t: tr } = useI18n();
   const { project } = props;
   const [name, setName] = useState(project.name);
   const [cwd, setCwd] = useState(project.cwd);
@@ -135,7 +139,7 @@ export function ProjectSettings(props: {
     if (
       dirChanged &&
       props.conversations > 0 &&
-      !confirm(`更换目录会重置 ${props.conversations} 个会话的 Agent 上下文。继续？`)
+      !confirm(tr("更换目录会重置 {count} 个会话的 Agent 上下文。继续？", { count: props.conversations }))
     )
       return;
     setSaving(true);
@@ -153,7 +157,15 @@ export function ProjectSettings(props: {
     }
   };
   const remove = async () => {
-    if (!confirm(`删除项目「${project.name}」及其 ${props.conversations} 个会话？目录中的文件不会删除。`)) return;
+    if (
+      !confirm(
+        tr("删除项目「{name}」及其 {count} 个会话？目录中的文件不会删除。", {
+          name: project.name,
+          count: props.conversations,
+        }),
+      )
+    )
+      return;
     try {
       await api("DELETE", `/api/projects/${project.id}`);
       props.onDeleted();
@@ -164,7 +176,7 @@ export function ProjectSettings(props: {
   return (
     <>
       <header className="main-head">
-        <button type="button" className="btn ghost icon back-btn" onClick={props.onBack} aria-label="返回">
+        <button type="button" className="btn ghost icon back-btn" onClick={props.onBack} aria-label={tr("返回")}>
           <ChevronLeft size={18} />
         </button>
         <div className="title">
@@ -175,32 +187,32 @@ export function ProjectSettings(props: {
       <form className="page" onSubmit={save}>
         <div className="page-inner form-page" style={{ maxWidth: 600 }}>
           <label className="field">
-            <span className="label">名称</span>
+            <span className="label">{tr("名称")}</span>
             <input
               className="input"
-              aria-label="项目名称"
+              aria-label={tr("项目名称")}
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={64}
             />
           </label>
           <div className="field dir-field">
-            <span className="label">目录</span>
-            <FolderField value={cwd} onChange={setCwd} title="选择项目文件夹" />
+            <span className="label">{tr("目录")}</span>
+            <FolderField value={cwd} onChange={setCwd} title={tr("选择项目文件夹")} />
           </div>
           {error && (
             <div className="form-error" role="alert">
-              {error}
+              {translateError(error)}
             </div>
           )}
           <div className="form-actions">
             <button type="submit" className="btn primary" disabled={saving || !dirty || !name.trim() || !cwd.trim()}>
-              {saving ? "保存中…" : "保存"}
+              {saving ? tr("保存中…") : tr("保存")}
             </button>
             {project.id !== "drafts" && (
               <button type="button" className="btn ghost danger" onClick={() => void remove()}>
                 <Trash2 size={14} />
-                删除项目
+                {tr("删除项目")}
               </button>
             )}
           </div>

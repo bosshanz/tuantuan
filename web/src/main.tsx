@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { getLocale, setLocale } from "./i18n";
 import "@fontsource-variable/plus-jakarta-sans/wght.css";
 import "./styles.css";
 
@@ -8,6 +9,7 @@ import "./styles.css";
 const syncHidden = () => document.documentElement.toggleAttribute("data-tab-hidden", document.hidden);
 document.addEventListener("visibilitychange", syncHidden);
 syncHidden();
+setLocale(getLocale());
 
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>

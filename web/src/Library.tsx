@@ -2,6 +2,7 @@ import { Blocks, Bot, FileText, Loader2, Package, RefreshCw, Search, SquareSlash
 import { useCallback, useEffect, useState } from "react";
 import { partsText } from "./AgentEditor";
 import { api, type Meta } from "./api";
+import { translateError, useI18n } from "./i18n";
 
 type Support = "yes" | "partial" | "no";
 interface LibItem {
@@ -45,6 +46,7 @@ const SHORT: Record<string, string> = {
 const KIND_ICON = { skill: FileText, plugin: Blocks, command: SquareSlash, agent: Bot } as const;
 
 export function LibraryPage({ meta }: { meta: Meta }) {
+  const { t } = useI18n();
   const [data, setData] = useState<{ items: LibItem[]; packages: LibPackage[] } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [kind, setKind] = useState<(typeof KINDS)[number]["id"]>("all");
@@ -77,40 +79,40 @@ export function LibraryPage({ meta }: { meta: Meta }) {
       await api("POST", "/api/library", { url: url.trim() });
       setUrl("");
     });
-  const t = q.trim().toLowerCase();
+  const query = q.trim().toLowerCase();
   const shown = (data?.items ?? []).filter(
     (i) =>
       (kind === "all" || i.kind === kind) &&
-      (!t || `${i.name} ${i.description} ${i.source} ${i.format}`.toLowerCase().includes(t)),
+      (!query || `${i.name} ${i.description} ${i.source} ${i.format}`.toLowerCase().includes(query)),
   );
   const count = (k: string) => (data?.items ?? []).filter((i) => k === "all" || i.kind === k).length;
-  const harnessName = (h: string) => SHORT[h] ?? meta.harnesses.find((x) => x.id === h)?.name ?? h;
+  const harnessName = (h: string) => t(SHORT[h] ?? meta.harnesses.find((x) => x.id === h)?.name ?? h);
 
   return (
     <>
       <header className="main-head">
         <div className="title">
-          <h2>Skills 与插件</h2>
+          <h2>{t("Skills 与插件")}</h2>
         </div>
-        <button type="button" className="btn ghost sm" onClick={() => void load()} title="重新扫描本机目录">
+        <button type="button" className="btn ghost sm" onClick={() => void load()} title={t("重新扫描本机目录")}>
           <RefreshCw size={14} />
-          刷新
+          {t("刷新")}
         </button>
       </header>
       <div className="page">
         <div className="page-inner lib">
-          {err && <div className="form-error">{err}</div>}
+          {err && <div className="form-error">{translateError(err)}</div>}
           <section className="card">
             <div className="card-head">
-              <h3>导入</h3>
-              <p>从 git 仓库或链接导入到团团自己的目录；本机的 ~/.claude、~/.codex 只读，不会改动。</p>
+              <h3>{t("导入")}</h3>
+              <p>{t("从 git 仓库或链接导入到团团自己的目录；本机的 ~/.claude、~/.codex 只读，不会改动。")}</p>
             </div>
             <div className="card-body">
               <div className="lib-import">
                 <input
                   className="input grow"
-                  aria-label="导入链接"
-                  placeholder="GitHub / git / SKILL.md 链接"
+                  aria-label={t("导入链接")}
+                  placeholder={t("GitHub / git / SKILL.md 链接")}
                   value={url}
                   spellCheck={false}
                   onChange={(e) => setUrl(e.target.value)}
@@ -128,11 +130,11 @@ export function LibraryPage({ meta }: { meta: Meta }) {
                   onClick={() => void doImport()}
                 >
                   {busy === "import" ? <Loader2 size={14} className="spin" /> : <Package size={14} />}
-                  导入
+                  {t("导入")}
                 </button>
               </div>
               {data && data.packages.length > 0 && (
-                <ul className="lib-pkgs" aria-label="已导入">
+                <ul className="lib-pkgs" aria-label={t("已导入")}>
                   {data.packages.map((p) => (
                     <li key={p.id} className="lib-pkg">
                       <Package size={15} className="muted" aria-hidden />
@@ -140,25 +142,25 @@ export function LibraryPage({ meta }: { meta: Meta }) {
                         <b>{p.name}</b>
                         <small title={p.url}>{p.url}</small>
                       </span>
-                      <span className="badge">{p.items} 项</span>
+                      <span className="badge">{t("{count} 项", { count: p.items })}</span>
                       <button
                         type="button"
                         className="btn ghost sm"
-                        title="重新拉取最新版本"
+                        title={t("重新拉取最新版本")}
                         disabled={!!busy}
                         onClick={() => void run(`u-${p.id}`, () => api("POST", `/api/library/${p.id}/update`))}
                       >
                         {busy === `u-${p.id}` ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
-                        更新
+                        {t("更新")}
                       </button>
                       <button
                         type="button"
                         className="btn ghost icon sm"
-                        aria-label={`删除 ${p.name}`}
-                        title="删除"
+                        aria-label={t("删除 {name}", { name: p.name })}
+                        title={t("删除")}
                         disabled={!!busy}
                         onClick={() => {
-                          if (confirm(`删除「${p.name}」？用到它的 Agent 会自动不再加载。`))
+                          if (confirm(t("删除「{name}」？用到它的 Agent 会自动不再加载。", { name: p.name })))
                             void run(`d-${p.id}`, () => api("DELETE", `/api/library/${p.id}`));
                         }}
                       >
@@ -173,7 +175,7 @@ export function LibraryPage({ meta }: { meta: Meta }) {
 
           <section className="card">
             <div className="card-head card-head-row lib-head">
-              <div className="segmented" role="tablist" aria-label="类型">
+              <div className="segmented" role="tablist" aria-label={t("类型")}>
                 {KINDS.map((k) => (
                   <button
                     key={k.id}
@@ -182,7 +184,7 @@ export function LibraryPage({ meta }: { meta: Meta }) {
                     aria-selected={kind === k.id}
                     onClick={() => setKind(k.id)}
                   >
-                    {k.label}
+                    {t(k.label)}
                     <span className="lib-count">{data ? count(k.id) : ""}</span>
                   </button>
                 ))}
@@ -191,8 +193,8 @@ export function LibraryPage({ meta }: { meta: Meta }) {
                 <Search size={14} aria-hidden />
                 <input
                   className="input"
-                  aria-label="搜索库"
-                  placeholder="搜索"
+                  aria-label={t("搜索库")}
+                  placeholder={t("搜索")}
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                 />
@@ -201,11 +203,13 @@ export function LibraryPage({ meta }: { meta: Meta }) {
             <div className="card-body">
               {!data && !err && (
                 <div className="muted lib-empty">
-                  <Loader2 size={14} className="spin" /> 正在扫描…
+                  <Loader2 size={14} className="spin" /> {t("正在扫描…")}
                 </div>
               )}
               {data && shown.length === 0 && (
-                <div className="muted lib-empty">{t || kind !== "all" ? "没有匹配的结果" : "还没有 Skill 或插件"}</div>
+                <div className="muted lib-empty">
+                  {query || kind !== "all" ? t("没有匹配的结果") : t("还没有 Skill 或插件")}
+                </div>
               )}
               <ul className="lib-list">
                 {shown.map((i, n) => {
@@ -242,10 +246,13 @@ export function LibraryPage({ meta }: { meta: Meta }) {
                               data-level={s.level}
                               title={
                                 s.level === "yes"
-                                  ? `${harnessName(h)} 可用`
+                                  ? t("{name} 可用", { name: harnessName(h) })
                                   : s.level === "no"
-                                    ? `${harnessName(h)} 不支持`
-                                    : `${harnessName(h)} 不支持：${s.missing.map((m) => PART[m] ?? m).join("、")}`
+                                    ? t("{name} 不支持", { name: harnessName(h) })
+                                    : t("{name} 不支持：{missing}", {
+                                        name: harnessName(h),
+                                        missing: s.missing.map((m) => t(PART[m] ?? m)).join(", "),
+                                      })
                               }
                             >
                               {s.level === "yes" ? "✓" : s.level === "no" ? "✕" : "◐"} {harnessName(h)}

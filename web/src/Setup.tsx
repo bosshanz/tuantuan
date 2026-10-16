@@ -2,6 +2,7 @@ import { Check, Copy, Download, ExternalLink, Loader2, PlugZap, RefreshCw, Squar
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Agent, api, type HarnessStatus, type Meta } from "./api";
 import { HarnessAuth } from "./HarnessAuth";
+import { translateError, useI18n } from "./i18n";
 import { RegistryIcon, RegistrySection } from "./Registry";
 import { AgentAvatar } from "./ui";
 
@@ -21,7 +22,7 @@ interface TestResult {
   }[];
   needsKey?: boolean;
   secretEnv?: Record<string, string>;
-  /** null: couldn't tell (session/new failed for another reason, see sessionError). */
+  /** null: couldn'result tell (session/new failed for another reason, see sessionError). */
   loggedIn?: boolean | null;
   sessionError?: string | null;
   authError?: string | null;
@@ -39,6 +40,7 @@ export function SetupPage(props: {
   /** Onboarding mode: 跳过 / 完成 call this. */
   onFinish?: () => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [list, setList] = useState<HarnessStatus[] | null>(null);
   const [tests, setTests] = useState<Record<string, TestResult | "running">>({});
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export function SetupPage(props: {
 
   const [authing, setAuthing] = useState<string | null>(null);
   const test = async (id: string, methodId?: string) => {
-    setTests((t) => ({ ...t, [id]: "running" }));
+    setTests((result) => ({ ...result, [id]: "running" }));
     if (methodId) setAuthing(id);
     const r = await (methodId
       ? api<TestResult>("POST", `/api/harnesses/${id}/authenticate`, { methodId })
@@ -64,7 +66,7 @@ export function SetupPage(props: {
       error: (e as Error).message,
     }));
     setAuthing(null);
-    setTests((t) => ({ ...t, [id]: r }));
+    setTests((result) => ({ ...result, [id]: r }));
   };
 
   const bind = async (agent: Agent, harness: string) => {
@@ -100,34 +102,35 @@ export function SetupPage(props: {
       <header className="main-head">
         <PlugZap size={18} />
         <div className="title">
-          <h2>{props.onFinish ? "新手引导" : "Harness 管理"}</h2>
-          <div className="sub">接入编码 Agent（Harness），再把它们分给团团里的 Agent</div>
+          <h2>{props.onFinish ? t("新手引导") : t("Harness 管理")}</h2>
+          <div className="sub">{t("接入编码 Agent（Harness），再把它们分给团团里的 Agent")}</div>
         </div>
         {props.onFinish && (
           <button type="button" className="btn ghost sm" onClick={() => void props.onFinish?.()}>
-            跳过
+            {t("跳过")}
           </button>
         )}
         <button type="button" className="btn ghost sm" onClick={() => void refresh()}>
           <RefreshCw size={14} />
-          重新检测
+          {t("重新检测")}
         </button>
       </header>
       <div className="page">
         <div className="page-inner">
-          {error && <div className="form-error">{error}</div>}
+          {error && <div className="form-error">{translateError(error)}</div>}
           <section className="card">
             <div className="card-head">
-              <h3>1 · 安装与登录</h3>
+              <h3>{t("1 · 安装与登录")}</h3>
               <p>
-                你本机装的版本优先；没有时一键装到团团自己的目录，不需要管理员权限。登录优先用 Harness
-                自带流程，不支持时复制命令到终端。
+                {t(
+                  "你本机装的版本优先；没有时一键装到团团自己的目录，不需要管理员权限。登录优先用 Harness 自带流程，不支持时复制命令到终端。",
+                )}
               </p>
             </div>
             <div className="card-body harness-list">
               {!list && <Loader2 size={16} className="spin" />}
               {curated.map((h) => {
-                const t = tests[h.id];
+                const result = tests[h.id];
                 return (
                   <div key={h.id} className="harness-row" data-ok={h.path ? "" : undefined}>
                     <div className="harness-main">
@@ -138,7 +141,7 @@ export function SetupPage(props: {
                           <TriangleAlert size={14} className="warn-text" />
                         )}
                         <RegistryIcon id={h.registryId} name={h.name} size={16} />
-                        <b>{h.name}</b>
+                        <b>{t(h.name)}</b>
                         {h.version && <span className="badge">{h.version}</span>}
                         {h.source && (
                           <span
@@ -146,13 +149,13 @@ export function SetupPage(props: {
                             data-source={h.source}
                             title={
                               h.source === "bundled"
-                                ? "团团内置的适配器"
+                                ? t("团团内置的适配器")
                                 : h.bundledVersion
-                                  ? `用你本机的版本；内置 ${h.bundledVersion} 作后备`
+                                  ? t("用你本机的版本；内置 {version} 作后备", { version: h.bundledVersion })
                                   : undefined
                             }
                           >
-                            {SOURCE_LABEL[h.source]}
+                            {t(SOURCE_LABEL[h.source])}
                           </span>
                         )}
                         {h.docs && (
@@ -161,21 +164,21 @@ export function SetupPage(props: {
                             target="_blank"
                             rel="noreferrer"
                             className="muted"
-                            aria-label={`${h.name} 文档`}
+                            aria-label={t("{name} 文档", { name: t(h.name) })}
                           >
                             <ExternalLink size={12} />
                           </a>
                         )}
                       </div>
-                      <div className="harness-sub muted">{h.path ?? h.error}</div>
+                      <div className="harness-sub muted">{h.path ?? translateError(h.error ?? "")}</div>
                       {(!h.command || h.installers.length > 0) && <InstallPanel h={h} onInstalled={changed} />}
                       {(h.updateAvailable || h.source === "managed") && <ManagedActions h={h} onChanged={changed} />}
-                      <div className="harness-sub">登录：{h.auth}</div>
-                      {h.path && h.login && <CopyLine label="登录" text={h.login} />}
+                      <div className="harness-sub">{t("登录：{auth}", { auth: t(h.auth) })}</div>
+                      {h.path && h.login && <CopyLine label={t("登录")} text={h.login} />}
                       <HarnessAuth
                         harnessId={h.id}
-                        methods={t && t !== "running" ? t.authMethods : undefined}
-                        secretEnv={t && t !== "running" ? (t.secretEnv ?? h.secretEnv) : h.secretEnv}
+                        methods={result && result !== "running" ? result.authMethods : undefined}
+                        secretEnv={result && result !== "running" ? (result.secretEnv ?? h.secretEnv) : h.secretEnv}
                         onChanged={async () => {
                           await refresh();
                           await test(h.id);
@@ -187,52 +190,56 @@ export function SetupPage(props: {
                       <button
                         type="button"
                         className="btn sm"
-                        disabled={!h.command || t === "running"}
+                        disabled={!h.command || result === "running"}
                         onClick={() => void test(h.id)}
                       >
-                        {t === "running" ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
-                        {t && t !== "running" ? "重新检测" : "握手测试"}
+                        {result === "running" ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
+                        {result && result !== "running" ? t("重新检测") : t("握手测试")}
                       </button>
                       {authing === h.id && (
                         <div className="muted harness-test" role="status">
-                          等待登录完成…（可能会打开浏览器）
+                          {t("等待登录完成…（可能会打开浏览器）")}
                         </div>
                       )}
-                      {t && t !== "running" && (
-                        <div className={t.ok ? "ok-text harness-test" : "error-text harness-test"} role="status">
-                          {t.ok
-                            ? `ACP v${t.protocolVersion} · ${t.agentInfo?.title ?? t.agentInfo?.name ?? "已连接"} · ${
-                                t.needsKey
-                                  ? "需要 API Key"
-                                  : t.loggedIn === true
-                                    ? "已登录"
-                                    : t.loggedIn === false
-                                      ? "未登录"
-                                      : "登录状态未知"
+                      {result && result !== "running" && (
+                        <div className={result.ok ? "ok-text harness-test" : "error-text harness-test"} role="status">
+                          {result.ok
+                            ? `ACP v${result.protocolVersion} · ${result.agentInfo?.title ?? result.agentInfo?.name ?? t("已连接")} · ${
+                                result.needsKey
+                                  ? t("需要 API Key")
+                                  : result.loggedIn === true
+                                    ? t("已登录")
+                                    : result.loggedIn === false
+                                      ? t("未登录")
+                                      : t("登录状态未知")
                               }`
-                            : t.error}
+                            : translateError(result.error ?? "")}
                         </div>
                       )}
-                      {t && t !== "running" && t.ok && t.loggedIn === false && (
+                      {result && result !== "running" && result.ok && result.loggedIn === false && (
                         <div className="auth-actions">
-                          {t.authError && <div className="error-text">登录失败：{t.authError}</div>}
-                          {t.authMethods
+                          {result.authError && (
+                            <div className="error-text">
+                              {t("登录失败：{error}", { error: translateError(result.authError) })}
+                            </div>
+                          )}
+                          {result.authMethods
                             ?.filter((m) => m.type === "agent")
                             .map((m) => (
                               <button
                                 key={m.id}
                                 type="button"
                                 className="btn sm primary"
-                                title={m.description ?? undefined}
+                                title={m.description ? t(m.description) : undefined}
                                 onClick={() => void test(h.id, m.id)}
                               >
-                                用「{m.name}」登录
+                                {t("用「{name}」登录", { name: t(m.name) })}
                               </button>
                             ))}
                         </div>
                       )}
-                      {t && t !== "running" && t.ok && t.sessionError && (
-                        <div className="error-text harness-test">{t.sessionError}</div>
+                      {result && result !== "running" && result.ok && result.sessionError && (
+                        <div className="error-text harness-test">{translateError(result.sessionError)}</div>
                       )}
                     </div>
                   </div>
@@ -245,15 +252,15 @@ export function SetupPage(props: {
 
           <section className="card">
             <div className="card-head">
-              <h3>2 · 绑定到 Agent</h3>
-              <p>每个 Agent 由一个 Harness 驱动。</p>
+              <h3>{t("2 · 绑定到 Agent")}</h3>
+              <p>{t("每个 Agent 由一个 Harness 驱动。")}</p>
             </div>
             <div className="card-body">
               {installed.length > 0 && (
                 <div className="row wrap-sm" style={{ gap: 6, marginBottom: 8 }}>
                   {installed.map((h) => (
                     <button key={h.id} type="button" className="btn sm" onClick={() => void create(h)}>
-                      新建 {h.name} Agent
+                      {t("新建 {name} Agent", { name: t(h.name) })}
                     </button>
                   ))}
                 </div>
@@ -266,15 +273,15 @@ export function SetupPage(props: {
                   </a>
                   <select
                     className="select"
-                    aria-label={`${a.name} 的 Harness`}
+                    aria-label={t("{name} 的 Harness", { name: a.name })}
                     value={a.harness}
                     onChange={(e) => void bind(a, e.target.value)}
                   >
-                    <option value="">未绑定</option>
+                    <option value="">{t("未绑定")}</option>
                     {props.meta.harnesses.map((h) => (
                       <option key={h.id} value={h.id}>
-                        {h.name}
-                        {list && !list.find((x) => x.id === h.id)?.path ? "（未安装）" : ""}
+                        {t(h.name)}
+                        {list && !list.find((x) => x.id === h.id)?.path ? t("（未安装）") : ""}
                       </option>
                     ))}
                   </select>
@@ -285,7 +292,7 @@ export function SetupPage(props: {
           {props.onFinish && (
             <div>
               <button type="button" className="btn primary" onClick={() => void props.onFinish?.()}>
-                完成
+                {t("完成")}
               </button>
             </div>
           )}
@@ -297,6 +304,7 @@ export function SetupPage(props: {
 
 /** Update / uninstall a harness Tuantuan installed from the ACP registry. */
 function ManagedActions({ h, onChanged }: { h: HarnessStatus; onChanged: () => Promise<void> }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState<"update" | "remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const update = async () => {
@@ -333,29 +341,30 @@ function ManagedActions({ h, onChanged }: { h: HarnessStatus; onChanged: () => P
       {h.updateAvailable && (
         <button type="button" className="btn sm primary" disabled={!!busy} onClick={() => void update()}>
           {busy === "update" ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
-          更新到 {h.latestVersion}
+          {t("更新到 {version}", { version: h.latestVersion ?? "" })}
         </button>
       )}
       {h.source === "managed" && (
         <button type="button" className="btn ghost sm" disabled={!!busy} onClick={() => void remove()}>
-          卸载团团安装的版本
+          {t("卸载团团安装的版本")}
         </button>
       )}
-      {error && <span className="error-text">{error}</span>}
+      {error && <span className="error-text">{translateError(error)}</span>}
     </div>
   );
 }
 
 export function CopyLine({ label, text }: { label: string; text: string }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   return (
     <div className="copy-line">
-      <span className="muted">{label}</span>
+      <span className="muted">{t(label)}</span>
       <code>{text}</code>
       <button
         type="button"
         className="btn ghost sm icon"
-        aria-label={`复制${label}命令`}
+        aria-label={t("复制命令：{label}", { label: t(label) })}
         onClick={() =>
           void navigator.clipboard?.writeText(text).then(() => {
             setCopied(true);
@@ -370,12 +379,13 @@ export function CopyLine({ label, text }: { label: string; text: string }) {
 }
 
 function PathOverride({ h, onSaved }: { h: HarnessStatus; onSaved: (l: HarnessStatus[]) => void }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(!!h.override);
   const [value, setValue] = useState(h.override ?? "");
   if (!open)
     return (
       <button type="button" className="quiet-link" onClick={() => setOpen(true)}>
-        自定义路径
+        {t("自定义路径")}
       </button>
     );
   return (
@@ -391,16 +401,16 @@ function PathOverride({ h, onSaved }: { h: HarnessStatus; onSaved: (l: HarnessSt
         className="input mono grow"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="/opt/homebrew/bin/…（留空则按 PATH 查找）"
-        aria-label={`${h.name} 路径`}
+        placeholder={t("/opt/homebrew/bin/…（留空则按 PATH 查找）")}
+        aria-label={t("{name} 路径", { name: t(h.name) })}
         spellCheck={false}
       />
       <button type="submit" className="btn sm">
-        保存
+        {t("保存")}
       </button>
       {!h.override && (
         <button type="button" className="btn ghost sm" onClick={() => setOpen(false)}>
-          取消
+          {t("取消")}
         </button>
       )}
     </form>
@@ -426,6 +436,7 @@ interface InstallJob {
 
 /** One-click install: runs the harness's official installer on click, streams its log, re-detects when done. */
 export function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled: () => Promise<void> }) {
+  const { t } = useI18n();
   const [job, setJob] = useState<InstallJob | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -456,11 +467,11 @@ export function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled
   const running = job?.state === "running";
   useEffect(() => {
     if (!running) return;
-    const t = setInterval(async () => {
+    const result = setInterval(async () => {
       const j = await poll();
       if (j?.state === "done") await onInstalled();
     }, 400);
-    return () => clearInterval(t);
+    return () => clearInterval(result);
   }, [running, poll, onInstalled]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: follow the log as it grows
   useEffect(() => {
@@ -493,11 +504,11 @@ export function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled
               type="button"
               className={`btn sm ${i.available && i.id === usable[0]?.id ? "primary" : ""}`}
               disabled={!i.available}
-              title={i.reason ?? i.command}
+              title={i.reason ? translateError(i.reason) : i.command}
               onClick={() => void start(i.id)}
             >
               {n === 0 && <Download size={13} />}
-              {n === 0 ? `安装（${i.label}）` : i.label}
+              {n === 0 ? t("安装（{label}）", { label: t(i.label) }) : t(i.label)}
             </button>
           ))}
         </div>
@@ -505,26 +516,36 @@ export function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled
       {running && (
         <div className="install-status" role="status">
           <Loader2 size={13} className="spin" />
-          <span>安装中…</span>
+          <span>{t("安装中…")}</span>
           <button type="button" className="btn ghost sm" onClick={cancel}>
             <Square size={11} />
-            取消
+            {t("取消")}
           </button>
         </div>
       )}
       {job && log.length > 0 && (
-        <pre ref={box} className="install-log" data-state={job.state} role="log" aria-label={`${h.name} 安装日志`}>
+        <pre
+          ref={box}
+          className="install-log"
+          data-state={job.state}
+          role="log"
+          aria-label={t("{name} 安装日志", { name: t(h.name) })}
+        >
           {log.join("\n")}
         </pre>
       )}
-      {job?.state === "done" && <div className="ok-text harness-sub">安装完成</div>}
-      {job?.state === "error" && <div className="error-text harness-sub">安装失败：{job.error}</div>}
-      {job?.state === "cancelled" && <div className="muted harness-sub">已取消</div>}
-      {error && <div className="error-text harness-sub">{error}</div>}
+      {job?.state === "done" && <div className="ok-text harness-sub">{t("安装完成")}</div>}
+      {job?.state === "error" && (
+        <div className="error-text harness-sub">
+          {t("安装失败：{error}", { error: translateError(job.error ?? "") })}
+        </div>
+      )}
+      {job?.state === "cancelled" && <div className="muted harness-sub">{t("已取消")}</div>}
+      {error && <div className="error-text harness-sub">{translateError(error)}</div>}
       {h.command ? null : h.installers.length === 0 ? (
-        <CopyLine label="安装" text={h.install} />
+        <CopyLine label={t("安装")} text={t(h.install)} />
       ) : (
-        !running && usable.length === 0 && <CopyLine label="手动安装" text={h.install} />
+        !running && usable.length === 0 && <CopyLine label={t("手动安装")} text={t(h.install)} />
       )}
     </div>
   );

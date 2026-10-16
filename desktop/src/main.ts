@@ -9,11 +9,14 @@ import {
   Menu,
   type MenuItemConstructorOptions,
   nativeImage,
+  powerSaveBlocker,
   shell,
   Tray,
 } from "electron";
+import { isLocale, type Locale, translate } from "../../shared/i18n";
 import { registerNotifications, registerOnFirstLaunch } from "./notify";
 import { serverLayout } from "./paths";
+import { TaskPowerManager } from "./power";
 import { type RunningServer, startServer } from "./server";
 import { loginShellEnv } from "./shell-env";
 
@@ -25,6 +28,18 @@ let win: BrowserWindow | null = null;
 let srv: RunningServer | null = null;
 let tray: Tray | null = null;
 let quitting = false;
+let taskPower: TaskPowerManager | null = null;
+let locale: Locale = "zh-CN";
+const t = (source: string, params?: Record<string, string | number>) => translate(locale, source, params);
+
+function setLocale(value: unknown) {
+  if (!isLocale(value) || value === locale) return;
+  locale = value;
+  app.setAboutPanelOptions({ applicationName: t("团团") });
+  win?.setTitle(t("团团"));
+  menu();
+  updateTrayMenu();
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -66,7 +81,7 @@ function createWindow() {
     ...(b ? { x: b.x, y: b.y } : {}),
     minWidth: 900,
     minHeight: 600,
-    title: "团团",
+    title: t("团团"),
     show: false,
     backgroundColor: "#f7f6f3",
     icon: icon(),
@@ -86,7 +101,7 @@ function createWindow() {
   });
   win.once("ready-to-show", () => {
     win?.show();
-    registerOnFirstLaunch();
+    registerOnFirstLaunch(locale);
   });
   // Full screen hides the traffic lights: the UI drops the space it kept for them.
   const sendFullscreen = () => win?.webContents.send("tuantuan:fullscreen", win.isFullScreen());
@@ -119,67 +134,67 @@ function createWindow() {
 }
 
 function menu() {
-  const t: MenuItemConstructorOptions[] = [
+  const template: MenuItemConstructorOptions[] = [
     ...(isMac
       ? [
           {
-            label: "团团",
+            label: t("团团"),
             submenu: [
-              { role: "about", label: "关于团团" },
+              { role: "about", label: t("关于团团") },
               { type: "separator" },
-              { role: "hide", label: "隐藏团团" },
-              { role: "hideOthers", label: "隐藏其他" },
-              { role: "unhide", label: "全部显示" },
+              { role: "hide", label: t("隐藏团团") },
+              { role: "hideOthers", label: t("隐藏其他") },
+              { role: "unhide", label: t("全部显示") },
               { type: "separator" },
-              { role: "quit", label: "退出团团" },
+              { role: "quit", label: t("退出团团") },
             ],
           } as MenuItemConstructorOptions,
         ]
       : []),
     {
-      label: "编辑",
+      label: t("编辑"),
       submenu: [
-        { role: "undo", label: "撤销" },
-        { role: "redo", label: "重做" },
+        { role: "undo", label: t("撤销") },
+        { role: "redo", label: t("重做") },
         { type: "separator" },
-        { role: "cut", label: "剪切" },
-        { role: "copy", label: "复制" },
-        { role: "paste", label: "粘贴" },
-        { role: "selectAll", label: "全选" },
+        { role: "cut", label: t("剪切") },
+        { role: "copy", label: t("复制") },
+        { role: "paste", label: t("粘贴") },
+        { role: "selectAll", label: t("全选") },
       ],
     },
     {
-      label: "显示",
+      label: t("显示"),
       submenu: [
-        { role: "reload", label: "重新加载" },
-        { role: "toggleDevTools", label: "开发者工具" },
+        { role: "reload", label: t("重新加载") },
+        { role: "toggleDevTools", label: t("开发者工具") },
         { type: "separator" },
-        { role: "resetZoom", label: "实际大小" },
-        { role: "zoomIn", label: "放大" },
-        { role: "zoomOut", label: "缩小" },
+        { role: "resetZoom", label: t("实际大小") },
+        { role: "zoomIn", label: t("放大") },
+        { role: "zoomOut", label: t("缩小") },
         { type: "separator" },
-        { role: "togglefullscreen", label: "全屏" },
+        { role: "togglefullscreen", label: t("全屏") },
       ],
     },
     {
-      label: "窗口",
+      label: t("窗口"),
       submenu: [
-        { role: "minimize", label: "最小化" },
-        { role: "zoom", label: "缩放" },
-        ...(isMac ? ([{ type: "separator" }, { role: "front", label: "前置全部窗口" }] as const) : []),
-        ...(!isMac ? ([{ role: "quit", label: "退出" }] as const) : []),
+        { role: "minimize", label: t("最小化") },
+        { role: "zoom", label: t("缩放") },
+        ...(isMac ? ([{ type: "separator" }, { role: "front", label: t("前置全部窗口") }] as const) : []),
+        ...(!isMac ? ([{ role: "quit", label: t("退出") }] as const) : []),
       ],
     },
     {
-      label: "帮助",
+      label: t("帮助"),
       submenu: [
-        { label: "打开数据文件夹", click: () => void shell.openPath(app.getPath("userData")) },
-        { label: "打开日志", click: () => void shell.openPath(join(app.getPath("userData"), "logs")) },
-        { label: "项目主页", click: () => void shell.openExternal("https://github.com/bosshanz/tuantuan") },
+        { label: t("打开数据文件夹"), click: () => void shell.openPath(app.getPath("userData")) },
+        { label: t("打开日志"), click: () => void shell.openPath(join(app.getPath("userData"), "logs")) },
+        { label: t("项目主页"), click: () => void shell.openExternal("https://github.com/bosshanz/tuantuan") },
       ],
     },
   ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(t));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function trayIcon() {
@@ -187,15 +202,20 @@ function trayIcon() {
   const img = icon();
   if (!img) return;
   tray = new Tray(img.resize({ width: 18, height: 18 }));
-  tray.setToolTip("团团");
+  updateTrayMenu();
+  tray.on("click", () => restore());
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  tray.setToolTip(t("团团"));
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "打开团团", click: () => restore() },
+      { label: t("打开团团"), click: () => restore() },
       { type: "separator" },
-      { label: "退出", click: () => app.quit() },
+      { label: t("退出"), click: () => app.quit() },
     ]),
   );
-  tray.on("click", () => restore());
 }
 
 async function updates() {
@@ -205,7 +225,18 @@ async function updates() {
   try {
     const { autoUpdater } = await import("electron-updater");
     autoUpdater.autoDownload = true;
-    await autoUpdater.checkForUpdatesAndNotify();
+    await autoUpdater.checkForUpdatesAndNotify({
+      // The download can finish after the user changes language.
+      get title() {
+        return t("新版本已就绪");
+      },
+      get body() {
+        return t("{appName} {version} 已下载，将在退出时自动安装。", {
+          appName: t("团团"),
+          version: "{version}",
+        });
+      },
+    });
   } catch (e) {
     console.error("update check failed", e);
   }
@@ -214,10 +245,12 @@ async function updates() {
 async function boot() {
   menu();
   registerNotifications(() => win);
+  // The renderer derives this from the server profile and its existing global socket.
+  ipcMain.handle("tuantuan:set-locale", (_e, value: unknown) => setLocale(value));
   ipcMain.handle("tuantuan:pick-folder", async (e, o: { title?: string; start?: string }) => {
     const owner = BrowserWindow.fromWebContents(e.sender) ?? undefined;
     const opts: Electron.OpenDialogOptions = {
-      title: o?.title || "选择文件夹",
+      title: o?.title || t("选择文件夹"),
       message: o?.title,
       defaultPath: o?.start && existsSync(o.start) ? o.start : homedir(),
       properties: ["openDirectory", "createDirectory"],
@@ -240,14 +273,46 @@ async function boot() {
       logDir: join(app.getPath("userData"), "logs"),
     });
   } catch (e) {
-    dialog.showErrorBox("团团无法启动", `${(e as Error).message}\n\n日志：${join(app.getPath("userData"), "logs")}`);
+    dialog.showErrorBox(
+      t("团团无法启动"),
+      `${(e as Error).message}\n\n${t("日志：{path}", { path: join(app.getPath("userData"), "logs") })}`,
+    );
     app.exit(1);
     return;
   }
   srv.child.on("exit", () => {
+    taskPower?.dispose();
     if (!quitting) {
-      dialog.showErrorBox("团团的服务意外退出", `日志：${join(app.getPath("userData"), "logs", "server.log")}`);
+      dialog.showErrorBox(
+        t("团团的服务意外退出"),
+        t("日志：{path}", { path: join(app.getPath("userData"), "logs", "server.log") }),
+      );
       app.quit();
+    }
+  });
+  try {
+    const response = await fetch(new URL("/api/profile", srv.url), { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const profile = (await response.json()) as { language?: unknown };
+    if (!isLocale(profile.language)) throw new Error("Invalid profile language");
+    setLocale(profile.language);
+  } catch (error) {
+    console.error("desktop profile language sync failed", error);
+  }
+  if (quitting || !srv) return;
+  taskPower = new TaskPowerManager({
+    blocker: powerSaveBlocker,
+    settingsPath: join(app.getPath("userData"), "settings.json"),
+    serverUrl: srv.url,
+  });
+  ipcMain.handle("tuantuan:task-power-status", () => taskPower?.status());
+  ipcMain.handle("tuantuan:task-power-set", (_e, enabled: unknown) => {
+    if (typeof enabled !== "boolean") throw new Error(t("设置值必须为布尔值"));
+    try {
+      return taskPower?.setEnabled(enabled);
+    } catch (error) {
+      if (error instanceof Error && error.message === "桌面版正在退出") throw new Error(t(error.message));
+      throw error;
     }
   });
   if (process.env.TUANTUAN_DESKTOP_SMOKE) console.log(`TUANTUAN_SERVER_URL=${srv.url}`);
@@ -262,6 +327,7 @@ app.on("window-all-closed", () => {
 });
 app.on("before-quit", (e) => {
   quitting = true;
+  taskPower?.dispose();
   if (srv && srv.child.exitCode === null) {
     e.preventDefault();
     const s = srv;

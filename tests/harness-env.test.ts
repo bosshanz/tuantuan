@@ -53,6 +53,20 @@ describe("harness env inherits user config", () => {
     expect(env.EXTRA).toBe("1");
   });
 
+  test("Codex identity merges into Agent config without replacing its explicit reasoning choice", () => {
+    const env = harnessProcessEnv(
+      { CODEX_CONFIG: JSON.stringify({ model_reasoning_effort: "high", developer_instructions: "login" }) },
+      {},
+      { CODEX_CONFIG: JSON.stringify({ model_reasoning_effort: "none", developer_instructions: "agent" }) },
+      { identity: "codex-env" },
+      "identity",
+    );
+    expect(JSON.parse(env.CODEX_CONFIG as string)).toEqual({
+      model_reasoning_effort: "none",
+      developer_instructions: "agent\n\nidentity",
+    });
+  });
+
   test("materializeSkills never returns isolation env or writes shared project links", () => {
     const data = mkdtempSync(join(tmpdir(), "he-"));
     const cwd = mkdtempSync(join(tmpdir(), "he-cwd-"));
@@ -83,7 +97,10 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
 
   beforeAll(() => {
     const shell = join(fixtureRoot, "login-shell");
-    writeFileSync(shell, `#!/bin/sh\nprintf 'PATH=/usr/bin:/bin\\0HOME=${fixtureRoot}\\0'\n`);
+    writeFileSync(
+      shell,
+      `#!/bin/sh\nprintf 'PATH=/usr/bin:/bin\\0HOME=${fixtureRoot}\\0NO_PROXY=127.0.0.1,localhost\\0no_proxy=127.0.0.1,localhost\\0'\n`,
+    );
     chmodSync(shell, 0o755);
     process.env.SHELL = shell;
     mockLlm = Bun.serve({
@@ -168,7 +185,15 @@ describe("live: mock harness sees ANTHROPIC_BASE_URL from process env", () => {
         mkdirSync(home);
         mkdirSync(cwd);
         // This is the test user's login environment, not the developer machine's config or credentials.
-        const login = { HOME: home, PATH: "/usr/bin:/bin", TMPDIR: tmpdir(), LANG: "en_US.UTF-8" };
+        const login = {
+          HOME: home,
+          PATH: "/usr/bin:/bin",
+          TMPDIR: tmpdir(),
+          LANG: "en_US.UTF-8",
+          // Native SDKs may use the machine's system proxy even without HTTP_PROXY in this env.
+          NO_PROXY: "127.0.0.1,localhost",
+          no_proxy: "127.0.0.1,localhost",
+        };
         const baseUrl = `http://127.0.0.1:${mock.port}`;
         if (id === "codex") {
           writeFileSync(

@@ -2,7 +2,13 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type * as acp from "@agentclientprotocol/sdk";
 import { type CustomFormat, maskKey } from "./custom";
+import { resolveModelCapabilities } from "./model-catalog";
+import { claudeConfigOptions, claudeProviderEnv } from "./provider-claude";
+import { providerRuntimeModel } from "./provider-runtime";
+
+export { providerSupports } from "../shared/providerSupport";
 
 /**
  * 服务商 (provider profiles): a reusable base URL + key + models, applied to an agent's harness
@@ -147,6 +153,8 @@ export interface ProviderSecret {
   model: string;
   smallModel: string;
   wireApi: "responses" | "chat";
+  /** Optional model aliases -> models.dev provider/model references; never changes routing IDs. */
+  modelCatalog?: Record<string, string>;
   createdAt: number;
   updatedAt: number;
 }
@@ -170,16 +178,40 @@ export function publicProvider(s: ProviderSecret): Provider {
   };
 }
 
-/** Harnesses a profile can drive. */
-export function providerSupports(
-  s: Pick<ProviderSecret, "anthropicBaseUrl" | "openaiBaseUrl" | "wireApi">,
+/** OpenCode / Pi keep native configuration, but a selected profile owns model routing. */
+export function providerModelValues(s: ProviderSecret | null, harness: string): string[] | null {
+  if (!s || (harness !== "opencode" && harness !== "pi")) return null;
+  return [...new Set([s.model, s.smallModel].filter(Boolean).map(providerRuntimeModel))];
+}
+
+export function providerConfigOptions(
+  s: ProviderSecret | null,
   harness: string,
-) {
-  if (harness === "claude-code") return !!s.anthropicBaseUrl;
-  // codex-acp's provider slot speaks the Responses API only
-  if (harness === "codex") return !!s.openaiBaseUrl && s.wireApi === "responses";
-  if (harness === "custom") return !!(s.anthropicBaseUrl || s.openaiBaseUrl);
-  return false;
+  options: acp.SessionConfigOption[],
+  env: Record<string, string> = {},
+): acp.SessionConfigOption[] {
+  if (s && harness === "claude-code") return claudeConfigOptions(s, options, env);
+  const models = providerModelValues(s, harness);
+  if (!models) return options;
+  return options.map((o) => {
+    if (s && harness === "pi" && o.type === "select" && (o.category === "thought_level" || /thinking/.test(o.id))) {
+      const model = options.find(
+        (item) => item.type === "select" && (item.category === "model" || item.id === "model"),
+      );
+      const raw = model?.type === "select" ? model.currentValue.replace(/^tuantuan\//, "") : s.model;
+      const capability = resolveModelCapabilities(s, raw);
+      if (capability?.levels.includes("on"))
+        return {
+          ...o,
+          options: o.options
+            .flatMap((item) => ("options" in item ? item.options : [item]))
+            .map((item) => (item.value === "high" ? { ...item, name: "On" } : item)),
+        };
+    }
+    if (o.type !== "select" || (o.category !== "model" && o.id !== "model")) return o;
+    const choices = o.options.flatMap((item) => ("options" in item ? item.options : [item]));
+    return { ...o, options: choices.filter((item) => models.includes(item.value)) };
+  });
 }
 
 const ANTHROPIC_VARS = [
@@ -213,6 +245,10 @@ export function providerEnv(
       set.ANTHROPIC_DEFAULT_OPUS_MODEL = s.model;
     }
     if (s.smallModel || s.model) set.ANTHROPIC_DEFAULT_HAIKU_MODEL = s.smallModel || s.model;
+    const capabilities = claudeProviderEnv(s, { ...baseEnv, ...set });
+    for (const key of ["CLAUDE_CODE_MODEL_CAPABILITIES", "ANTHROPIC_CUSTOM_MODEL_OPTION"]) {
+      if (capabilities[key] !== undefined) set[key] = capabilities[key];
+    }
     return { set, unset: ANTHROPIC_VARS.filter((k) => !(k in set)) };
   }
   if (harness === "codex") {
@@ -236,8 +272,11 @@ export function providerEnv(
  * adapter's `_meta.claudeCode.options.settings` is the programmatic tier, above user / project /
  * local settings, and lives only in this session: nothing is written to disk.
  */
-export function claudeSettingsOverride(s: ProviderSecret): { apiKeyHelper: string; env: Record<string, string> } {
-  const { set } = providerEnv(s, "claude-code", {});
+export function claudeSettingsOverride(
+  s: ProviderSecret,
+  baseEnv: Record<string, string> = {},
+): { apiKeyHelper: string; env: Record<string, string> } {
+  const { set } = providerEnv(s, "claude-code", baseEnv);
   return { apiKeyHelper: "", env: { ...set, ANTHROPIC_API_KEY: "" } };
 }
 
@@ -255,7 +294,7 @@ export function codexProviderSet(s: ProviderSecret) {
   };
 }
 
-/** BYOK settings from a profile (anthropic endpoint preferred when present). */
+/** BYOK settings from a profile (OpenAI endpoint preferred when present). */
 export function providerAsCustom(s: ProviderSecret): {
   format: CustomFormat;
   baseUrl: string;
@@ -263,7 +302,12 @@ export function providerAsCustom(s: ProviderSecret): {
   apiKey: string;
 } {
   if (s.openaiBaseUrl)
-    return { format: "openai-chat", baseUrl: s.openaiBaseUrl.replace(/\/+$/, ""), model: s.model, apiKey: s.apiKey };
+    return {
+      format: s.wireApi === "responses" ? "openai-responses" : "openai-chat",
+      baseUrl: s.openaiBaseUrl.replace(/\/+$/, ""),
+      model: s.model,
+      apiKey: s.apiKey,
+    };
   return {
     format: "anthropic",
     baseUrl: `${s.anthropicBaseUrl.replace(/\/+$/, "")}/v1`,

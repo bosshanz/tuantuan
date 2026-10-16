@@ -16,6 +16,7 @@ import type { Agent, Room } from "./api";
 import type { Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
 import { PreviewImage } from "./ImagePreview";
+import { getLocale, intlLocale, type Locale, translate, useI18n } from "./i18n";
 import { MermaidBlock } from "./MermaidBlock";
 import { withViewTransition } from "./motion";
 
@@ -106,7 +107,7 @@ export function RoomIcon({
 
 export function roomSubtitle(room: Room, agents: Agent[]): string {
   const names = room.agentIds.map((id) => agents.find((a) => a.id === id)?.name).filter(Boolean);
-  return names.length ? names.join("、") : "Agent 已删除";
+  return names.length ? names.join(getLocale() === "en" ? ", " : "、") : translate("Agent 已删除");
 }
 
 /** Splits plain text so known @names render as mention chips. */
@@ -148,13 +149,14 @@ const markdownComponents: Components = {
   li: function MentionItem({ children }) {
     return <li>{withMentions(children, useContext(MentionNames))}</li>;
   },
-  a: ({ href, children, node }) =>
-    node && containsImage(node) ? (
+  a: function MarkdownLink({ href, children, node }) {
+    const { t } = useI18n();
+    return node && containsImage(node) ? (
       <span className="md-linked-image">
         {children}
         {href && (
           <a className="md-image-link" href={href} target="_blank" rel="noreferrer noopener">
-            打开链接
+            {t("打开链接")}
           </a>
         )}
       </span>
@@ -162,7 +164,8 @@ const markdownComponents: Components = {
       <a href={href} target="_blank" rel="noreferrer noopener">
         {children}
       </a>
-    ),
+    );
+  },
   img: ({ src, alt, title }) => (src ? <PreviewImage src={src} alt={alt} title={title} /> : <span>{alt}</span>),
   pre: ({ children, node }) => {
     const code = node?.children[0];
@@ -206,8 +209,8 @@ export function MessageMarkdown({ text, mentionNames }: { text: string; mentionN
   );
 }
 
-export function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+export function formatTime(ts: number, locale: Locale = getLocale()): string {
+  return new Date(ts).toLocaleTimeString(intlLocale(locale), { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 /** Hash routes keep the current screen on refresh/back without a router dependency. */

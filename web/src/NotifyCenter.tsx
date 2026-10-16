@@ -6,6 +6,7 @@ import { defaultAvatar } from "../../server/avatars";
 import { type GlobalEvent, NOTIFY_KINDS, NOTIFY_LABEL, type NotifyKind } from "../../shared/notify";
 import type { Agent, WsEvent } from "./api";
 import { BotAvatar } from "./BotAvatar";
+import { translate, translateError, useI18n } from "./i18n";
 import {
   avatarIcon,
   bridge,
@@ -19,6 +20,7 @@ import {
   showNotification,
   totalUnread,
 } from "./notifications";
+import { TaskPowerSettings } from "./TaskPowerSettings";
 
 const iconCache = new Map<string, Promise<string | undefined>>();
 function agentIcon(agent: Agent | undefined): Promise<string | undefined> {
@@ -48,10 +50,16 @@ export function useNotifications(o: {
   openRoomId: string | null;
   open: (roomId: string) => void;
 }) {
+  const { locale } = useI18n();
   const [unread, setUnread] = useState<Record<string, number>>({});
   const ctx = useRef(o);
   ctx.current = o;
   const seen = useRef(new Set<string>());
+  useEffect(() => {
+    void bridge()
+      ?.setLocale?.(locale)
+      .catch((error) => console.error("desktop language sync failed", error));
+  }, [locale]);
   useEffect(
     () =>
       o.subscribe((e) => {
@@ -64,7 +72,15 @@ export function useNotifications(o: {
         if (!shouldNotify(e, { settings, focused, openRoomId: ctx.current.openRoomId })) return;
         const agent = ctx.current.agents.find((a) => a.id === e.agentId);
         void agentIcon(agent).then((icon) =>
-          showNotification({ title: titleFor(e), body: e.text, roomId: e.roomId, icon }, (id) => ctx.current.open(id)),
+          showNotification(
+            {
+              title: titleFor(e),
+              body: e.kind === "error" || e.kind === "auth" ? translateError(e.text) : e.text,
+              roomId: e.roomId,
+              icon,
+            },
+            (id) => ctx.current.open(id),
+          ),
         );
       }),
     [o.subscribe],
@@ -86,9 +102,9 @@ export function useNotifications(o: {
 }
 
 function titleFor(e: Extract<GlobalEvent, { type: "notify" }>): string {
-  if (e.kind === "permission") return `${e.agentName} · 需要你批准`;
-  if (e.kind === "auth") return `${e.agentName} · 需要登录或 Key`;
-  if (e.kind === "error") return `${e.agentName} · 出错了`;
+  if (e.kind === "permission") return translate("{name} · 需要你批准", { name: e.agentName });
+  if (e.kind === "auth") return translate("{name} · 需要登录或 Key", { name: e.agentName });
+  if (e.kind === "error") return translate("{name} · 出错了", { name: e.agentName });
   return e.agentName;
 }
 
@@ -100,6 +116,7 @@ const KIND_HINT: Record<NotifyKind, string> = {
 };
 
 export function NotificationsPage() {
+  const { t } = useI18n();
   const [s, setS] = useState<NotifySettings>(loadNotifySettings);
   const support = notifySupport();
   const update = useCallback((patch: Partial<NotifySettings>) => {
@@ -113,20 +130,20 @@ export function NotificationsPage() {
     <>
       <header className="main-head">
         <div className="title">
-          <h2>通知</h2>
+          <h2>{t("通知")}</h2>
         </div>
       </header>
       <div className="page">
         <div className="page-inner">
           <section className="card">
             <div className="card-head">
-              <h3>系统通知</h3>
+              <h3>{t("系统通知")}</h3>
               <p>
                 {support === "desktop"
-                  ? "团团在后台或你没在看那个会话时提醒你。第一次发送时 macOS 会询问权限。"
+                  ? t("团团在后台或你没在看那个会话时提醒你。第一次发送时 macOS 会询问权限。")
                   : support === "web"
-                    ? "浏览器里用网页通知；第一次发送时浏览器会询问权限。"
-                    : "这个环境不支持系统通知。"}
+                    ? t("浏览器里用网页通知；第一次发送时浏览器会询问权限。")
+                    : t("这个环境不支持系统通知。")}
               </p>
             </div>
             <div className="card-body notify-list">
@@ -135,12 +152,12 @@ export function NotificationsPage() {
                   <BellRing size={15} />
                 </span>
                 <span className="grow">
-                  <b>开启通知</b>
+                  <b>{t("开启通知")}</b>
                 </span>
                 <input
                   type="checkbox"
                   className="tg"
-                  aria-label="开启通知"
+                  aria-label={t("开启通知")}
                   checked={s.enabled}
                   onChange={(e) => update({ enabled: e.target.checked })}
                 />
@@ -151,13 +168,13 @@ export function NotificationsPage() {
                     <Bell size={14} />
                   </span>
                   <span className="grow">
-                    <b>{NOTIFY_LABEL[k]}</b>
-                    <span className="muted">{KIND_HINT[k]}</span>
+                    <b>{t(NOTIFY_LABEL[k])}</b>
+                    <span className="muted">{t(KIND_HINT[k])}</span>
                   </span>
                   <input
                     type="checkbox"
                     className="tg"
-                    aria-label={NOTIFY_LABEL[k]}
+                    aria-label={t(NOTIFY_LABEL[k])}
                     disabled={!s.enabled}
                     checked={s[k]}
                     onChange={(e) => update({ [k]: e.target.checked } as Partial<NotifySettings>)}
@@ -165,10 +182,11 @@ export function NotificationsPage() {
                 </label>
               ))}
               {s.enabled && support === "web" && Notification.permission === "denied" && (
-                <p className="muted">浏览器已阻止通知，请在站点设置中允许通知。</p>
+                <p className="muted">{t("浏览器已阻止通知，请在站点设置中允许通知。")}</p>
               )}
             </div>
           </section>
+          <TaskPowerSettings />
         </div>
       </div>
     </>

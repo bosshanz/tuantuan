@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LOCALES } from "../shared/locales/types";
 import { AVATAR_SHAPES } from "./avatars";
 
 /** 个人资料: who the user is. Stored server-side (settings table) so every window and agent sees it. */
@@ -31,8 +32,8 @@ export const ProfileSchema = z.object({
     .nullable()
     .default(null),
   timezone: z.string().max(64).default(""),
-  /** Reserved for UI i18n later; not shown and not sent to agents. */
-  language: z.enum(["zh-CN", "en"]).default("zh-CN"),
+  /** Application interface language only; never added to an Agent's instructions. */
+  language: z.enum(LOCALES).default("zh-CN"),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 

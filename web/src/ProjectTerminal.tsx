@@ -4,6 +4,7 @@ import { ChevronDown, Plus, RotateCcw, SquareTerminal, Trash2, X } from "lucide-
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ProjectTerminalEvent, ProjectTerminalMeta } from "../../shared/project-terminal";
 import { api, type Project } from "./api";
+import { translateError, useI18n } from "./i18n";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalFocusRequest {
@@ -26,6 +27,7 @@ export default function ProjectTerminal(props: {
   onHide: () => void;
   onEnded: () => void;
 }) {
+  const { t: tr } = useI18n();
   const { project, visible, height, onHeightChange } = props;
   const dock = useRef<HTMLElement>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -149,7 +151,7 @@ export default function ProjectTerminal(props: {
         }
         if (remaining.length) setSessions(remaining);
         else {
-          if (ownsFocus) dock.current?.querySelector<HTMLButtonElement>('[aria-label="收起终端"]')?.focus();
+          if (ownsFocus) dock.current?.querySelector<HTMLButtonElement>("[data-terminal-hide]")?.focus();
           props.onEnded();
         }
       }
@@ -184,22 +186,22 @@ export default function ProjectTerminal(props: {
     closing?.id !== active;
   const status =
     loading || creating || restarting
-      ? "正在打开…"
+      ? tr("正在打开…")
       : selected?.connection === "starting"
-        ? "正在打开…"
+        ? tr("正在打开…")
         : selected?.connection === "reconnecting"
-          ? "正在重连…"
+          ? tr("正在重连…")
           : selected?.connection === "error"
-            ? "连接失败"
+            ? tr("连接失败")
             : selected?.meta.status === "exited"
-              ? `已退出${selected.meta.exitCode === null ? "" : ` · ${selected.meta.exitCode}`}`
+              ? `${tr("已退出")}${selected.meta.exitCode === null ? "" : ` · ${selected.meta.exitCode}`}`
               : "";
   return (
     <section
       ref={dock}
       className="project-terminal"
       style={{ height }}
-      aria-label="项目终端"
+      aria-label={tr("项目终端")}
       aria-busy={
         loading ||
         creating ||
@@ -212,7 +214,7 @@ export default function ProjectTerminal(props: {
       <hr
         className="terminal-resize"
         tabIndex={0}
-        aria-label="调整终端高度"
+        aria-label={tr("调整终端高度")}
         aria-orientation="horizontal"
         aria-valuemin={180}
         aria-valuemax={maxHeight}
@@ -246,7 +248,7 @@ export default function ProjectTerminal(props: {
       />
       <header className="terminal-head">
         <SquareTerminal size={16} />
-        <div className="terminal-tabs" role="tablist" aria-label="项目终端会话">
+        <div className="terminal-tabs" role="tablist" aria-label={tr("项目终端会话")}>
           {sessions.map((session, index) => (
             <div key={session.meta.id} className="terminal-tab" data-active={active === session.meta.id || undefined}>
               <button
@@ -274,13 +276,13 @@ export default function ProjectTerminal(props: {
                   }
                 }}
               >
-                终端 {session.meta.number}
+                {tr("终端 {count}", { count: session.meta.number })}
               </button>
               <button
                 type="button"
                 className="terminal-tab-close"
-                aria-label={`关闭终端 ${session.meta.number}`}
-                title={`关闭终端 ${session.meta.number}`}
+                aria-label={tr("关闭终端 {count}", { count: session.meta.number })}
+                title={tr("关闭终端 {count}", { count: session.meta.number })}
                 disabled={closing !== null || creating}
                 onClick={() => void end(session.meta.id)}
               >
@@ -292,8 +294,8 @@ export default function ProjectTerminal(props: {
         <button
           type="button"
           className="btn ghost icon"
-          aria-label="新建终端"
-          title="新建终端"
+          aria-label={tr("新建终端")}
+          title={tr("新建终端")}
           aria-busy={creating || undefined}
           disabled={loading || closing !== null}
           onClick={() => void add()}
@@ -320,14 +322,14 @@ export default function ProjectTerminal(props: {
             }}
           >
             <RotateCcw size={14} />
-            {selected?.meta.status === "exited" ? "重新打开" : "重试连接"}
+            {selected?.meta.status === "exited" ? tr("重新打开") : tr("重试连接")}
           </button>
         )}
         <button
           type="button"
           className="btn ghost icon"
-          title="结束终端"
-          aria-label="结束终端"
+          title={tr("结束终端")}
+          aria-label={tr("结束终端")}
           disabled={!selected || closing !== null || creating}
           onClick={() => selected && void end(selected.meta.id)}
         >
@@ -336,8 +338,9 @@ export default function ProjectTerminal(props: {
         <button
           type="button"
           className="btn ghost icon"
-          title="收起终端（Ctrl+`）"
-          aria-label="收起终端"
+          title={tr("收起终端（Ctrl+`）")}
+          aria-label={tr("收起终端")}
+          data-terminal-hide
           onClick={props.onHide}
         >
           <ChevronDown size={17} />
@@ -345,7 +348,7 @@ export default function ProjectTerminal(props: {
       </header>
       {error && (
         <div className="terminal-error" role="alert">
-          {error}
+          {translateError(error)}
         </div>
       )}
       <div className="terminal-sessions">
@@ -380,6 +383,7 @@ function TerminalSession({
   focusRequest: TerminalFocusRequest | null;
   onState: (id: string, patch: Partial<Session>) => void;
 }) {
+  const { t: tr } = useI18n();
   const { meta } = session;
   const container = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
@@ -562,6 +566,12 @@ function TerminalSession({
     };
   }, [endpoint, meta.id, session.attempt, focusRequested, onState]);
 
+  useEffect(() => {
+    Terminal.strings.promptLabel = tr("终端输入");
+    Terminal.strings.tooMuchOutput = tr("输出过多，已暂停朗读，请手动浏览各行");
+    terminal.current?.textarea?.setAttribute("aria-label", Terminal.strings.promptLabel);
+  }, [tr]);
+
   return (
     <div
       className="terminal-session"
@@ -574,7 +584,7 @@ function TerminalSession({
     >
       {session.error && (
         <div className="terminal-error" role="alert">
-          {session.error}
+          {translateError(session.error)}
         </div>
       )}
       <div className="terminal-screen" ref={container} />

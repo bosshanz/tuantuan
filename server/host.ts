@@ -3,7 +3,18 @@ import type * as acp from "@agentclientprotocol/sdk";
 import { methods } from "@agentclientprotocol/sdk";
 import { AcpProcess, type TerminalSnapshot, withTimeout } from "./acp";
 import { harnessSecretEnv } from "./harness-secrets";
-import { claudeSettingsOverride, codexProviderSet, providerAsCustom, providerEnv, providerSupports } from "./providers";
+import { providerReasoningDefaults } from "./provider-reasoning";
+import { prepareProviderRuntime } from "./provider-runtime";
+import {
+  claudeSettingsOverride,
+  codexProviderSet,
+  type ProviderSecret,
+  providerAsCustom,
+  providerConfigOptions,
+  providerEnv,
+  providerModelValues,
+  providerSupports,
+} from "./providers";
 
 const CANCEL_GRACE_MS = Number(process.env.TUANTUAN_CANCEL_GRACE_MS) || 4000;
 const RESUME_TIMEOUT_MS = 45_000;
@@ -70,6 +81,9 @@ interface Proc {
   signature: string;
   acp: AcpProcess;
   spec: HarnessSpec;
+  provider: ProviderSecret | null;
+  /** Undefined permits a recommendation; an empty object preserves native choices. */
+  reasoningPreferences?: Record<string, string>;
   ready: Promise<acp.InitializeResponse>;
   /** sessionId -> where its updates go. */
   sessions: Map<string, SessionSlot>;
@@ -189,6 +203,9 @@ export class HarnessHost {
     for (const [k, v] of Object.entries(harnessSecretEnv(this.store, spec.id))) if (!(k in agent.env)) env[k] = v;
     // 服务商: only this child process's env changes; ~/.claude / ~/.codex are never touched.
     const prov = agent.providerId ? this.store.getProvider(agent.providerId) : null;
+    if (agent.providerId && !prov) throw new ValidationError("服务商不存在，请重新选择服务商");
+    if (prov && !providerSupports(prov, agent.harness))
+      throw new ValidationError(`「${prov.name}」不能用于 ${spec.name}，请检查服务商的接口地址、格式和主模型`);
     if (prov && providerSupports(prov, agent.harness)) {
       const pe = providerEnv(prov, agent.harness, env);
       for (const k of pe.unset) delete env[k];
@@ -210,27 +227,52 @@ export class HarnessHost {
     }
     if (existing) this.dropProc(existing);
 
+    const runtime: ReturnType<typeof prepareProviderRuntime> = prov
+      ? prepareProviderRuntime(prov, agent.harness, env, status.version, {
+          command: status.command,
+          args: status.args,
+          cwd,
+        })
+      : { env, cleanup: () => {} };
+    const nativePreferences = nativeReasoningPreferences(agent.harness, env);
+
     const proc: Proc = {
       key,
       roomId,
       agentId: agent.id,
       signature,
       spec,
+      provider: prov,
+      reasoningPreferences:
+        runtime.reasoningPreferences !== undefined || Object.keys(nativePreferences).length
+          ? { ...runtime.reasoningPreferences, ...nativePreferences }
+          : undefined,
       sessions: new Map(),
       acp: null as unknown as AcpProcess,
       ready: null as never,
     };
-    proc.acp = new AcpProcess(
-      { command: status.command, args: status.args, env, cwd, skillReadRoots: mat.skills.map((s) => s.dir) },
-      {
-        onUpdate: (n) => this.onUpdate(proc, n),
-        requestPermission: (p) => this.requestPermission(proc, agent.id, p),
-        onTerminal: (t) => {
-          const slot = proc.sessions.get(t.sessionId);
-          if (slot) this.events.terminal(slot.roomId, t);
+    try {
+      proc.acp = new AcpProcess(
+        {
+          command: status.command,
+          args: status.args,
+          env: runtime.env,
+          cwd,
+          skillReadRoots: mat.skills.map((s) => s.dir),
         },
-      },
-    );
+        {
+          onUpdate: (n) => this.onUpdate(proc, n),
+          requestPermission: (p) => this.requestPermission(proc, agent.id, p),
+          onTerminal: (t) => {
+            const slot = proc.sessions.get(t.sessionId);
+            if (slot) this.events.terminal(slot.roomId, t);
+          },
+        },
+      );
+    } catch (error) {
+      runtime.cleanup();
+      throw error;
+    }
     const useProv = prov && providerSupports(prov, agent.harness) ? prov : null;
     proc.ready = proc.acp.initialize().then(async (init) => {
       if (useProv && agent.harness === "codex")
@@ -242,6 +284,7 @@ export class HarnessHost {
     });
     proc.ready.catch(() => this.dropProc(proc));
     void proc.acp.exited.then(() => {
+      runtime.cleanup();
       if (this.procs.get(key) === proc) this.dropProc(proc);
     });
     this.procs.set(key, proc);
@@ -275,7 +318,7 @@ export class HarnessHost {
         break;
       }
       case "config_option_update":
-        v.configOptions = u.configOptions;
+        v.configOptions = providerConfigOptions(p.provider, p.spec.id, u.configOptions, p.acp.launch.env);
         break;
       case "current_mode_update":
         if (v.modes) v.modes = { ...v.modes, currentModeId: u.currentModeId };
@@ -461,7 +504,10 @@ export class HarnessHost {
     };
     const preferLoad = this.wantLoad.delete(slotKey);
     const meta = withClaudePlugins(
-      withProviderMeta(identityMeta(proc.spec, identity), agent, this.store),
+      withProviderMeta(identityMeta(proc.spec, identity), agent, this.store, {
+        provider: proc.provider,
+        env: proc.acp.launch.env,
+      }),
       plugins.claudePlugins,
     );
     const saved = this.store.getAcpSession(room.id, agent.id);
@@ -532,47 +578,122 @@ export class HarnessHost {
       fresh = true;
       slot.costBase = 0;
     }
-    view.configOptions = res?.configOptions ?? [];
+    view.configOptions = providerConfigOptions(
+      proc.provider,
+      agent.harness,
+      res?.configOptions ?? [],
+      proc.acp.launch.env,
+    );
     view.modes = res?.modes ?? null;
-    // Preferences are applied on a brand-new session (ACP has no config on session/new):
-    // conversation override > agent default > harness default. Unknown / rejected values are skipped.
-    if (fresh) {
-      const want = { ...agent.configDefaults, ...this.store.getRoomConfig(room.id, agent.id) };
-      for (const [configId, value] of Object.entries(want)) {
-        checkCurrent();
-        const opt = view.configOptions.find((o) => o.id === configId);
-        if (!opt) continue;
-        let params: acp.SetSessionConfigOptionRequest;
-        if (opt.type === "select") {
-          if (opt.currentValue === value || !selectValues(opt).includes(value)) continue;
-          params = { sessionId: view.sessionId as string, configId, value } as acp.SetSessionConfigOptionRequest;
-        } else if (opt.type === "boolean") {
-          const v = value === "true";
-          if (opt.currentValue === v) continue;
-          params = {
+    const profileModels = providerModelValues(proc.provider, agent.harness);
+    if (profileModels) {
+      // A resumed OpenCode session can retain the old provider/model. Apply the current
+      // profile before prompting, while preserving explicit choices within this profile.
+      const opt = view.configOptions.find((o) => o.type === "select" && (o.category === "model" || o.id === "model"));
+      if (opt?.type !== "select") throw new ValidationError(`${proc.spec.name} 未返回模型设置，请更新 Harness`);
+      const preferences = { ...agent.configDefaults, ...this.store.getRoomConfig(room.id, agent.id) };
+      const wanted = preferences[opt.id];
+      const value = wanted && profileModels.includes(wanted) ? wanted : (profileModels[0] as string);
+      if (opt.currentValue !== value) {
+        const set = await withTimeout(
+          proc.acp.agent.request(methods.agent.session.setConfigOption, {
             sessionId: view.sessionId as string,
-            configId,
-            type: "boolean",
-            value: v,
-          } as acp.SetSessionConfigOptionRequest;
-        } else continue;
-        try {
-          const set = (await withTimeout(
-            proc.acp.agent.request(methods.agent.session.setConfigOption, params),
-            CONFIG_TIMEOUT_MS,
-            "设置超时",
-          )) as acp.SetSessionConfigOptionResponse;
-          view.configOptions = set.configOptions;
-        } catch {
-          // keep the harness default; the chips show what is actually active
-        }
+            configId: opt.id,
+            value,
+          }),
+          CONFIG_TIMEOUT_MS,
+          "设置服务商模型超时",
+        );
+        view.configOptions = providerConfigOptions(
+          proc.provider,
+          agent.harness,
+          set.configOptions,
+          proc.acp.launch.env,
+        );
+        const selected = view.configOptions.find((o) => o.id === opt.id);
+        if (selected?.type !== "select" || selected.currentValue !== value)
+          throw new ValidationError(`${proc.spec.name} 未采用服务商模型 ${value}`);
       }
+    }
+    // Fresh-session defaults: conversation > Agent > explicit native settings > recommendation.
+    if (fresh) {
+      const preferences = { ...agent.configDefaults, ...this.store.getRoomConfig(room.id, agent.id) };
+      // A model change may replace reasoning choices. Derive defaults from its real response,
+      // including when a rejected model preference leaves the original model active.
+      const model = view.configOptions.find((option) => option.category === "model" || option.id === "model");
+      const preferredModel =
+        model &&
+        (preferences[model.id] ?? (agent.harness === "claude-code" && proc.provider ? proc.provider.model : undefined));
+      if (model && preferredModel !== undefined) {
+        await this.applyConfigPreferences(proc, slot, { [model.id]: preferredModel }, checkCurrent);
+        delete preferences[model.id];
+      }
+      await this.applyConfigPreferences(
+        proc,
+        slot,
+        {
+          ...(proc.reasoningPreferences ?? providerReasoningDefaults(proc.provider, agent.harness, view.configOptions)),
+          ...preferences,
+        },
+        checkCurrent,
+      );
+    } else {
+      // Some adapters reconstruct native defaults on restore. Replay only explicit room/Agent
+      // reasoning intent; an unsupported choice remains saved for a later compatible model.
+      await this.applyConfigPreferences(proc, slot, this.reasoningPreferences(room, agent, view), checkCurrent);
     }
     checkCurrent();
     if (fresh) this.store.setAcpSession(room.id, agent.id, proc.spec.id, view.sessionId as string);
     this.slots.set(slotKey, slot);
     this.events.session(room.id, agent.id, { ...view });
     return { proc, slot };
+  }
+
+  private reasoningPreferences(room: Room, agent: Agent, view: SessionView): Record<string, string> {
+    const preferences = { ...agent.configDefaults, ...this.store.getRoomConfig(room.id, agent.id) };
+    return Object.fromEntries(
+      view.configOptions
+        .filter((option) => option.category === "thought_level" || /thinking|reasoning|effort/.test(option.id))
+        .filter((option) => preferences[option.id] !== undefined)
+        .map((option) => [option.id, preferences[option.id] as string]),
+    );
+  }
+
+  private async applyConfigPreferences(
+    proc: Proc,
+    slot: SessionSlot,
+    preferences: Record<string, string>,
+    checkCurrent: () => void = () => {},
+  ): Promise<void> {
+    for (const [configId, value] of Object.entries(preferences)) {
+      checkCurrent();
+      const option = slot.view.configOptions.find((item) => item.id === configId);
+      if (!option) continue;
+      let params: acp.SetSessionConfigOptionRequest;
+      if (option.type === "select") {
+        if (option.currentValue === value || !selectValues(option).includes(value)) continue;
+        params = { sessionId: slot.view.sessionId as string, configId, value };
+      } else if (option.type === "boolean") {
+        const selected = value === "true";
+        if (option.currentValue === selected) continue;
+        params = { sessionId: slot.view.sessionId as string, configId, type: "boolean", value: selected };
+      } else continue;
+      try {
+        const set = await withTimeout(
+          proc.acp.agent.request(methods.agent.session.setConfigOption, params),
+          CONFIG_TIMEOUT_MS,
+          "设置超时",
+        );
+        slot.view.configOptions = providerConfigOptions(
+          proc.provider,
+          proc.spec.id,
+          set.configOptions,
+          proc.acp.launch.env,
+        );
+      } catch {
+        // Keep the actual Harness value and saved intent when a preferred value is rejected.
+      }
+    }
   }
 
   private mcpServers(agent: Agent): acp.McpServer[] {
@@ -914,6 +1035,14 @@ export class HarnessHost {
       return slot.view;
     }
     const { proc, slot } = await this.session(room, agent, identity);
+    const profileModels = providerModelValues(proc.provider, agent.harness);
+    const option = slot.view.configOptions.find((o) => o.id === configId);
+    if (
+      profileModels &&
+      (option?.category === "model" || configId === "model") &&
+      !profileModels.includes(String(value))
+    )
+      throw new ValidationError("请选择当前服务商的模型；其他模型可在服务商设置中填写");
     const params =
       typeof value === "boolean"
         ? { sessionId: slot.view.sessionId as string, configId, type: "boolean" as const, value }
@@ -928,8 +1057,15 @@ export class HarnessHost {
     } catch (e) {
       throw new ValidationError(`${proc.spec.name} 拒绝了这个设置：${harnessError(proc, e).message}`);
     }
-    slot.view.configOptions = res.configOptions;
+    slot.view.configOptions = providerConfigOptions(
+      proc.provider,
+      agent.harness,
+      res.configOptions,
+      proc.acp.launch.env,
+    );
     this.store.setRoomConfig(room.id, agent.id, configId, String(value));
+    if (option?.category === "model" || configId === "model")
+      await this.applyConfigPreferences(proc, slot, this.reasoningPreferences(room, agent, slot.view));
     this.events.session(room.id, agent.id, { ...slot.view });
     return slot.view;
   }
@@ -1033,11 +1169,12 @@ export function withProviderMeta(
   meta: Record<string, unknown> | undefined,
   agent: Pick<Agent, "harness" | "providerId">,
   store: Pick<Store, "getProvider">,
+  runtime?: { provider: ProviderSecret | null; env: Record<string, string> },
 ): Record<string, unknown> | undefined {
   if (agent.harness !== "claude-code" || !agent.providerId) return meta;
-  const prov = store.getProvider(agent.providerId);
+  const prov = runtime ? runtime.provider : store.getProvider(agent.providerId);
   if (!prov || !providerSupports(prov, "claude-code")) return meta;
-  return { ...meta, claudeCode: { options: { settings: claudeSettingsOverride(prov) } } };
+  return { ...meta, claudeCode: { options: { settings: claudeSettingsOverride(prov, runtime?.env) } } };
 }
 
 /** Checked library plugins for Claude Code: session-only `plugins` option, merged with other options. */
@@ -1099,6 +1236,24 @@ function splitCommands(all: acp.AvailableCommand[]): {
 export function modelOption(opts: acp.SessionConfigOption[]): (acp.SessionConfigOption & { type: "select" }) | null {
   const o = opts.find((x) => x.type === "select" && (x.category === "model" || x.id === "model"));
   return (o as (acp.SessionConfigOption & { type: "select" }) | undefined) ?? null;
+}
+
+export function nativeReasoningPreferences(harness: string, env: Record<string, string>): Record<string, string> {
+  if (harness === "codex") {
+    try {
+      const config = JSON.parse(env.CODEX_CONFIG || "{}");
+      return typeof config.model_reasoning_effort === "string"
+        ? { reasoning_effort: config.model_reasoning_effort }
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  if (harness === "claude-code") {
+    if (env.MAX_THINKING_TOKENS === "0") return { effort: "off" };
+    if (env.CLAUDE_CODE_EFFORT_LEVEL) return { effort: env.CLAUDE_CODE_EFFORT_LEVEL };
+  }
+  return {};
 }
 
 export function selectValues(o: acp.SessionConfigOption): string[] {

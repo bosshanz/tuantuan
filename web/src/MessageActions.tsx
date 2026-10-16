@@ -2,9 +2,10 @@ import { Check, Copy, Hash, ListTree, MoreHorizontal, Reply } from "lucide-react
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "./api";
 import { Popover } from "./ConfigChips";
+import { translateError, useI18n } from "./i18n";
 import "./MessageActions.css";
 
-type Feedback = { kind: "success" | "error"; text: string } | null;
+type Feedback = { kind: "success" | "error"; text: string; reason?: string } | null;
 
 /** Message operations use the stored body/ID; rendered thoughts, tools and quoted context are never copied. */
 export function MessageActions(props: {
@@ -14,6 +15,7 @@ export function MessageActions(props: {
   onDetails?: () => void;
   selected?: boolean;
 }) {
+  const { t: tr } = useI18n();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
@@ -40,7 +42,7 @@ export function MessageActions(props: {
       setFeedback({ kind: "success", text: kind === "content" ? "已复制内容" : "已复制消息 ID" });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      setFeedback({ kind: "error", text: `复制失败：${reason}。请重试。` });
+      setFeedback({ kind: "error", text: "复制失败：{reason}。请重试。", reason });
     } finally {
       copying.current = false;
       setPending(false);
@@ -53,8 +55,8 @@ export function MessageActions(props: {
         <button
           type="button"
           className="message-action-btn"
-          aria-label="引用回复"
-          title="引用回复"
+          aria-label={tr("引用回复")}
+          title={tr("引用回复")}
           disabled={props.quoteDisabled}
           onClick={() => {
             close();
@@ -68,8 +70,8 @@ export function MessageActions(props: {
         ref={more}
         type="button"
         className="message-action-btn message-more"
-        aria-label="更多消息操作"
-        title="更多消息操作"
+        aria-label={tr("更多消息操作")}
+        title={tr("更多消息操作")}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -80,13 +82,13 @@ export function MessageActions(props: {
         <Popover
           anchor={more.current}
           onClose={close}
-          label="消息操作"
+          label={tr("消息操作")}
           width={200}
           align={props.message.senderKind === "human" ? "end" : "start"}
         >
           <fieldset
             ref={menu}
-            aria-label="消息操作选项"
+            aria-label={tr("消息操作选项")}
             className="message-actions-menu"
             onBlur={(event) => {
               const next = event.relatedTarget;
@@ -121,7 +123,7 @@ export function MessageActions(props: {
               onClick={() => void copy("content")}
             >
               <Copy size={15} aria-hidden />
-              <span>复制内容</span>
+              <span>{tr("复制内容")}</span>
             </button>
             <button
               type="button"
@@ -131,7 +133,7 @@ export function MessageActions(props: {
               onClick={() => void copy("id")}
             >
               <Hash size={15} aria-hidden />
-              <span>复制消息 ID</span>
+              <span>{tr("复制消息 ID")}</span>
             </button>
             {props.onDetails && (
               <button
@@ -146,12 +148,12 @@ export function MessageActions(props: {
                 }}
               >
                 <ListTree size={15} aria-hidden />
-                <span>查看详情</span>
+                <span>{tr("查看详情")}</span>
               </button>
             )}
             {pending && (
               <div className="message-action-feedback" role="status">
-                正在复制…
+                {tr("正在复制…")}
               </div>
             )}
             {feedback && (
@@ -161,7 +163,7 @@ export function MessageActions(props: {
                 role={feedback.kind === "error" ? "alert" : "status"}
               >
                 {feedback.kind === "success" && <Check size={13} aria-hidden />}
-                {feedback.text}
+                {tr(feedback.text, { reason: translateError(feedback.reason ?? "") })}
               </div>
             )}
           </fieldset>

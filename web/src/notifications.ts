@@ -1,3 +1,5 @@
+import type { TaskPowerStatus } from "../../shared/desktopPower";
+import type { Locale } from "../../shared/i18n";
 import { type GlobalEvent, NOTIFY_KINDS, type NotifyKind } from "../../shared/notify";
 
 export type NotifySettings = { enabled: boolean } & Record<NotifyKind, boolean>;
@@ -43,6 +45,7 @@ export type DesktopStatus = {
   last: { at: number; result: { ok: boolean; shown?: boolean; reason?: string } } | null;
 };
 type Bridge = {
+  setLocale?: (locale: Locale) => Promise<unknown>;
   notify?: (p: {
     title: string;
     body: string;
@@ -53,6 +56,8 @@ type Bridge = {
   openNotificationSettings?: () => Promise<unknown>;
   setBadge?: (n: number) => Promise<unknown>;
   onOpenRoom?: (cb: (roomId: string) => void) => () => void;
+  taskPowerStatus?: () => Promise<TaskPowerStatus>;
+  setTaskPower?: (enabled: boolean) => Promise<TaskPowerStatus>;
 };
 export const bridge = (): Bridge | undefined => (window as { tuantuan?: Bridge }).tuantuan;
 

@@ -2,6 +2,7 @@ import { KeyRound, Loader2, LogIn, SquareTerminal } from "lucide-react";
 import { useRef, useState } from "react";
 import { missingKeyVar } from "../../shared/auth";
 import { api } from "./api";
+import { translateError, useI18n } from "./i18n";
 import { CopyLine } from "./Setup";
 
 export interface AuthMethodView {
@@ -33,6 +34,7 @@ export function HarnessAuth(props: {
   disabled?: boolean;
   onBusyChange?: (busy: boolean) => void;
 }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const busyChanged = (value: boolean) => {
     setBusy(value);
@@ -78,12 +80,12 @@ export function HarnessAuth(props: {
               key={m.id}
               type="button"
               className="btn sm primary"
-              title={m.description ?? undefined}
+              title={m.description ? t(m.description) : undefined}
               disabled={disabled}
               onClick={() => void props.onAuthenticate?.(m.id)}
             >
               {props.authenticating === m.id ? <Loader2 size={13} className="spin" /> : <LogIn size={13} />}
-              用「{m.name}」登录
+              {t("用「{name}」登录", { name: t(m.name) })}
             </button>
           ))}
         </div>
@@ -100,6 +102,7 @@ export function KeyField(props: {
   disabled?: boolean;
   onBusyChange?: (busy: boolean) => void;
 }) {
+  const { t } = useI18n();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -138,14 +141,14 @@ export function KeyField(props: {
         autoComplete="off"
         spellCheck={false}
         aria-label={props.name}
-        placeholder={props.hint ? `已保存 ${props.hint}` : "粘贴 API Key"}
+        placeholder={props.hint ? t("已保存 {hint}", { hint: props.hint }) : t("粘贴 API Key")}
         value={value}
         disabled={busy || props.disabled}
         onChange={(e) => setValue(e.target.value)}
       />
       <button type="submit" className="btn sm primary" disabled={busy || props.disabled || !value.trim()}>
         {busy && <Loader2 size={13} className="spin" />}
-        保存
+        {t("保存")}
       </button>
       {props.hint && (
         <button
@@ -154,10 +157,10 @@ export function KeyField(props: {
           disabled={busy || props.disabled}
           onClick={() => void save(null)}
         >
-          清除
+          {t("清除")}
         </button>
       )}
-      {err && <span className="error-text">{err}</span>}
+      {err && <span className="error-text">{translateError(err)}</span>}
     </form>
   );
 }
@@ -173,6 +176,7 @@ function TerminalLogin({
   disabled: boolean;
   onBusyChange: (busy: boolean) => void;
 }) {
+  const { t } = useI18n();
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -202,17 +206,18 @@ function TerminalLogin({
       <div className="row" style={{ gap: 8, alignItems: "center" }}>
         <button type="button" className="btn sm" disabled={disabled || busy} onClick={() => void open()}>
           {busy ? <Loader2 size={13} className="spin" /> : <SquareTerminal size={13} />}
-          在终端中打开「{method.name}」
+          {t("在终端中打开「{name}」", { name: t(method.name) })}
         </button>
-        {msg && <span className="muted hauth-msg">{msg}</span>}
+        {msg && <span className="muted hauth-msg">{t(translateError(msg))}</span>}
       </div>
-      <CopyLine label="命令" text={method.command as string} />
+      <CopyLine label={t("命令")} text={method.command as string} />
     </div>
   );
 }
 
 /** A reply failed because the harness has no API key: say so and let the user fill it in right here. */
 export function MissingKey({ harnessId, error }: { harnessId: string | undefined; error: string }) {
+  const { t } = useI18n();
   const name = missingKeyVar(error);
   const [saved, setSaved] = useState(false);
   if (name === null || !harnessId) return null;
@@ -220,13 +225,13 @@ export function MissingKey({ harnessId, error }: { harnessId: string | undefined
     <div className="need-key" role="alert">
       <div className="row" style={{ gap: 8, alignItems: "center" }}>
         <KeyRound size={14} />
-        <b>需要 API Key</b>
+        <b>{t("需要 API Key")}</b>
         <a className="muted" href="#/harness">
-          在 Harness 页管理
+          {t("在 Harness 页管理")}
         </a>
       </div>
       {name && !saved && <KeyField harnessId={harnessId} name={name} hint="" onChanged={() => setSaved(true)} />}
-      {saved && <span className="ok-text">已保存，重新发送消息即可</span>}
+      {saved && <span className="ok-text">{t("已保存，重新发送消息即可")}</span>}
     </div>
   );
 }

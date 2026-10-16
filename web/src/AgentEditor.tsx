@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import { CUSTOM_FORMATS, DEFAULT_BASE_URL } from "../../server/custom";
+import { providerSupports, supportsProviderProfiles } from "../../shared/providerSupport";
 import { AvatarPicker } from "./AvatarPicker";
 import {
   type Agent,
@@ -31,9 +32,10 @@ import {
 import { ChoiceList, OptIcon, Popover } from "./ConfigChips";
 import { describeOptions, type Opt } from "./config";
 import { useFolderPicker } from "./FolderPicker";
+import { translate, translateError, useI18n } from "./i18n";
 import { ProjectPicker } from "./NewRoom";
 import { type PickItem, PickList } from "./PickList";
-import { HARNESS_NAMES, ProviderIcon, type ProviderItem, providerFits } from "./Providers";
+import { HARNESS_NAMES, ProviderIcon, type ProviderItem } from "./Providers";
 import { AgentAvatar } from "./ui";
 
 type Form = Omit<AgentInput, "custom"> & { color: string; avatarShape: AvatarShape; custom: CustomInput | null };
@@ -104,6 +106,7 @@ export function AgentEditor(props: {
   onDeleted: () => void;
   onStartChat: (a: Agent) => void;
 }) {
+  const { t } = useI18n();
   const { meta, agent } = props;
   const seed = useMemo(() => agent?.id ?? draftSeed(), [agent]);
   const initial = useMemo<Form>(() => {
@@ -170,7 +173,12 @@ export function AgentEditor(props: {
   };
 
   const remove = async () => {
-    if (!agent || !confirm(`删除 Agent「${agent.name}」？\n它会退出所有会话；已有的聊天记录会保留。此操作不可撤销。`))
+    if (
+      !agent ||
+      !confirm(
+        t("删除 Agent「{name}」？\n它会退出所有会话；已有的聊天记录会保留。此操作不可撤销。", { name: agent.name }),
+      )
+    )
       return;
     try {
       await api("DELETE", `/api/agents/${agent.id}`);
@@ -183,22 +191,22 @@ export function AgentEditor(props: {
   return (
     <>
       <header className="main-head">
-        <button type="button" className="btn ghost icon back-btn" onClick={props.onBack} aria-label="返回">
+        <button type="button" className="btn ghost icon back-btn" onClick={props.onBack} aria-label={t("返回")}>
           <ChevronLeft size={18} />
         </button>
         <div className="preview-head title">
           <AgentAvatar agent={form} size={28} />
           <div className="editor-title">
-            <h2>{agent ? agent.name : form.name.trim() || "新建 Agent"}</h2>
+            <h2>{agent ? agent.name : form.name.trim() || t("新建 Agent")}</h2>
             <div className="sub">
-              {form.harness === "custom" ? "自定义 API" : harness ? harness.name : "未绑定 Harness"}
+              {form.harness === "custom" ? t("自定义 API") : harness ? t(harness.name) : t("未绑定 Harness")}
             </div>
           </div>
         </div>
         {agent && (
           <button type="button" className="btn" onClick={() => props.onStartChat(agent)}>
             <MessageCircle size={15} />
-            <span className="hide-sm">对话</span>
+            <span className="hide-sm">{t("对话")}</span>
           </button>
         )}
       </header>
@@ -206,7 +214,7 @@ export function AgentEditor(props: {
         <div className="page-inner">
           <section className="card">
             <div className="card-head">
-              <h3>基本信息</h3>
+              <h3>{t("基本信息")}</h3>
             </div>
             <div className="card-body">
               <div className="row wrap-sm" style={{ alignItems: "flex-end" }}>
@@ -220,14 +228,14 @@ export function AgentEditor(props: {
                   }}
                 />
                 <label className="field grow">
-                  <span className="label">名称</span>
+                  <span className="label">{t("名称")}</span>
                   <input
                     className="input"
                     value={form.name}
                     onChange={(e) => set("name", e.target.value)}
                     maxLength={32}
                     required
-                    placeholder="例如：产品经理Alice"
+                    placeholder={t("例如：产品经理Alice")}
                   />
                 </label>
               </div>
@@ -238,7 +246,8 @@ export function AgentEditor(props: {
             <div className="card-head">
               <h3>Harness</h3>
               <p>
-                由哪个编码 Agent 来驱动它；也可选自定义 API（仅对话，无文件/终端）。<a href="#/harness">检测与登录</a>
+                {t("由哪个编码 Agent 来驱动它；也可选自定义 API（仅对话，无文件/终端）。")}{" "}
+                <a href="#/harness">{t("检测与登录")}</a>
               </p>
             </div>
             <div className="card-body">
@@ -258,16 +267,16 @@ export function AgentEditor(props: {
                     if (v !== "custom") set("custom", null);
                   }}
                 >
-                  <option value="">未绑定</option>
-                  <option value="custom">自定义 API（BYOK）</option>
+                  <option value="">{t("未绑定")}</option>
+                  <option value="custom">{t("自定义 API（BYOK）")}</option>
                   {meta.harnesses.map((h) => (
                     <option key={h.id} value={h.id}>
-                      {h.name}
+                      {t(h.name)}
                     </option>
                   ))}
                 </select>
               </label>
-              {(form.harness === "claude-code" || form.harness === "codex" || form.harness === "custom") && (
+              {supportsProviderProfiles(form.harness) && (
                 <ProviderPick
                   harness={form.harness}
                   value={form.providerId ?? null}
@@ -293,21 +302,21 @@ export function AgentEditor(props: {
               )}
               {form.harness !== "custom" && (
                 <div className="field">
-                  <span className="label">工具授权</span>
-                  <fieldset className="segmented" aria-label="工具授权">
+                  <span className="label">{t("工具授权")}</span>
+                  <fieldset className="segmented" aria-label={t("工具授权")}>
                     <button
                       type="button"
                       aria-pressed={form.permissionPolicy === "ask"}
                       onClick={() => set("permissionPolicy", "ask")}
                     >
-                      每次询问
+                      {t("每次询问")}
                     </button>
                     <button
                       type="button"
                       aria-pressed={form.permissionPolicy === "allow"}
                       onClick={() => set("permissionPolicy", "allow")}
                     >
-                      自动允许
+                      {t("自动允许")}
                     </button>
                   </fieldset>
                 </div>
@@ -326,12 +335,16 @@ export function AgentEditor(props: {
 
           <section className="card">
             <div className="card-head">
-              <h3>身份文档</h3>
+              <h3>{t("身份文档")}</h3>
               <p>
-                团团独立维护，不写进项目目录。
+                {t("团团独立维护，不写进项目目录。")}
                 {form.harness === "custom"
-                  ? "作为系统提示发送。"
-                  : harness && `${harness.name}：${IDENTITY_DELIVERY[harness.identity]}。`}
+                  ? t("作为系统提示发送。")
+                  : harness &&
+                    t("{name}：{delivery}。", {
+                      name: t(harness.name),
+                      delivery: t(IDENTITY_DELIVERY[harness.identity]),
+                    })}
               </p>
             </div>
             <div className="card-body">
@@ -340,21 +353,22 @@ export function AgentEditor(props: {
                 rows={9}
                 value={form.identity}
                 onChange={(e) => set("identity", e.target.value)}
-                aria-label="身份文档"
-                placeholder={"# 角色\n你是团队里的前端工程师……\n\n# 约定\n- 改动前先说明计划"}
+                aria-label={t("身份文档")}
+                placeholder={t("# 角色\n你是团队里的前端工程师……\n\n# 约定\n- 改动前先说明计划")}
               />
               <label className="profile-optin">
                 <input
                   type="checkbox"
                   className="tg"
-                  aria-label="附上我的「关于我」"
+                  aria-label={t("附上我的「关于我」")}
                   checked={form.useProfile !== false}
                   onChange={(e) => set("useProfile", e.target.checked)}
                 />
                 <span>
-                  附上我的「关于我」
+                  {t("附上我的「关于我」")}
                   <span className="muted">
-                    来自<a href="#/profile">个人资料</a>，新会话生效
+                    <a href="#/profile">{t("个人资料")}</a>
+                    {t(" · 新会话生效")}
                   </span>
                 </span>
               </label>
@@ -370,8 +384,8 @@ export function AgentEditor(props: {
 
           <section className="card">
             <div className="card-head">
-              <h3>环境变量</h3>
-              <p>只给这个 Agent 的 Harness 进程，例如 API Key。每行 KEY=VALUE。</p>
+              <h3>{t("环境变量")}</h3>
+              <p>{t("只给这个 Agent 的 Harness 进程，例如 API Key。每行 KEY=VALUE。")}</p>
             </div>
             <div className="card-body">
               <textarea
@@ -382,7 +396,7 @@ export function AgentEditor(props: {
                   setEnvText(e.target.value);
                   set("env", textToEnv(e.target.value));
                 }}
-                aria-label="环境变量"
+                aria-label={t("环境变量")}
                 placeholder="ANTHROPIC_API_KEY=sk-…"
                 spellCheck={false}
               />
@@ -401,15 +415,15 @@ export function AgentEditor(props: {
           {agent && (
             <section className="card">
               <div className="card-head">
-                <h3>危险操作</h3>
+                <h3>{t("危险操作")}</h3>
               </div>
               <div className="card-body row" style={{ alignItems: "center" }}>
                 <span className="grow muted" style={{ fontSize: 13 }}>
-                  删除后它会退出所有会话，聊天记录保留。
+                  {t("删除后它会退出所有会话，聊天记录保留。")}
                 </span>
                 <button type="button" className="btn danger" onClick={remove}>
                   <Trash2 size={15} />
-                  删除 Agent
+                  {t("删除 Agent")}
                 </button>
               </div>
             </section>
@@ -420,19 +434,19 @@ export function AgentEditor(props: {
             {error ? (
               <span className="error-text" style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <AlertTriangle size={14} />
-                {error}
+                {translateError(error)}
               </span>
             ) : dirty ? (
-              "有未保存的修改"
+              t("有未保存的修改")
             ) : justSaved ? (
               <>
                 <Check size={14} color="var(--ok)" />
-                已保存
+                {t("已保存")}
               </>
             ) : agent ? (
-              "所有修改已保存"
+              t("所有修改已保存")
             ) : (
-              "填写名称后即可创建"
+              t("填写名称后即可创建")
             )}
           </span>
           {agent && dirty && (
@@ -444,11 +458,11 @@ export function AgentEditor(props: {
                 setEnvText(envToText(initial.env));
               }}
             >
-              放弃修改
+              {t("放弃修改")}
             </button>
           )}
           <button type="submit" className="btn primary" disabled={saving || (!!agent && !dirty) || !form.name.trim()}>
-            {saving ? "保存中…" : agent ? "保存修改" : "创建 Agent"}
+            {saving ? t("保存中…") : agent ? t("保存修改") : t("创建 Agent")}
           </button>
         </div>
       </form>
@@ -462,6 +476,7 @@ function McpSection(props: {
   toggle: (id: string) => void;
   onMcpChange: () => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -480,7 +495,7 @@ function McpSection(props: {
     }
   };
   const remove = async (s: McpServer) => {
-    if (!confirm(`移除 MCP 服务「${s.name}」？\n所有 Agent 都将不再拿到它。`)) return;
+    if (!confirm(t("移除 MCP 服务「{name}」？\n所有 Agent 都将不再拿到它。", { name: s.name }))) return;
     try {
       await api("DELETE", `/api/mcp-servers/${s.id}`);
       await props.onMcpChange();
@@ -497,8 +512,8 @@ function McpSection(props: {
       <button
         type="button"
         className="btn ghost sm icon danger"
-        title="移除此 MCP 服务"
-        aria-label={`移除 ${s.name}`}
+        title={t("移除此 MCP 服务")}
+        aria-label={t("移除 {name}", { name: s.name })}
         onClick={(e) => {
           e.stopPropagation();
           void remove(s);
@@ -513,23 +528,23 @@ function McpSection(props: {
     <section className="card">
       <div className="card-head row" style={{ alignItems: "center" }}>
         <div className="grow">
-          <h3>MCP 服务</h3>
-          <p>新建 Harness 会话时传给它（session/new 的 mcpServers）。</p>
+          <h3>{t("MCP 服务")}</h3>
+          <p>{t("新建 Harness 会话时传给它（session/new 的 mcpServers）。")}</p>
         </div>
         <button type="button" className="btn sm" onClick={() => setAdding((v) => !v)}>
           <Plug size={13} />
-          添加
+          {t("添加")}
         </button>
       </div>
       <div className="card-body">
         {adding && (
           <div className="row wrap-sm" style={{ alignItems: "flex-end" }}>
             <label className="field" style={{ width: 160 }}>
-              <span className="label">名称</span>
-              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="可选" />
+              <span className="label">{t("名称")}</span>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("可选")} />
             </label>
             <label className="field grow">
-              <span className="label">Streamable HTTP 地址</span>
+              <span className="label">{t("Streamable HTTP 地址")}</span>
               <input
                 className="input"
                 value={url}
@@ -538,14 +553,14 @@ function McpSection(props: {
               />
             </label>
             <button type="button" className="btn primary" onClick={() => void add()} disabled={!url.trim()}>
-              添加
+              {t("添加")}
             </button>
           </div>
         )}
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error">{translateError(error)}</div>}
         <PickList
-          searchPlaceholder="搜索 MCP 服务"
-          emptyText="还没有 MCP 服务"
+          searchPlaceholder={t("搜索 MCP 服务")}
+          emptyText={t("还没有 MCP 服务")}
           groups={[{ items }]}
           selected={props.selected}
           onToggle={props.toggle}
@@ -567,6 +582,7 @@ function CustomFields(props: {
   onChange: (c: CustomInput) => void;
   agentId?: string;
 }) {
+  const { t } = useI18n();
   const { value: c, onChange } = props;
   const set = <K extends keyof CustomInput>(k: K, v: CustomInput[K]) => onChange({ ...c, [k]: v });
   const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
@@ -589,10 +605,10 @@ function CustomFields(props: {
   return (
     <>
       <label className="field">
-        <span className="label">接口格式</span>
+        <span className="label">{t("接口格式")}</span>
         <select
           className="select"
-          aria-label="接口格式"
+          aria-label={t("接口格式")}
           value={c.format}
           onChange={(e) => {
             const format = e.target.value as CustomInput["format"];
@@ -618,23 +634,23 @@ function CustomFields(props: {
         />
       </label>
       <label className="field">
-        <span className="label">API Key{props.keyHint ? ` · 已保存 ${props.keyHint}` : ""}</span>
+        <span className="label">API Key{props.keyHint ? t(" · 已保存 {hint}", { hint: props.keyHint }) : ""}</span>
         <input
           className="input mono"
           aria-label="API Key"
           type="password"
           value={c.apiKey ?? ""}
           onChange={(e) => set("apiKey", e.target.value)}
-          placeholder={props.keyHint ? "留空则保持原 Key" : "sk-…"}
+          placeholder={props.keyHint ? t("留空则保持原 Key") : "sk-…"}
           spellCheck={false}
           autoComplete="off"
         />
       </label>
       <label className="field">
-        <span className="label">模型</span>
+        <span className="label">{t("模型")}</span>
         <input
           className="input mono"
-          aria-label="模型"
+          aria-label={t("模型")}
           value={c.model}
           onChange={(e) => set("model", e.target.value)}
           placeholder="gpt-4.1 / claude-sonnet-4-5"
@@ -643,16 +659,16 @@ function CustomFields(props: {
       </label>
       <div className="row" style={{ gap: 8, alignItems: "center" }}>
         <button type="button" className="btn sm" disabled={busy || !c.model} onClick={() => void runTest()}>
-          {busy ? "测试中…" : "测试连接"}
+          {busy ? t("测试中…") : t("测试连接")}
         </button>
         {test && (
           <span className={test.ok ? "muted" : "error-text"} style={{ fontSize: 12 }}>
-            {test.ok ? `✓ ${test.text.slice(0, 80)}` : test.text}
+            {test.ok ? `✓ ${test.text.slice(0, 80)}` : translateError(test.text)}
           </span>
         )}
       </div>
       <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-        仅对话；多 Agent 时可交接。无文件与终端。
+        {t("仅对话；多 Agent 时可交接。无文件与终端。")}
       </p>
     </>
   );
@@ -674,7 +690,13 @@ interface RemoteSkill {
   description: string;
 }
 
+function skillSourceLabel(source: string): string {
+  const project = /^项目 (\.[^\s]+)$/.exec(source);
+  return project ? translate("项目 {path}", { path: project[1] ?? "" }) : translate(source);
+}
+
 function SkillText({ sk }: { sk: SkillItem }) {
+  const { t } = useI18n();
   return (
     <>
       <span className="skill-text">
@@ -684,10 +706,10 @@ function SkillText({ sk }: { sk: SkillItem }) {
       <span
         className={`badge skill-src src-${sk.origin}`}
         title={(sk.sources ?? [{ key: sk.key, label: sk.label, native: sk.native }])
-          .map((source) => `${source.label}${source.native ? " · 原生可用" : ""}：${source.key}`)
+          .map((source) => `${skillSourceLabel(source.label)}${source.native ? t(" · 原生可用") : ""}: ${source.key}`)
           .join("\n")}
       >
-        {sk.label}
+        {skillSourceLabel(sk.label)}
       </span>
     </>
   );
@@ -713,20 +735,24 @@ export function partsText(c?: Record<string, number>): string {
   if (!c) return "";
   return Object.entries(c)
     .filter(([, n]) => n > 0)
-    .map(([k, n]) => `${n} ${PART_LABEL[k] ?? k}`)
+    .map(([k, n]) => `${n} ${translate(PART_LABEL[k] ?? k)}`)
     .join(" · ");
 }
 function SupportBadge({ s, harnessName }: { s: PluginItem["support"]; harnessName: string }) {
+  const { t } = useI18n();
   if (s.level === "yes")
     return (
-      <span className="badge ok-badge" title={`${harnessName} 全部可用`}>
-        可用
+      <span className="badge ok-badge" title={t("{name} 全部可用", { name: harnessName })}>
+        {t("可用")}
       </span>
     );
-  const miss = s.missing.map((m) => PART_LABEL[m] ?? m).join("、");
+  const miss = s.missing.map((m) => t(PART_LABEL[m] ?? m)).join(", ");
   return (
-    <span className={`badge ${s.level === "no" ? "no-badge" : "warn-badge"}`} title={`${harnessName} 不支持：${miss}`}>
-      {s.level === "no" ? "不支持" : `部分 · 无${miss}`}
+    <span
+      className={`badge ${s.level === "no" ? "no-badge" : "warn-badge"}`}
+      title={t("{name} 不支持：{missing}", { name: harnessName, missing: miss })}
+    >
+      {s.level === "no" ? t("不支持") : t("部分 · 无{missing}", { missing: miss })}
     </span>
   );
 }
@@ -743,7 +769,8 @@ function SkillsCard({
   pending?: Set<string>;
   onPending?: (s: Set<string>) => void;
 }) {
-  const harnessName = HARNESS_NAMES[harness] ?? "Harness";
+  const { t } = useI18n();
+  const harnessName = t(HARNESS_NAMES[harness] ?? "Harness");
   const [items, setItems] = useState<SkillItem[] | null>(null);
   const [plugins, setPlugins] = useState<PluginItem[]>([]);
   const [q, setQ] = useState("");
@@ -844,7 +871,7 @@ function SkillsCard({
     }
   };
   const fromFolder = async () => {
-    const dir = await folder.pick("选择 Skill 文件夹");
+    const dir = await folder.pick(t("选择 Skill 文件夹"));
     if (!dir) return;
     setErr(null);
     await post({ action: "import", path: dir }).then(refresh, (e) => setErr((e as Error).message));
@@ -853,13 +880,13 @@ function SkillsCard({
   return (
     <section className="card skills-card">
       <div className="card-head row" style={{ alignItems: "center" }}>
-        <h3 className="grow">Skills 与插件</h3>
+        <h3 className="grow">{t("Skills 与插件")}</h3>
         <ProjectPicker
           className="sm"
           projects={projects}
           value={projectId}
           onChange={setProjectId}
-          none={{ id: "", label: "不含项目", desc: "只看全局和这个 Agent 的 Skill", hint: "" }}
+          none={{ id: "", label: t("不含项目"), desc: t("只看全局和这个 Agent 的 Skill"), hint: "" }}
         />
       </div>
       <div className="card-body skills-body">
@@ -867,16 +894,16 @@ function SkillsCard({
           <Search size={14} aria-hidden />
           <input
             className="input"
-            aria-label="搜索 Skills 与插件"
-            placeholder="搜索"
+            aria-label={t("搜索 Skills 与插件")}
+            placeholder={t("搜索")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
         {shownPlugins.length > 0 && (
           <div className="skill-group">
-            <span className="skill-group-title">插件</span>
-            <ul className="skill-list" aria-label="插件列表">
+            <span className="skill-group-title">{t("插件")}</span>
+            <ul className="skill-list" aria-label={t("插件列表")}>
               {shownPlugins.map((pl) => (
                 <li key={pl.key}>
                   <label className="skill-row" title={pl.key} data-off={pl.support.level === "no" || undefined}>
@@ -894,28 +921,28 @@ function SkillsCard({
                       </span>
                     </span>
                     <SupportBadge s={pl.support} harnessName={harnessName} />
-                    <span className="badge skill-src">{pl.label}</span>
+                    <span className="badge skill-src">{skillSourceLabel(pl.label)}</span>
                   </label>
                 </li>
               ))}
             </ul>
           </div>
         )}
-        <ul className="skill-list" aria-label="Skill 列表">
+        <ul className="skill-list" aria-label={t("Skill 列表")}>
           {shownItems === null && (
             <li className="skill-empty muted">
-              <Loader2 size={14} className="spin" /> 正在查找…
+              <Loader2 size={14} className="spin" /> {t("正在查找…")}
             </li>
           )}
           {shownItems?.length === 0 && shownPlugins.length === 0 && (
-            <li className="skill-empty muted">{q ? "没有匹配的结果" : "没有找到 Skill"}</li>
+            <li className="skill-empty muted">{q ? t("没有匹配的结果") : t("没有找到 Skill")}</li>
           )}
           {shownItems &&
             shownItems.length > 0 &&
             (
               [
-                ["原生可用", shownItems.filter((x) => x.native)],
-                ["可选", shownItems.filter((x) => !x.native)],
+                [t("原生可用"), shownItems.filter((x) => x.native)],
+                [t("可选"), shownItems.filter((x) => !x.native)],
               ] as const
             ).map(
               ([title, list]) =>
@@ -929,7 +956,9 @@ function SkillsCard({
                             <div
                               className="skill-row"
                               data-locked
-                              title={`由 ${harnessName} 从已有目录自动发现，停用请修改对应原生配置或文件`}
+                              title={t("由 {name} 从已有目录自动发现，停用请修改对应原生配置或文件", {
+                                name: harnessName,
+                              })}
                             >
                               <Lock size={13} className="skill-lock" aria-hidden />
                               <SkillText sk={sk} />
@@ -954,16 +983,17 @@ function SkillsCard({
         </ul>
 
         <div className="muted skill-hint">
-          原生可用项来自 Harness 已有的全局或项目目录（包括已有链接），不会随此处取消勾选而删除。 可选项仅为这个 Agent
-          提供按需读取索引；团团不再向共享项目添加技能链接。
+          {t(
+            "原生可用项来自 Harness 已有的全局或项目目录（包括已有链接），不会随此处取消勾选而删除。 可选项仅为这个 Agent 提供按需读取索引；团团不再向共享项目添加技能链接。",
+          )}
         </div>
 
-        {!agentId && <div className="muted skill-hint">保存后可以从链接或文件夹添加 Skill</div>}
+        {!agentId && <div className="muted skill-hint">{t("保存后可以从链接或文件夹添加 Skill")}</div>}
         {agentId && (
           <div className="skill-add">
             <input
               className="input grow"
-              aria-label="Skill 链接"
+              aria-label={t("Skill 链接")}
               value={url}
               onChange={(e) => {
                 setUrl(e.target.value);
@@ -974,7 +1004,7 @@ function SkillsCard({
                 e.preventDefault();
                 if (url.trim() && !busy) void doPreview();
               }}
-              placeholder="GitHub / git / SKILL.md 链接"
+              placeholder={t("GitHub / git / SKILL.md 链接")}
               spellCheck={false}
             />
             <button
@@ -984,11 +1014,11 @@ function SkillsCard({
               onClick={() => void doPreview()}
             >
               {busy === "preview" ? <Loader2 size={14} className="spin" /> : <Link2 size={14} />}
-              查找
+              {t("查找")}
             </button>
             <button type="button" className="btn" onClick={() => void fromFolder()} disabled={folder.busy}>
               <FolderOpen size={14} />
-              文件夹
+              {t("文件夹")}
             </button>
           </div>
         )}
@@ -1001,7 +1031,7 @@ function SkillsCard({
                   <label className="skill-row">
                     <input
                       type="checkbox"
-                      aria-label={`添加 ${r.name}`}
+                      aria-label={t("添加 {name}", { name: r.name })}
                       checked={chosen.has(r.path)}
                       onChange={() =>
                         setChosen((c) => {
@@ -1023,7 +1053,7 @@ function SkillsCard({
             </ul>
             <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
               <button type="button" className="btn ghost sm" onClick={() => setPreview(null)}>
-                取消
+                {t("取消")}
               </button>
               <button
                 type="button"
@@ -1032,12 +1062,12 @@ function SkillsCard({
                 onClick={() => void doAdd()}
               >
                 {busy === "add" ? <Loader2 size={13} className="spin" /> : null}
-                添加 {chosen.size}
+                {t("添加 {count}", { count: chosen.size })}
               </button>
             </div>
           </div>
         )}
-        {err && <div className="error-text">{err}</div>}
+        {err && <div className="error-text">{translateError(err)}</div>}
       </div>
       {folder.dialog}
     </section>
@@ -1051,7 +1081,11 @@ function AgentDefaults(props: {
   value: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
 }) {
-  const [state, setState] = useState<{ opts: Opt[] | null; error: string | null }>({ opts: null, error: null });
+  const { t } = useI18n();
+  const [state, setState] = useState<{ opts: acp.SessionConfigOption[] | null; error: string | null }>({
+    opts: null,
+    error: null,
+  });
   const [tick, setTick] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: tick = retry
   useEffect(() => {
@@ -1067,11 +1101,16 @@ function AgentDefaults(props: {
       (r) => {
         if (off) return;
         const opts = r.error ? null : describeOptions(r.configOptions);
-        setState({ opts, error: r.error });
+        setState({ opts: r.error ? null : r.configOptions, error: r.error });
         // A saved model the current 服务商 doesn't offer would silently fail: fall back to the default.
         const model = opts?.find((o) => o.kind === "model");
         const saved = model ? props.value[model.id] : undefined;
-        if (model && saved && !model.choices.some((c) => c.value === saved) && !props.providerId) {
+        if (
+          model &&
+          saved &&
+          !model.choices.some((c) => c.value === saved) &&
+          (!props.providerId || props.harness === "opencode" || props.harness === "pi")
+        ) {
           const next = { ...props.value };
           delete next[model.id];
           props.onChange(next);
@@ -1083,31 +1122,34 @@ function AgentDefaults(props: {
       off = true;
     };
   }, [props.harness, props.providerId, tick]);
+  const options = state.opts ? describeOptions(state.opts) : null;
   return (
     <div className="field">
-      <span className="label">默认设置</span>
+      <span className="label">{t("默认设置")}</span>
       {state.error ? (
         <div className="defaults-note">
-          <span className="muted">读取不到选项：{state.error}</span>
+          <span className="muted">{t("读取不到选项：{error}", { error: translateError(state.error) })}</span>
           <button type="button" className="quiet-link" onClick={() => setTick((t) => t + 1)}>
-            重试
+            {t("重试")}
           </button>
         </div>
-      ) : !state.opts ? (
+      ) : !options ? (
         <div className="defaults-note muted">
           <Loader2 size={13} className="spin" />
-          正在读取 Harness 选项…
+          {t("正在读取 Harness 选项…")}
         </div>
-      ) : state.opts.length === 0 ? (
-        <div className="defaults-note muted">这个 Harness 没有可调的选项</div>
+      ) : options.length === 0 ? (
+        <div className="defaults-note muted">{t("这个 Harness 没有可调的选项")}</div>
       ) : (
         <div className="defaults-grid">
-          {state.opts.map((o) => (
+          {options.map((o) => (
             <DefaultRow
               key={o.id}
               opt={o}
               harness={props.harness}
-              custom={o.kind === "model" && !!props.providerId}
+              custom={
+                o.kind === "model" && !!props.providerId && props.harness !== "opencode" && props.harness !== "pi"
+              }
               value={props.value[o.id] ?? null}
               onChange={(v) => {
                 const next = { ...props.value };
@@ -1131,6 +1173,7 @@ function DefaultRow(props: {
   custom?: boolean;
   onChange: (v: string | null) => void;
 }) {
+  const { t } = useI18n();
   const { opt } = props;
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
@@ -1144,8 +1187,8 @@ function DefaultRow(props: {
       {
         value: FOLLOW,
         name: "Harness default",
-        label: "跟随 Harness",
-        description: harnessDefault ? `当前：${harnessDefault.label}` : null,
+        label: t("跟随 Harness"),
+        description: harnessDefault ? t("当前：{label}", { label: t(harnessDefault.label) }) : null,
         danger: false,
         recommended: false,
       },
@@ -1154,8 +1197,8 @@ function DefaultRow(props: {
   };
   return (
     <>
-      <span className="defaults-label" title={opt.description ?? opt.name}>
-        {opt.label}
+      <span className="defaults-label" title={t(opt.description ?? opt.name)}>
+        {t(opt.label)}
       </span>
       <button
         ref={btn}
@@ -1163,19 +1206,24 @@ function DefaultRow(props: {
         className="chip-opt defaults-btn"
         data-open={open || undefined}
         data-danger={chosen?.danger || undefined}
-        aria-label={`默认${opt.label}`}
+        aria-label={t("默认{label}", { label: t(opt.label) })}
         onClick={() => setOpen((v) => !v)}
       >
         <OptIcon opt={opt} harness={props.harness} value={props.value ?? opt.current} />
-        <span className="chip-value">{chosen?.label ?? props.value ?? "跟随 Harness"}</span>
+        <span className="chip-value">{chosen ? t(chosen.label) : (props.value ?? t("跟随 Harness"))}</span>
         <ChevronDown size={12} className="model-chev" />
       </button>
       {open && (
-        <Popover anchor={btn.current} onClose={() => setOpen(false)} label={`默认${opt.label}`} align="start">
+        <Popover
+          anchor={btn.current}
+          onClose={() => setOpen(false)}
+          label={t("默认{label}", { label: t(opt.label) })}
+          align="start"
+        >
           <ChoiceList
             opt={shown}
             harness={props.harness}
-            free={props.custom ? { placeholder: "自定义模型 ID" } : null}
+            free={props.custom ? { placeholder: t("自定义模型 ID") } : null}
             onPick={(v) => {
               props.onChange(v === FOLLOW ? null : v);
               setOpen(false);
@@ -1189,22 +1237,23 @@ function DefaultRow(props: {
 
 /** 服务商: "本机配置" (inherit the user's own login / env) or a saved profile that fits the harness. */
 function ProviderPick(props: { harness: string; value: string | null; onChange: (v: string | null) => void }) {
+  const { t } = useI18n();
   const [items, setItems] = useState<ProviderItem[] | null>(null);
   useEffect(() => {
     api<{ items: ProviderItem[] }>("GET", "/api/providers")
       .then((r) => setItems(r.items))
       .catch(() => setItems([]));
   }, []);
-  const fits = (items ?? []).filter((p) => providerFits(p, props.harness) || p.id === props.value);
+  const fits = (items ?? []).filter((p) => providerSupports(p, props.harness) || p.id === props.value);
   return (
     <div className="field">
-      <span className="label">服务商</span>
-      <fieldset className="prov-pick" aria-label="服务商">
+      <span className="label">{t("服务商")}</span>
+      <fieldset className="prov-pick" aria-label={t("服务商")}>
         <button type="button" aria-pressed={!props.value} className="preset" onClick={() => props.onChange(null)}>
           <span className="prov-icon local-icon">
             <Laptop size={12} />
           </span>
-          <span className="preset-name">本机配置</span>
+          <span className="preset-name">{t("本机配置")}</span>
         </button>
         {fits.map((p) => (
           <button
@@ -1223,11 +1272,11 @@ function ProviderPick(props: { harness: string; value: string | null; onChange: 
       </fieldset>
       <span className="help">
         {props.value
-          ? "只用于这个 Agent"
+          ? t("只用于这个 Agent")
           : props.harness === "custom"
-            ? "直接填写下面的接口。"
-            : "沿用你自己的登录和环境变量。"}{" "}
-        <a href="#/providers">管理服务商</a>
+            ? t("直接填写下面的接口。")
+            : t("沿用你自己的登录和环境变量。")}{" "}
+        <a href="#/providers">{t("管理服务商")}</a>
       </span>
     </div>
   );

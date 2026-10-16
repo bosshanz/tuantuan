@@ -1,9 +1,11 @@
 import { missingKeyVar } from "./auth";
+import { type Locale, translate } from "./i18n";
 import type { RoomPreview } from "./roomPreview";
 
 /** Global, room-independent events every UI client gets (sidebar activity + desktop notifications). */
 export type NotifyKind = "reply" | "permission" | "error" | "auth";
 export type GlobalEvent =
+  | { type: "profile.updated"; profile: import("../server/profile").Profile }
   | { type: "activity"; roomId: string; busy: boolean }
   | { type: "room.preview"; roomId: string; last: RoomPreview }
   | {
@@ -45,12 +47,13 @@ type Msg = {
 };
 
 /** Maps a finished agent message to a notification, or null (streaming, human, cancelled). */
-export function notifyForMessage(roomId: string, m: Msg): GlobalEvent | null {
+export function notifyForMessage(roomId: string, m: Msg, locale: Locale = "zh-CN"): GlobalEvent | null {
   if (m.senderKind !== "agent") return null;
   const base = { type: "notify" as const, roomId, agentId: m.senderId, agentName: m.senderName, id: m.id };
-  if (m.status === "done") return { ...base, kind: "reply", text: preview(m.content) || "（空回复）" };
+  if (m.status === "done")
+    return { ...base, kind: "reply", text: preview(m.content) || translate(locale, "（空回复）") };
   if (m.status === "error") {
-    const err = m.error ?? "出错了";
+    const err = m.error ?? translate(locale, "出错了");
     if (missingKeyVar(err) !== null || /登录|log ?in|auth|401|unauthori[sz]ed/i.test(err))
       return { ...base, kind: "auth", text: preview(err) };
     return { ...base, kind: "error", text: preview(err) };

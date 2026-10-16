@@ -15,6 +15,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from "react-dom";
 import type { Agent, SessionView } from "./api";
 import { currentChoice, describeOptions, type Opt, type OptKind } from "./config";
+import { translate, useI18n } from "./i18n";
 import { BrandLogo, brandFor } from "./ModelPicker";
 import { AgentAvatar } from "./ui";
 
@@ -145,6 +146,7 @@ export function ChoiceList(props: {
   hint?: { value: string; text: string } | null;
   free?: { placeholder: string } | null;
 }) {
+  const { t: tr } = useI18n();
   const { opt } = props;
   const id = useId();
   const list = useRef<HTMLDivElement>(null);
@@ -215,7 +217,7 @@ export function ChoiceList(props: {
               </span>
               {c.description && c.description !== c.name && <span className="opt-desc">{c.description}</span>}
             </span>
-            {c.recommended && <span className="opt-tag">推荐</span>}
+            {c.recommended && <span className="opt-tag">{tr("推荐")}</span>}
             {props.hint?.value === c.value && <span className="opt-tag">{props.hint.text}</span>}
             <Check size={14} className="opt-check" aria-hidden />
           </button>
@@ -259,7 +261,7 @@ export function memberOpts(view: SessionView | undefined): (Opt & { free?: boole
       {
         id: "model",
         kind: "model",
-        label: "模型",
+        label: translate("模型"),
         name: "Model",
         description: null,
         type: "select",
@@ -268,7 +270,7 @@ export function memberOpts(view: SessionView | undefined): (Opt & { free?: boole
           value: x,
           name: x,
           label: x,
-          description: x === view.customModel?.default ? "Agent 默认" : null,
+          description: x === view.customModel?.default ? translate("Agent 默认") : null,
           danger: false,
           recommended: false,
         })),
@@ -290,6 +292,7 @@ function OptionChip(props: {
   opt: Opt & { free?: boolean };
   onPick: (agentId: string, opt: Opt, value: string) => Promise<void>;
 }) {
+  const { t: tr } = useI18n();
   const { opt, agent } = props;
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -343,7 +346,7 @@ function OptionChip(props: {
             harness={agent.harness}
             busy={busy}
             onPick={(v) => void pick(v)}
-            free={opt.free ? { placeholder: "其他模型 ID" } : null}
+            free={opt.free ? { placeholder: tr("其他模型 ID") } : null}
           />
         </Popover>
       )}
@@ -357,6 +360,7 @@ function OptionsPanel(props: {
   showAgents: boolean;
   onPick: (agentId: string, opt: Opt, value: string) => Promise<void>;
 }) {
+  const { t: tr } = useI18n();
   const [drill, setDrill] = useState<{ agent: Agent; opt: Opt & { free?: boolean } } | null>(null);
   const [busy, setBusy] = useState(false);
   if (drill) {
@@ -373,7 +377,7 @@ function OptionsPanel(props: {
           opt={opt}
           harness={drill.agent.harness}
           busy={busy}
-          free={opt.free ? { placeholder: "其他模型 ID" } : null}
+          free={opt.free ? { placeholder: tr("其他模型 ID") } : null}
           onPick={(v) => {
             setBusy(true);
             void props.onPick(drill.agent.id, opt, v).finally(() => {
@@ -398,10 +402,10 @@ function OptionsPanel(props: {
           {g.opts === null ? (
             <div className="opt-empty">
               <LoaderCircle size={13} className="spin" />
-              正在连接…
+              {tr("正在连接…")}
             </div>
           ) : g.opts.length === 0 ? (
-            <div className="opt-empty">没有可调的设置</div>
+            <div className="opt-empty">{tr("没有可调的设置")}</div>
           ) : (
             g.opts.map((o) => {
               const c = currentChoice(o);
@@ -476,6 +480,7 @@ export function SessionChips(props: {
   sessions: Record<string, SessionView | undefined>;
   onPick: (agentId: string, opt: Opt, value: string) => Promise<void>;
 }) {
+  const { t: tr } = useI18n();
   const root = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   useLayoutEffect(() => {
@@ -497,7 +502,7 @@ export function SessionChips(props: {
     return (
       <div className="chips" ref={root}>
         <PanelChip
-          label="成员设置"
+          label={tr("成员设置")}
           className="chip-summary"
           icon={
             <span className="stack-avatars" aria-hidden>
@@ -506,7 +511,7 @@ export function SessionChips(props: {
               ))}
             </span>
           }
-          text="各自设置"
+          text={tr("各自设置")}
           groups={groups}
           showAgents
           onPick={props.onPick}
@@ -522,7 +527,7 @@ export function SessionChips(props: {
       <div className="chips" ref={root}>
         <span className="chip-opt" aria-busy="true">
           <LoaderCircle size={13} className="spin" />
-          <span className="chip-value muted">连接中</span>
+          <span className="chip-value muted">{tr("连接中")}</span>
         </span>
       </div>
     );
@@ -536,7 +541,7 @@ export function SessionChips(props: {
       ))}
       {rest.length > 0 && (
         <PanelChip
-          label="更多设置"
+          label={tr("更多设置")}
           className="chip-more"
           icon={<MoreHorizontal size={14} />}
           groups={[{ agent: g.agent, opts: rest }]}

@@ -1,11 +1,14 @@
 import { BRAND_SVG } from "./brandIcons";
 import { BRAND_LABEL, type Brand, brandFor } from "./brands";
+import { useI18n } from "./i18n";
 
 export { type Brand, brandFor };
 
 /** Official vendor mark (mono, currentColor); unknown models get a neutral chip glyph. */
 export function BrandLogo({ brand, size = 14 }: { brand: Brand; size?: number }) {
+  const { t } = useI18n();
   const svg = BRAND_SVG[brand];
+  const label = brand === "generic" ? t("其他模型") : BRAND_LABEL[brand];
   return (
     <svg
       width={size}
@@ -14,10 +17,10 @@ export function BrandLogo({ brand, size = 14 }: { brand: Brand; size?: number })
       fill="currentColor"
       fillRule="evenodd"
       role="img"
-      aria-label={BRAND_LABEL[brand]}
+      aria-label={label}
       className={`brand-logo brand-${brand}`}
     >
-      <title>{BRAND_LABEL[brand]}</title>
+      <title>{label}</title>
       {svg ? (
         // biome-ignore lint/security/noDangerouslySetInnerHtml: static vendor marks bundled with the app
         <g dangerouslySetInnerHTML={{ __html: svg }} />

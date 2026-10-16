@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { missingKeyVar } from "../../shared/auth";
 import { api } from "./api";
 import { type AuthMethodView, HarnessAuth } from "./HarnessAuth";
+import { intlLocale, translateError, useI18n } from "./i18n";
 
 export interface RegistryItem {
   id: string;
@@ -34,6 +35,7 @@ export interface RegistryView {
 
 /** Registry logo: monochrome SVG used as a mask so it takes the text color (light / dark). */
 export function RegistryIcon({ id, name, size = 20 }: { id: string | null; name: string; size?: number }) {
+  const { t } = useI18n();
   const [failed, setFailed] = useState(false);
   const url = id ? `/api/registry/icon/${encodeURIComponent(id)}` : null;
   useEffect(() => {
@@ -52,7 +54,7 @@ export function RegistryIcon({ id, name, size = 20 }: { id: string | null; name:
     <span
       className="reg-icon"
       role="img"
-      aria-label={`${name} 图标`}
+      aria-label={t("{name} 图标", { name: t(name) })}
       style={{ width: size, height: size, maskImage: `url("${url}")`, WebkitMaskImage: `url("${url}")` }}
     />
   );
@@ -94,6 +96,7 @@ type Operation = { kind: "install" | "remove" | "probe" | "credentials" } | { ki
  * searchable, each installable with one click into Tuantuan's own directory.
  */
 export function RegistrySection(props: { onChanged: () => Promise<void> }) {
+  const { t, locale } = useI18n();
   const [view, setView] = useState<RegistryView | null>(null);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
@@ -111,7 +114,7 @@ export function RegistrySection(props: { onChanged: () => Promise<void> }) {
     const s = q.trim().toLowerCase();
     const all = (view?.agents ?? []).filter((a) => !a.curated);
     const hit = s
-      ? all.filter((a) => `${a.name} ${a.id} ${a.description} ${a.authors.join(" ")}`.toLowerCase().includes(s))
+      ? all.filter((a) => `${a.name} ${a.id} ${t(a.description)} ${a.authors.join(" ")}`.toLowerCase().includes(s))
       : all;
     // installed first, then experimental last, then by name
     return [...hit].sort(
@@ -120,9 +123,9 @@ export function RegistrySection(props: { onChanged: () => Promise<void> }) {
         Number(a.experimental) - Number(b.experimental) ||
         a.name.localeCompare(b.name),
     );
-  }, [view, q]);
+  }, [view, q, t]);
   const when = view?.fetchedAt
-    ? new Date(view.fetchedAt).toLocaleString("zh-CN", {
+    ? new Date(view.fetchedAt).toLocaleString(intlLocale(locale), {
         month: "numeric",
         day: "numeric",
         hour: "2-digit",
@@ -133,19 +136,20 @@ export function RegistrySection(props: { onChanged: () => Promise<void> }) {
     <section className="card registry-card">
       <div className="card-head row" style={{ alignItems: "center" }}>
         <div className="grow">
-          <h3>更多 Agent</h3>
+          <h3>{t("更多 Agent")}</h3>
           <p>
-            来自{" "}
+            {t("来自")}{" "}
             <a href="https://agentclientprotocol.com/get-started/registry" target="_blank" rel="noreferrer">
-              ACP 官方 Registry
+              {t("ACP 官方 Registry")}
             </a>
-            ，{view ? `${view.agents.filter((a) => !a.curated).length} 个` : "…"}
+            {" · "}
+            {view ? t("{count} 个", { count: view.agents.filter((a) => !a.curated).length }) : "…"}
             {view &&
               (view.source === "network"
-                ? ` · ${when} 更新`
+                ? t(" · {time} 更新", { time: when ?? "" })
                 : view.source === "cache"
-                  ? ` · ${when} 的缓存`
-                  : " · 离线快照")}
+                  ? t(" · {time} 的缓存", { time: when ?? "" })
+                  : t(" · 离线快照"))}
           </p>
         </div>
         <button
@@ -153,27 +157,29 @@ export function RegistrySection(props: { onChanged: () => Promise<void> }) {
           className="btn ghost sm"
           onClick={() => void refresh()}
           disabled={busy}
-          aria-label="刷新 Registry"
+          aria-label={t("刷新 Registry")}
         >
           {busy ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
-          刷新
+          {t("刷新")}
         </button>
       </div>
       <div className="card-body">
-        {view?.error && <div className="muted harness-sub">{view.error}，先用已有的列表</div>}
+        {view?.error && (
+          <div className="muted harness-sub">{t("{error}，先用已有的列表", { error: translateError(view.error) })}</div>
+        )}
         <label className="reg-search">
           <Search size={14} />
           <input
             className="input"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索名称、作者、描述"
-            aria-label="搜索 Agent"
+            placeholder={t("搜索名称、作者、描述")}
+            aria-label={t("搜索 Agent")}
           />
         </label>
         <div className="reg-grid">
           {!view && <Loader2 size={16} className="spin" />}
-          {view && list.length === 0 && <div className="muted">没有匹配的 Agent</div>}
+          {view && list.length === 0 && <div className="muted">{t("没有匹配的 Agent")}</div>}
           {list.map((a) => (
             <RegistryCard
               key={a.id}
@@ -200,6 +206,7 @@ function RegistryCard({
   platform: string;
   onChanged: () => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [job, setJob] = useState<Job | null>(null);
   const [test, setTest] = useState<Probe | null>(null);
   const [operation, setOperation] = useState<Operation | null>(null);
@@ -313,16 +320,16 @@ function RegistryCard({
       <div className="reg-head">
         <RegistryIcon id={a.hasIcon ? a.id : null} name={a.name} size={22} />
         <div className="reg-title">
-          <b>{a.name}</b>
+          <b>{t(a.name)}</b>
           <span className="muted">
             {a.version}
             {a.license && ` · ${a.license}`}
           </span>
         </div>
         {a.experimental && (
-          <span className="badge warn-badge" title={a.note ?? "实验性"}>
+          <span className="badge warn-badge" title={t(a.note ?? "实验性")}>
             <FlaskConical size={11} />
-            实验性
+            {t("实验性")}
           </span>
         )}
         {(a.website || a.repository) && (
@@ -331,24 +338,24 @@ function RegistryCard({
             target="_blank"
             rel="noreferrer"
             className="muted"
-            aria-label={`${a.name} 主页`}
+            aria-label={t("{name} 主页", { name: a.name })}
           >
             <ExternalLink size={12} />
           </a>
         )}
       </div>
-      <p className="reg-desc" title={a.description}>
-        {a.description}
+      <p className="reg-desc" title={t(a.description)}>
+        {t(a.description)}
       </p>
       <div className="reg-tags">
         {a.kinds.map((k) => (
           <span key={k} className="tag">
-            {KIND[k]}
+            {t(KIND[k] ?? k)}
           </span>
         ))}
         {!a.platforms.includes("all") && (
           <span className="tag" title={a.platforms.map((p) => PLATFORM[p] ?? p).join("、")}>
-            {here ? "支持本机" : "本机不支持"} · {a.platforms.length} 个平台
+            {t(here ? "支持本机" : "本机不支持")} · {t("{count} 个平台", { count: a.platforms.length })}
           </span>
         )}
       </div>
@@ -356,28 +363,28 @@ function RegistryCard({
         {running ? (
           <span className="muted row" style={{ gap: 6 }}>
             <Loader2 size={13} className="spin" />
-            {job?.log.at(-1)?.slice(0, 40) ?? "安装中…"}
+            {job?.log.at(-1)?.slice(0, 40) ?? t("安装中…")}
           </span>
         ) : installed ? (
           <>
             <span className="ok-text row" style={{ gap: 4 }}>
               <Check size={13} />
-              已安装 {a.installedVersion}
+              {t("已安装 {version}", { version: a.installedVersion ?? "" })}
             </span>
             {a.updateAvailable && (
               <button type="button" className="btn sm primary" disabled={busy} onClick={() => void install()}>
-                更新到 {a.version}
+                {t("更新到 {version}", { version: a.version })}
               </button>
             )}
             <button type="button" className="btn sm" onClick={() => void probe()} disabled={busy}>
               {operation?.kind === "probe" ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
-              握手
+              {t("握手")}
             </button>
             <button
               type="button"
               className="btn ghost sm icon"
-              aria-label={`卸载 ${a.name}`}
-              title="卸载"
+              aria-label={t("卸载 {name}", { name: a.name })}
+              title={t("卸载")}
               onClick={() => void remove()}
               disabled={busy}
             >
@@ -389,55 +396,61 @@ function RegistryCard({
             type="button"
             className="btn sm"
             disabled={busy || !a.installable}
-            title={a.installable ? "装到团团自己的目录，不需要管理员权限" : "没有适合这台电脑的安装包"}
+            title={a.installable ? t("装到团团自己的目录，不需要管理员权限") : t("没有适合这台电脑的安装包")}
             onClick={() => void install()}
           >
             <Download size={13} />
-            安装
+            {t("安装")}
           </button>
         )}
       </div>
-      {job?.state === "error" && <div className="error-text harness-sub">安装失败：{job.error}</div>}
+      {job?.state === "error" && (
+        <div className="error-text harness-sub">
+          {t("安装失败：{error}", { error: translateError(job.error ?? "") })}
+        </div>
+      )}
       {err && (
         <div className="error-text harness-sub" role="alert">
-          {err}
+          {translateError(err)}
         </div>
       )}
       {test && (
         <div className={`${ready ? "ok-text" : test.ok ? "muted" : "error-text"} harness-sub`} role="status">
           {test.ok
-            ? `ACP v${test.protocolVersion} · ${test.agentInfo?.title ?? test.agentInfo?.name ?? "已连接"} · ${
+            ? `ACP v${test.protocolVersion} · ${test.agentInfo?.title ?? test.agentInfo?.name ?? t("已连接")} · ${
                 test.authError
-                  ? "登录未完成"
+                  ? t("登录未完成")
                   : test.needsKey || requiredEnv
-                    ? "需要 API Key"
+                    ? t("需要 API Key")
                     : test.loggedIn === true
-                      ? "可以用了"
+                      ? t("可以用了")
                       : test.loggedIn === false
-                        ? "需要登录"
-                        : "登录状态未知"
+                        ? t("需要登录")
+                        : t("登录状态未知")
               }`
-            : (test.error ?? "握手失败")}
+            : translateError(test.error ?? "握手失败")}
         </div>
       )}
       {test?.authError && (
         <div className="error-text harness-sub" role="alert">
-          登录失败：{test.authError}
+          {t("登录失败：{error}", { error: translateError(test.authError) })}
         </div>
       )}
       {test?.sessionError && (
         <div className="error-text harness-sub" role="alert">
-          {test.sessionError}
+          {translateError(test.sessionError)}
         </div>
       )}
       {operation?.kind === "probe" && (
         <div className="muted harness-sub" role="status">
-          正在检查登录状态…
+          {t("正在检查登录状态…")}
         </div>
       )}
       {authing && (
         <div className="muted harness-sub" role="status">
-          等待「{test?.authMethods?.find((m) => m.id === authing)?.name ?? "Agent"}」登录完成…（可能会打开浏览器）
+          {t("等待「{name}」登录完成…（可能会打开浏览器）", {
+            name: t(test?.authMethods?.find((m) => m.id === authing)?.name ?? "Agent"),
+          })}
         </div>
       )}
       {test && (

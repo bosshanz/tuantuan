@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import { canQuoteMessage, type MessageQuote, messageQuote } from "../../shared/messageQuote";
+import { intlLocale, translateError, useI18n } from "./i18n";
 import "./messageQuote.css";
 import "./chatTasks.css";
 import "./chatScroll.css";
@@ -86,6 +87,7 @@ export function ChatView(props: {
   onRoomChange: () => Promise<void>;
   onDeleted: () => void;
 }) {
+  const { t: tr, locale } = useI18n();
   const { room, agents } = props;
   const [{ messages, state, sessions, asks, terminals, history }, dispatch] = useReducer(
     chatReducer,
@@ -106,7 +108,7 @@ export function ChatView(props: {
   const [quote, setQuote] = useState<MessageQuote | null>(null);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<{ source: string; reason: string } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const wide = useMediaQuery("(min-width: 1181px)");
   const [panel, setPanel] = useState(false);
@@ -270,7 +272,7 @@ export function ChatView(props: {
       // The server's reply is authoritative: show it now even if the socket is slow, reconnecting or raced.
       dispatch({ type: "event", event: { type: "message", message: sent } });
     } catch (e) {
-      setSendError(`发送失败：${(e as Error).message}`);
+      setSendError({ source: "发送失败：{reason}", reason: (e as Error).message });
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -292,7 +294,7 @@ export function ChatView(props: {
     } catch (e) {
       setCancellations((current) => ({
         ...current,
-        [taskId]: { pending: false, error: `停止失败：${(e as Error).message}。请重试。` },
+        [taskId]: { pending: false, error: (e as Error).message },
       }));
     } finally {
       pendingCancellations.current.delete(taskId);
@@ -314,7 +316,7 @@ export function ChatView(props: {
         } else {
           setAnswers((a) => ({
             ...a,
-            [askId]: { pending: false, error: `授权提交失败：${(e as Error).message}。请重试。` },
+            [askId]: { pending: false, error: (e as Error).message },
           }));
         }
       } finally {
@@ -336,7 +338,7 @@ export function ChatView(props: {
             });
       dispatch({ type: "event", event: { type: "session", roomId: room.id, agentId, view: v } });
     } catch (e) {
-      setSendError((e as Error).message);
+      setSendError({ source: "{reason}", reason: (e as Error).message });
     }
   };
 
@@ -360,7 +362,7 @@ export function ChatView(props: {
               type="button"
               className="btn ghost icon back-btn"
               onClick={props.onBack}
-              aria-label="返回会话列表"
+              aria-label={tr("返回会话列表")}
               data-shot="open-nav"
             >
               <ChevronLeft size={18} />
@@ -380,8 +382,8 @@ export function ChatView(props: {
                   ref={terminalButton}
                   type="button"
                   className="btn ghost icon"
-                  aria-label={terminalOpen ? "收起项目终端" : "打开项目终端"}
-                  title="终端（Ctrl+`）"
+                  aria-label={terminalOpen ? tr("收起项目终端") : tr("打开项目终端")}
+                  title={tr("终端（Ctrl+`）")}
                   aria-expanded={terminalOpen}
                   onClick={() => showTerminal(!terminalOpen)}
                 >
@@ -393,8 +395,8 @@ export function ChatView(props: {
                   type="button"
                   className="btn ghost icon"
                   aria-pressed={panel}
-                  aria-label={panel ? "收起详情面板" : "展开详情面板"}
-                  title="详情面板"
+                  aria-label={panel ? tr("收起详情面板") : tr("展开详情面板")}
+                  title={tr("详情面板")}
                   onClick={() => {
                     setPanel((v) => !v);
                     setSelected(null);
@@ -408,7 +410,7 @@ export function ChatView(props: {
 
           {loadError && (
             <div className="form-error" role="alert" style={{ margin: 12 }}>
-              <AlertTriangle size={15} /> 消息加载失败：{loadError}
+              <AlertTriangle size={15} /> {tr("消息加载失败：{reason}", { reason: translateError(loadError) })}
             </div>
           )}
 
@@ -423,10 +425,10 @@ export function ChatView(props: {
                     onClick={() => void loadHistory()}
                   >
                     <History size={14} />
-                    {history.loading ? "加载中…" : "加载更早消息"}
+                    {history.loading ? tr("加载中…") : tr("加载更早消息")}
                   </button>
                   <span className="chat-history-status" role={history.error ? "alert" : "status"}>
-                    {history.error ? `加载失败：${history.error}。请重试。` : ""}
+                    {history.error ? tr("加载失败：{reason}。请重试。", { reason: translateError(history.error) }) : ""}
                   </span>
                 </div>
               )}
@@ -434,12 +436,17 @@ export function ChatView(props: {
                 <div className="empty">
                   <RoomIcon room={room} agents={agents} />
                   <h2 style={{ fontSize: 17 }}>
-                    {members.length > 1 ? "开始聊天" : `和 ${members[0]?.name ?? "Agent"} 打个招呼`}
+                    {members.length > 1
+                      ? tr("开始聊天")
+                      : tr("和 {name} 打个招呼", { name: members[0]?.name ?? "Agent" })}
                   </h2>
                   {primary && !primary.harness && (
                     <p className="muted">
-                      {primary.name} 还没有绑定 Harness，<a href={`#/a/${primary.id}`}>去设置</a>或
-                      <a href="#/harness">管理 Harness</a>。
+                      {tr("{name} 还没有绑定 Harness，", { name: primary.name })}
+                      <a href={`#/a/${primary.id}`}>{tr("去设置")}</a>
+                      {tr("或")}
+                      <a href="#/harness">{tr("管理 Harness")}</a>
+                      {tr("。")}
                     </p>
                   )}
                   {members.length > 1 && (
@@ -480,8 +487,10 @@ export function ChatView(props: {
                     )}
                     <div className="msg-head">
                       <span className="name">{g.senderName}</span>
-                      {g.kind === "agent" && !agentById.has(g.senderId ?? "") && <span className="badge">已删除</span>}
-                      <span className="time">{formatTime(g.messages[0]?.createdAt ?? 0)}</span>
+                      {g.kind === "agent" && !agentById.has(g.senderId ?? "") && (
+                        <span className="badge">{tr("已删除")}</span>
+                      )}
+                      <span className="time">{formatTime(g.messages[0]?.createdAt ?? 0, locale)}</span>
                     </div>
                     {g.messages.map((m) => (
                       <MessageItem
@@ -505,9 +514,14 @@ export function ChatView(props: {
             <div className="msg-fade msg-fade-top" aria-hidden />
             <div className="msg-fade msg-fade-bottom" aria-hidden />
             {!following && (
-              <button type="button" className="btn sm chat-latest" onClick={followLatest} aria-label="回到最新消息">
+              <button
+                type="button"
+                className="btn sm chat-latest"
+                onClick={followLatest}
+                aria-label={tr("回到最新消息")}
+              >
                 <ArrowDown size={14} />
-                回到最新
+                {tr("回到最新")}
               </button>
             )}
           </div>
@@ -524,7 +538,7 @@ export function ChatView(props: {
             )}
             {sendError && (
               <div className="error-text" role="alert" style={{ marginBottom: 6 }}>
-                {sendError}
+                {tr(sendError.source, { reason: translateError(sendError.reason) })}
               </div>
             )}
             <Composer
@@ -536,7 +550,9 @@ export function ChatView(props: {
               onSubmit={() => void send()}
               members={members.length > 1 ? members : []}
               placeholder={
-                primaryView?.commands.length || primaryView?.skills.length ? "发消息，/ 命令 · $ Skills…" : "发消息…"
+                primaryView?.commands.length || primaryView?.skills.length
+                  ? tr("发消息，/ 命令 · $ Skills…")
+                  : tr("发消息…")
               }
               commands={primaryView?.commands ?? []}
               skills={primaryView?.skills ?? []}
@@ -560,7 +576,11 @@ export function ChatView(props: {
             agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
             terminals={terminals}
             pending={answers[ask.id]?.pending ?? false}
-            error={answers[ask.id]?.error ?? null}
+            error={
+              answers[ask.id]?.error
+                ? tr("授权提交失败：{reason}。请重试。", { reason: translateError(answers[ask.id]?.error ?? "") })
+                : null
+            }
             onAnswer={(optionId) => void answer(ask.id, optionId)}
           />
         )}
@@ -574,25 +594,25 @@ export function ChatView(props: {
             )}
             {/* The slot reserves the panel's column and resizes in step with the slide, so the chat never jumps. */}
             <div className="details-slot" data-state={panelPresence.state}>
-              <aside className="details" data-state={panelPresence.state} aria-label="详情面板">
+              <aside className="details" data-state={panelPresence.state} aria-label={tr("详情面板")}>
                 <div className="details-head">
                   {selectedMsg && (
                     <button
                       type="button"
                       className="btn ghost icon"
-                      aria-label="返回会话信息"
-                      title="返回会话信息"
+                      aria-label={tr("返回会话信息")}
+                      title={tr("返回会话信息")}
                       onClick={() => setSelected(null)}
                     >
                       <ChevronLeft size={16} />
                     </button>
                   )}
-                  <h3>{selectedMsg ? "回复详情" : ""}</h3>
+                  <h3>{selectedMsg ? tr("回复详情") : ""}</h3>
                   <div className="details-actions">
                     <button
                       type="button"
                       className="btn ghost icon"
-                      aria-label="关闭详情面板"
+                      aria-label={tr("关闭详情面板")}
                       onClick={() => setPanel(false)}
                     >
                       <X size={16} />
@@ -652,7 +672,7 @@ export function ChatView(props: {
                 <Suspense
                   fallback={
                     <div className="terminal-loading" role="status">
-                      正在打开终端…
+                      {tr("正在打开终端…")}
                     </div>
                   }
                 >
@@ -716,6 +736,7 @@ function MessageItem(props: {
   onQuote?: () => void;
   quoteDisabled?: boolean;
 }) {
+  const { t: tr } = useI18n();
   const { m } = props;
   const streaming = m.status === "streaming";
   const t = withoutHandoffTools(m.timeline);
@@ -733,7 +754,7 @@ function MessageItem(props: {
           <div className="handoff-from">
             <ArrowRightLeft size={12} />
             <span>
-              接 <b>@{t.handoffFrom.agentName}</b> 的交接：{t.handoffFrom.task}
+              {tr("接 {name} 的交接：{task}", { name: `@${t.handoffFrom.agentName}`, task: t.handoffFrom.task })}
             </span>
           </div>
         )}
@@ -753,7 +774,7 @@ function MessageItem(props: {
           <div key={h.agentId} className="handoff-card" role="note">
             <div className="handoff-title">
               <ArrowRightLeft size={13} />
-              交接给 <b>@{h.agentName}</b>
+              {tr("交接给 {name}", { name: `@${h.agentName}` })}
             </div>
             <p>{h.task}</p>
           </div>
@@ -763,33 +784,35 @@ function MessageItem(props: {
             <i />
             <i />
             <i />
-            正在思考
+            {tr("正在思考")}
             <Waited since={m.createdAt} />
           </span>
         )}
         {m.senderKind === "agent" && empty && !m.content && m.status === "done" && (
-          <span className="muted">（空回复）</span>
+          <span className="muted">{tr("（空回复）")}</span>
         )}
         {m.status === "error" && (
           <div className="msg-error" role="alert">
             <AlertTriangle size={14} />
-            <span>{m.error ?? "回复失败"}</span>
+            <span>{m.error ? translateError(m.error) : tr("回复失败")}</span>
           </div>
         )}
         {m.status === "error" && m.error && <MissingKey harnessId={props.harnessId} error={m.error} />}
         {m.status === "interrupted" && (
           <div className="msg-error">
             <AlertTriangle size={14} />
-            <span>{m.error ?? "回复被中断"}</span>
+            <span>{m.error ? translateError(m.error) : tr("回复被中断")}</span>
           </div>
         )}
         {m.senderKind === "agent" && !streaming && (t?.reviewOf || m.status === "cancelled") && (
           <div className="msg-meta">
-            {t?.reviewOf && <span className="muted">群主跟进 · 已收到 {t.reviewOf.length} 份成员结果</span>}
+            {t?.reviewOf && (
+              <span className="muted">{tr("群主跟进 · 已收到 {count} 份成员结果", { count: t.reviewOf.length })}</span>
+            )}
             {m.status === "cancelled" && (
               <span className="state-tag">
                 <CircleSlash size={11} />
-                {m.error === "被新消息打断" ? "被新消息打断" : "已停止"}
+                {m.error === "被新消息打断" ? tr("被新消息打断") : tr("已停止")}
               </span>
             )}
           </div>
@@ -814,6 +837,7 @@ function TaskList(props: {
   onCancel: (id: string) => void;
   disclosureRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  const { t: tr } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
@@ -831,33 +855,33 @@ function TaskList(props: {
     ).length;
     const status =
       props.cancellations[task.id]?.pending || task.status === "cancelling"
-        ? "正在停止"
+        ? tr("正在停止")
         : task.status === "queued"
           ? queued > 1
-            ? `${queued} 项排队`
-            : "排队中"
+            ? tr("{count} 项排队", { count: queued })
+            : tr("排队中")
           : task.status === "waiting"
             ? task.coordination === "lead" || task.coordination === "review"
-              ? "等待成员结果"
-              : "等待交接完成"
+              ? tr("等待成员结果")
+              : tr("等待交接完成")
             : task.coordination === "review"
-              ? "正在跟进"
+              ? tr("正在跟进")
               : task.messageId
-                ? "正在回复"
-                : "正在准备";
+                ? tr("正在回复")
+                : tr("正在准备");
     return { task, status, queued: task.status === "queued" ? 0 : queued };
   });
   const overflow = participants.slice(3);
   const single = props.tasks.length === 1 ? props.tasks[0] : undefined;
   const singleStopping = !!single && (props.cancellations[single.id]?.pending || single.status === "cancelling");
   return (
-    <section className="chat-tasks" aria-label="会话任务" data-expanded={expanded}>
+    <section className="chat-tasks" aria-label={tr("会话任务")} data-expanded={expanded}>
       <div className="chat-activity">
         <button
           ref={toggleRef}
           type="button"
           className="chat-activity-toggle"
-          aria-label={expanded ? "收起回复状态" : "展开回复状态"}
+          aria-label={expanded ? tr("收起回复状态") : tr("展开回复状态")}
           aria-expanded={expanded}
           aria-controls={listId}
           aria-describedby={summaryId}
@@ -877,7 +901,7 @@ function TaskList(props: {
                 {queued > 0 && (
                   <span className="chat-activity-count">
                     <Clock3 size={12} aria-hidden />
-                    {queued} 项排队
+                    {tr("{count} 项排队", { count: queued })}
                   </span>
                 )}
               </span>
@@ -889,8 +913,10 @@ function TaskList(props: {
               >
                 <span aria-hidden>+{overflow.length}</span>
                 <span className="sr-only">
-                  还有 {overflow.length} 位 Agent：
-                  {overflow.map(({ task, status }) => `${task.agentName} ${status}`).join("，")}
+                  {tr("还有 {count} 位 Agent：{agents}", {
+                    count: overflow.length,
+                    agents: overflow.map(({ task, status }) => `${task.agentName} ${status}`).join("; "),
+                  })}
                 </span>
               </span>
             )}
@@ -911,8 +937,8 @@ function TaskList(props: {
             data-hidden={expanded || undefined}
             aria-hidden={expanded}
             inert={expanded}
-            aria-label={single.status === "queued" ? "取消排队" : "停止任务"}
-            title={single.status === "queued" ? "取消排队" : "停止任务"}
+            aria-label={single.status === "queued" ? tr("取消排队") : tr("停止任务")}
+            title={single.status === "queued" ? tr("取消排队") : tr("停止任务")}
             aria-describedby={summaryId}
             disabled={singleStopping}
             onClick={() => props.onCancel(single.id)}
@@ -929,7 +955,7 @@ function TaskList(props: {
               <div key={task.id} className="chat-activity-error" role="alert">
                 <AlertTriangle size={13} aria-hidden />
                 <span>
-                  未能停止 {task.agentName}：{error}
+                  {tr("未能停止 {name}：{reason}。请重试。", { name: task.agentName, reason: translateError(error) })}
                 </span>
               </div>
             ) : null;
@@ -949,18 +975,18 @@ function TaskList(props: {
               const cancellation = props.cancellations[task.id];
               const status =
                 task.status === "queued"
-                  ? "排队中"
+                  ? tr("排队中")
                   : task.status === "cancelling"
-                    ? "停止中"
+                    ? tr("停止中")
                     : task.status === "waiting"
                       ? task.coordination === "lead" || task.coordination === "review"
-                        ? "统筹中"
-                        : "交接中"
+                        ? tr("统筹中")
+                        : tr("交接中")
                       : task.coordination === "review"
-                        ? "跟进中"
+                        ? tr("跟进中")
                         : task.messageId
-                          ? "回复中"
-                          : "准备中";
+                          ? tr("回复中")
+                          : tr("准备中");
               return (
                 <li className="chat-task" key={task.id} data-task-id={task.id} data-task-status={task.status}>
                   <div className="chat-task-content" id={`task-summary-${task.id}`}>
@@ -969,26 +995,26 @@ function TaskList(props: {
                       <span className="chat-task-name">{task.agentName}</span>
                       <span className="chat-task-state">{status}</span>
                     </div>
-                    <div className="chat-task-summary">{task.text || "正在准备回复…"}</div>
+                    <div className="chat-task-summary">{task.text || tr("正在准备回复…")}</div>
                     {cancellation?.error && (
                       <div className="chat-task-error" role="alert">
-                        {cancellation.error}
+                        {tr("停止失败：{reason}。请重试。", { reason: translateError(cancellation.error) })}
                       </div>
                     )}
                   </div>
                   <button
                     type="button"
                     className="btn ghost sm chat-task-stop"
-                    aria-label={task.status === "queued" ? "取消排队" : "停止任务"}
+                    aria-label={task.status === "queued" ? tr("取消排队") : tr("停止任务")}
                     aria-describedby={`task-summary-${task.id}`}
                     disabled={cancellation?.pending || task.status === "cancelling"}
                     onClick={() => props.onCancel(task.id)}
                   >
                     {cancellation?.pending || task.status === "cancelling"
-                      ? "停止中…"
+                      ? tr("停止中…")
                       : task.status === "queued"
-                        ? "取消排队"
-                        : "停止"}
+                        ? tr("取消排队")
+                        : tr("停止")}
                   </button>
                 </li>
               );
@@ -1001,8 +1027,9 @@ function TaskList(props: {
 }
 
 function QuoteExcerpt({ quote }: { quote: MessageQuote }) {
+  const { t: tr } = useI18n();
   return (
-    <blockquote className="message-quote" aria-label={`引用 ${quote.senderName} 的消息`}>
+    <blockquote className="message-quote" aria-label={tr("引用 {name} 的消息", { name: quote.senderName })}>
       <span className="message-quote-author">{quote.senderName}</span>
       <span className="message-quote-text">{quote.text}</span>
     </blockquote>
@@ -1011,6 +1038,7 @@ function QuoteExcerpt({ quote }: { quote: MessageQuote }) {
 
 /** After a while with no output, say so (a harness can sit silently while it retries upstream). */
 function Waited({ since }: { since: number }) {
+  const { t: tr } = useI18n();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -1018,7 +1046,7 @@ function Waited({ since }: { since: number }) {
   }, []);
   const s = Math.floor((now - since) / 1000);
   if (s < 15) return null;
-  return <span className="waited">· {s} 秒无响应，可停止后重试</span>;
+  return <span className="waited">{tr("· {count} 秒无响应，可停止后重试", { count: s })}</span>;
 }
 
 /** The handoff tool call is shown as a hand-off card instead of a generic tool card. */
@@ -1035,17 +1063,18 @@ function withoutHandoffTools(t: Timeline | null): Timeline | null {
 
 /** History a harness replayed on session/load that this room never showed (read-only). */
 function ReplayHistory(props: { turns: ReplayTurn[]; agentName: string; terminals: Record<string, TerminalSnapshot> }) {
+  const { t: tr } = useI18n();
   return (
     <details className="replay" open>
       <summary>
-        <History size={13} /> 载入的 Harness 历史 · {props.turns.length} 轮
+        <History size={13} /> {tr("载入的 Harness 历史 · {count} 轮", { count: props.turns.length })}
       </summary>
       {props.turns.map((turn, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: replayed turns have no ids and never reorder
         <div key={i} className="replay-turn">
           {turn.user && (
             <div className="replay-user">
-              <span className="name">我</span>
+              <span className="name">{tr("我")}</span>
               <MessageMarkdown text={turn.user} mentionNames={[]} />
             </div>
           )}
@@ -1068,8 +1097,16 @@ const STOP_LABEL: Record<string, string> = {
 };
 
 function MessageDetails(props: { m: Message; agent?: Agent; harnessName: (id: string) => string }) {
+  const { t: tr, locale } = useI18n();
   const { m, agent } = props;
   const tools = Object.values(m.timeline?.tools ?? {});
+  const status: Record<Message["status"], string> = {
+    streaming: "回复中",
+    done: "正常结束",
+    error: "回复失败",
+    cancelled: "已取消",
+    interrupted: "回复被中断",
+  };
   return (
     <section className="d-section">
       <dl className="kv">
@@ -1077,15 +1114,17 @@ function MessageDetails(props: { m: Message; agent?: Agent; harnessName: (id: st
         <dd>{m.senderName}</dd>
         <dt>Harness</dt>
         <dd>{agent?.harness ? props.harnessName(agent.harness) : "—"}</dd>
-        <dt>状态</dt>
+        <dt>{tr("状态")}</dt>
         <dd>
-          {m.timeline?.stopReason ? (STOP_LABEL[m.timeline.stopReason] ?? m.timeline.stopReason) : m.status}
-          {m.error && <div className="error-text">{m.error}</div>}
+          {m.timeline?.stopReason
+            ? tr(STOP_LABEL[m.timeline.stopReason] ?? m.timeline.stopReason)
+            : tr(status[m.status])}
+          {m.error && <div className="error-text">{translateError(m.error)}</div>}
         </dd>
-        <dt>工具</dt>
-        <dd>{tools.length === 0 ? "无" : tools.map((t) => t.title).join("、")}</dd>
-        <dt>时间</dt>
-        <dd>{new Date(m.createdAt).toLocaleString()}</dd>
+        <dt>{tr("工具")}</dt>
+        <dd>{tools.length === 0 ? tr("无") : tools.map((t) => t.title).join(locale === "en" ? ", " : "、")}</dd>
+        <dt>{tr("时间")}</dt>
+        <dd>{new Date(m.createdAt).toLocaleString(intlLocale(locale))}</dd>
       </dl>
     </section>
   );
@@ -1093,6 +1132,7 @@ function MessageDetails(props: { m: Message; agent?: Agent; harnessName: (id: st
 
 /** Harness session controls for one agent: current session, new session, sessions the harness remembers. */
 function SessionSection(props: { room: Room; agent: Agent; view?: SessionView; solo: boolean }) {
+  const { t: tr, locale } = useI18n();
   const { room, agent, view } = props;
   const [list, setList] = useState<{ sessionId: string; title?: string | null; updatedAt?: string | null }[] | null>(
     null,
@@ -1110,7 +1150,7 @@ function SessionSection(props: { room: Room; agent: Agent; view?: SessionView; s
   return (
     <section className="d-section">
       <h4 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        {props.solo ? "Harness 会话" : `${agent.name} 的会话`}
+        {props.solo ? tr("Harness 会话") : tr("{name} 的会话", { name: agent.name })}
         <span style={{ display: "flex", gap: 4 }}>
           {view?.capabilities.list && (
             <button
@@ -1119,45 +1159,47 @@ function SessionSection(props: { room: Room; agent: Agent; view?: SessionView; s
               onClick={() => void run(async () => setList(await api("GET", `${base}/history`)))}
             >
               <History size={13} />
-              历史
+              {tr("历史")}
             </button>
           )}
           <button
             type="button"
             className="btn ghost sm"
-            title="开始新的 Harness 会话（聊天记录保留）"
+            title={tr("开始新的 Harness 会话（聊天记录保留）")}
             onClick={() => void run(() => api("POST", `${base}/session`, { sessionId: null }))}
           >
             <Plus size={13} />
-            新会话
+            {tr("新会话")}
           </button>
         </span>
       </h4>
       {view ? (
         <dl className="kv">
-          <dt>会话</dt>
+          <dt>{tr("会话")}</dt>
           <dd>
             <code style={{ fontSize: 11 }}>{view.sessionId}</code>
             {view.title && <div className="muted">{view.title}</div>}
           </dd>
           {view.usage && (
             <>
-              <dt>上下文</dt>
+              <dt>{tr("上下文")}</dt>
               <dd>
-                {view.usage.used.toLocaleString()} / {view.usage.size.toLocaleString()}
-                {view.usage.cost && ` · ${view.usage.cost.amount.toFixed(4)} ${view.usage.cost.currency}`}
+                {view.usage.used.toLocaleString(intlLocale(locale))} /{" "}
+                {view.usage.size.toLocaleString(intlLocale(locale))}
+                {view.usage.cost &&
+                  ` · ${view.usage.cost.amount.toLocaleString(intlLocale(locale), { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${view.usage.cost.currency}`}
               </dd>
             </>
           )}
         </dl>
       ) : (
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          发第一条消息时启动。
+          {tr("发第一条消息时启动。")}
         </p>
       )}
       {list && (
         <div className="session-list">
-          {list.length === 0 && <p className="muted">没有可恢复的会话。</p>}
+          {list.length === 0 && <p className="muted">{tr("没有可恢复的会话。")}</p>}
           {list.map((s) => (
             <button
               key={s.sessionId}
@@ -1172,12 +1214,14 @@ function SessionSection(props: { room: Room; agent: Agent; view?: SessionView; s
               }
             >
               <span>{s.title || s.sessionId}</span>
-              {s.updatedAt && <span className="pop-hint muted">{new Date(s.updatedAt).toLocaleDateString()}</span>}
+              {s.updatedAt && (
+                <span className="pop-hint muted">{new Date(s.updatedAt).toLocaleDateString(intlLocale(locale))}</span>
+              )}
             </button>
           ))}
         </div>
       )}
-      {error && <div className="error-text">{error}</div>}
+      {error && <div className="error-text">{translateError(error)}</div>}
     </section>
   );
 }
@@ -1193,6 +1237,7 @@ function RoomInfo(props: {
   onRoomChange: () => Promise<void>;
   onDeleted: () => void;
 }) {
+  const { t: tr } = useI18n();
   const { room } = props;
   const [error, setError] = useState<string | null>(null);
   const replyCount = new Map<string, number>();
@@ -1225,12 +1270,12 @@ function RoomInfo(props: {
       <div className="d-hero">
         <RoomIcon room={room} agents={props.agents} size={64} />
         <h3>{room.name}</h3>
-        <div className="d-tabs" role="tablist" aria-label="会话信息">
+        <div className="d-tabs" role="tablist" aria-label={tr("会话信息")}>
           {(
             [
-              ["info", "详情"],
-              ["library", "资料库"],
-              ["members", "成员"],
+              ["info", tr("详情")],
+              ["library", tr("资料库")],
+              ["members", tr("成员")],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -1248,20 +1293,20 @@ function RoomInfo(props: {
       </div>
       {tab === "members" && (
         <section className="d-section d-members">
-          {props.members.length === 0 && <p className="muted">没有 Agent 成员。</p>}
+          {props.members.length === 0 && <p className="muted">{tr("没有 Agent 成员。")}</p>}
           {props.members.map((a) => {
             const n = replyCount.get(a.id) ?? 0;
             const doing = agentActivity(a.id, props.messages);
             return (
               <div key={a.id} className="member-row">
-                <a className="member-link" href={`#/a/${a.id}`} title="编辑这个 Agent">
+                <a className="member-link" href={`#/a/${a.id}`} title={tr("编辑这个 Agent")}>
                   <AgentAvatar agent={a} size={28} expression={doing} animate />
                   <span className="member-body">
                     <span className="member-name">{a.name}</span>
                     <span className="member-sub">
-                      {a.harness ? props.harnessName(a.harness) : "未绑定 Harness"}
-                      {room.mainAgentId === a.id && " · 主 Agent"}
-                      {n > 0 && ` · ${n} 条回复`}
+                      {a.harness ? props.harnessName(a.harness) : tr("未绑定 Harness")}
+                      {room.mainAgentId === a.id && tr(" · 主 Agent")}
+                      {n > 0 && tr(" · {count} 条回复", { count: n })}
                     </span>
                   </span>
                 </a>
@@ -1269,7 +1314,7 @@ function RoomInfo(props: {
                   <button
                     type="button"
                     className="btn ghost icon xs member-remove"
-                    aria-label={`移出 ${a.name}`}
+                    aria-label={tr("移出 {name}", { name: a.name })}
                     onClick={() => void toggle(a.id)}
                   >
                     <X size={13} />
@@ -1283,13 +1328,13 @@ function RoomInfo(props: {
               <span className="add-icon">
                 <Plus size={15} />
               </span>
-              <span className="member-name">添加成员</span>
+              <span className="member-name">{tr("添加成员")}</span>
             </button>
             {adding && (
               <div className="add-pop">
                 <PickList
-                  searchPlaceholder="搜索 Agent"
-                  emptyText="没有可添加的 Agent"
+                  searchPlaceholder={tr("搜索 Agent")}
+                  emptyText={tr("没有可添加的 Agent")}
                   groups={[
                     {
                       items: others.map((a) => ({
@@ -1309,17 +1354,17 @@ function RoomInfo(props: {
               </div>
             )}
           </div>
-          {error && <div className="error-text">{error}</div>}
+          {error && <div className="error-text">{translateError(error)}</div>}
         </section>
       )}
       {tab === "library" && (
         <section className="d-section">
-          <h4>项目</h4>
+          <h4>{tr("项目")}</h4>
           <a className="project-link" href={props.project ? `#/p/${props.project.id}` : undefined}>
             <span>{props.project?.name ?? "—"}</span>
             <span className="muted mono">{room.cwd}</span>
           </a>
-          <p className="muted d-note">会话里的 Agent 都在这个文件夹里读写文件。</p>
+          <p className="muted d-note">{tr("会话里的 Agent 都在这个文件夹里读写文件。")}</p>
         </section>
       )}
       {tab === "info" && (
@@ -1327,10 +1372,10 @@ function RoomInfo(props: {
           {props.members.length > 1 && (
             <section className="d-section">
               <label className="field">
-                <span className="label">主 Agent</span>
+                <span className="label">{tr("主 Agent")}</span>
                 <select
                   className="select"
-                  aria-label="主 Agent"
+                  aria-label={tr("主 Agent")}
                   value={room.mainAgentId ?? ""}
                   onChange={(e) => void patch({ mainAgentId: e.target.value })}
                 >
@@ -1359,14 +1404,14 @@ function RoomInfo(props: {
               type="button"
               className="btn danger"
               onClick={async () => {
-                if (!confirm(`删除会话「${room.name}」及其全部消息？此操作不可撤销。`)) return;
+                if (!confirm(tr("删除会话「{name}」及其全部消息？此操作不可撤销。", { name: room.name }))) return;
                 await api("DELETE", `/api/rooms/${room.id}`).then(props.onDeleted, (e) =>
                   setError((e as Error).message),
                 );
               }}
             >
               <Trash2 size={14} />
-              删除会话
+              {tr("删除会话")}
             </button>
           </section>
         </>
@@ -1400,6 +1445,7 @@ function Composer(props: {
   queued?: number;
   onStop?: () => void;
 }) {
+  const { t: tr } = useI18n();
   const fileRef = useRef<HTMLInputElement>(null);
   const addFiles = async (files: Iterable<File>) => {
     if (props.sending) return;
@@ -1420,7 +1466,8 @@ function Composer(props: {
   const q = (query?.[1] ?? "").toLowerCase();
   // "所有人" is offered first in groups with 2+ agents; it matches 所有人 / all / everyone.
   const everyone =
-    props.members.length > 1 && ["所有人", "all", "everyone"].some((n) => n.startsWith(q) || n.includes(q));
+    props.members.length > 1 &&
+    [tr("所有人").toLowerCase(), "所有人", "all", "everyone"].some((n) => n.startsWith(q) || n.includes(q));
   const options: (Agent | typeof EVERYONE)[] =
     query && !dismissed
       ? [...(everyone ? [EVERYONE] : []), ...props.members.filter((a) => a.name.toLowerCase().includes(q))]
@@ -1453,7 +1500,7 @@ function Composer(props: {
     });
   };
   const picker = commands.length
-    ? { kind: "cmd" as const, items: commands, prefix: "/" as const, title: "命令" }
+    ? { kind: "cmd" as const, items: commands, prefix: "/" as const, title: tr("命令") }
     : skillHits.length
       ? { kind: "skill" as const, items: skillHits, prefix: "$" as const, title: "Skills" }
       : null;
@@ -1531,11 +1578,11 @@ function Composer(props: {
           {props.images.map((img, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: attachments are a short local list
             <span key={i} className="attach">
-              <img src={`data:${img.mimeType};base64,${img.data}`} alt={`附件 ${i + 1}`} />
+              <img src={`data:${img.mimeType};base64,${img.data}`} alt={tr("附件 {count}", { count: i + 1 })} />
               <button
                 type="button"
                 disabled={props.sending}
-                aria-label="移除图片"
+                aria-label={tr("移除图片")}
                 onClick={() => props.onImages(props.images.filter((_, j) => j !== i))}
               >
                 <X size={11} />
@@ -1545,8 +1592,8 @@ function Composer(props: {
         </div>
       )}
       {options.length > 0 && (
-        <div className="popover mention-pop" role="listbox" aria-label="选择要 @ 的 Agent">
-          <div className="pop-title">提及 Agent</div>
+        <div className="popover mention-pop" role="listbox" aria-label={tr("选择要 @ 的 Agent")}>
+          <div className="pop-title">{tr("提及 Agent")}</div>
           {options.map((a, i) => (
             <button
               type="button"
@@ -1566,7 +1613,7 @@ function Composer(props: {
               ) : (
                 <AgentAvatar agent={a as Agent} size={22} />
               )}
-              <span>{a.name}</span>
+              <span>{a === EVERYONE ? tr("所有人") : a.name}</span>
             </button>
           ))}
         </div>
@@ -1577,7 +1624,7 @@ function Composer(props: {
           <button
             type="button"
             className="btn ghost icon sm"
-            aria-label="取消引用"
+            aria-label={tr("取消引用")}
             disabled={props.sending}
             onClick={() => {
               props.onCancelQuote();
@@ -1593,7 +1640,7 @@ function Composer(props: {
         ref={ref}
         rows={1}
         value={props.value}
-        aria-label="消息输入框"
+        aria-label={tr("消息输入框")}
         aria-autocomplete={picker ? "list" : undefined}
         aria-controls={picker ? pickerId : undefined}
         aria-activedescendant={picker ? `${pickerId}-${active % picker.items.length}` : undefined}
@@ -1671,8 +1718,8 @@ function Composer(props: {
                 type="button"
                 className="btn ghost icon sm"
                 disabled={props.sending}
-                aria-label="添加图片"
-                title={props.imageNote || "添加图片"}
+                aria-label={tr("添加图片")}
+                title={props.imageNote || tr("添加图片")}
                 onClick={() => fileRef.current?.click()}
               >
                 <Plus size={17} />
@@ -1685,7 +1732,7 @@ function Composer(props: {
           {props.usage}
           {(() => {
             const stop = !!props.stopTask && !props.sending && !props.value.trim() && props.images.length === 0;
-            const label = stop ? (props.stopTask?.status === "queued" ? "取消排队" : "停止") : "发送";
+            const label = stop ? (props.stopTask?.status === "queued" ? tr("取消排队") : tr("停止")) : tr("发送");
             return (
               <button
                 type="button"
@@ -1698,10 +1745,10 @@ function Composer(props: {
                 aria-label={label}
                 title={
                   stop
-                    ? `${label} · ${props.stopTask?.agentName} · ${props.stopTask?.text || "正在准备回复"}`
+                    ? `${label} · ${props.stopTask?.agentName} · ${props.stopTask?.text || tr("正在准备回复")}`
                     : props.queued
-                      ? `发送 · ${props.queued} 条排队中`
-                      : "发送"
+                      ? tr("发送 · {count} 条排队中", { count: props.queued })
+                      : tr("发送")
                 }
               >
                 <span className="send-ico send-ico-arrow" aria-hidden>
@@ -1723,6 +1770,7 @@ const EVERYONE_RE = /(^|[^\w.])@(所有人|all|everyone)(?![\w\u4e00-\u9fff])/i;
 
 /** Live preview of who will answer the draft, mirroring the server's group rules. */
 function Recipients(props: { text: string; members: Agent[] }) {
+  const { t: tr } = useI18n();
   const lower = props.text.toLowerCase();
   const named = props.members.filter((a) => lower.includes(`@${a.name.toLowerCase()}`));
   const everyone = EVERYONE_RE.test(props.text);
@@ -1731,11 +1779,11 @@ function Recipients(props: { text: string; members: Agent[] }) {
       {everyone ? (
         <span className="rcpt">
           <Users size={12} />
-          所有人
+          {tr("所有人")}
         </span>
       ) : (
         named.map((a) => (
-          <span key={a.id} className="rcpt" title={`发给 ${a.name}`}>
+          <span key={a.id} className="rcpt" title={tr("发给 {name}", { name: a.name })}>
             <AgentAvatar agent={a} size={14} />
             {a.name}
           </span>

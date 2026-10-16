@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "../server/app";
-import { resetLoginShellEnv } from "../server/harness";
+import { bundledAdapter, harnessSpec, resetLoginShellEnv } from "../server/harness";
 import type { Agent, Message, Project, Room } from "../server/store";
 import { agentInput } from "./helpers";
 
@@ -95,11 +95,12 @@ const mock = Bun.serve({
 const base = `http://127.0.0.1:${mock.port}`;
 
 // The "user's login shell": their own key + base URL, which the profile must override.
+// Keep the local mock endpoints direct even when native SDKs discover a system proxy.
 const oldShell = process.env.SHELL;
 const shell = join(dir, "login.sh");
 writeFileSync(
   shell,
-  `#!/bin/sh\nprintf "PATH=%s\\0HOME=${home}\\0ANTHROPIC_API_KEY=user-own-key\\0ANTHROPIC_BASE_URL=http://127.0.0.1:9\\0OPENAI_API_KEY=user-own-openai\\0" "$PATH"\n`,
+  `#!/bin/sh\nprintf "PATH=%s\\0HOME=${home}\\0NO_PROXY=127.0.0.1,localhost\\0no_proxy=127.0.0.1,localhost\\0ANTHROPIC_API_KEY=user-own-key\\0ANTHROPIC_BASE_URL=http://127.0.0.1:9\\0OPENAI_API_KEY=user-own-openai\\0" "$PATH"\n`,
 );
 chmodSync(shell, 0o755);
 
@@ -114,6 +115,17 @@ const api = async <T>(m: string, p: string, b?: unknown) => {
 };
 
 beforeAll(() => {
+  const paths: Record<string, string> = {};
+  for (const id of ["claude-code", "codex"]) {
+    const spec = harnessSpec(id);
+    const adapter = spec ? bundledAdapter(spec) : null;
+    if (!adapter) throw new Error(`Missing bundled ${id} adapter`);
+    const wrapper = join(dir, `${id}-acp.js`);
+    writeFileSync(wrapper, `#!${process.execPath}\nimport ${JSON.stringify(adapter.script)};\n`);
+    chmodSync(wrapper, 0o755);
+    paths[id] = wrapper;
+  }
+  app.store.setSetting("harnessPaths", paths);
   process.env.SHELL = shell;
   resetLoginShellEnv();
 });

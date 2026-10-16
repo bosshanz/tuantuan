@@ -1,4 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
+import { translate } from "./i18n";
 
 /** One ACP session setting (config option or legacy mode), normalized for chips / pickers. */
 export type OptKind = "model" | "mode" | "effort" | "thinking" | "other";
@@ -18,7 +19,7 @@ export interface Opt {
   /** configId, or "__mode" for the legacy session/set_mode API. */
   id: string;
   kind: OptKind;
-  /** Short Chinese label, e.g. 权限 / 推理 / 思考. */
+  /** Short localized label. */
   label: string;
   /** Harness name of the option (tooltip). */
   name: string;
@@ -95,9 +96,17 @@ const DANGER = new Set([
 
 export function choiceLabel(kind: OptKind, value: string, name: string): string {
   const v = value.toLowerCase();
-  if (kind === "model") return name.replace(/\s*\((recommended|推荐)\)\s*/i, "").replace(/^default$/i, "默认") || value;
+  if (kind === "model") {
+    const label = name.replace(/\s*\((recommended|推荐)\)\s*/i, "");
+    return /^default$/i.test(label) ? translate("默认") : label || value;
+  }
+  // Some adapters use a native effort ID for an on/off control. Keep its explicit
+  // meaning instead of translating that transport ID into a fabricated intensity.
+  const switchLabel = (kind === "effort" || kind === "thinking") && VALUES.bool?.[name.toLowerCase()];
+  if (switchLabel) return translate(switchLabel);
   const table = kind === "mode" ? VALUES.mode : kind === "effort" ? VALUES.effort : undefined;
-  return table?.[v] ?? VALUES.bool?.[v] ?? name;
+  const label = table?.[v] ?? VALUES.bool?.[v];
+  return label ? translate(label) : name;
 }
 
 function flatChoices(o: acp.SessionConfigOption): { value: string; name: string; description?: string | null }[] {
@@ -112,12 +121,15 @@ function flatChoices(o: acp.SessionConfigOption): { value: string; name: string;
 }
 
 function choice(kind: OptKind, c: { value: string; name: string; description?: string | null }, id = ""): OptChoice {
+  const collaborationLabel = VALUES.collaboration_mode?.[c.value];
   return {
     value: c.value,
     name: c.name,
     label:
       id === "collaboration_mode"
-        ? (VALUES.collaboration_mode?.[c.value] ?? c.name)
+        ? collaborationLabel
+          ? translate(collaborationLabel)
+          : c.name
         : choiceLabel(kind, c.value, c.name),
     description: c.description ?? null,
     danger: DANGER.has(c.value.toLowerCase()),
@@ -130,7 +142,8 @@ export function describeOptions(configOptions: acp.SessionConfigOption[], modes?
   const out: Opt[] = [];
   for (const o of configOptions) {
     const kind = optKind(o);
-    const label = KIND_LABEL[kind] || ID_LABEL[o.id.toLowerCase()] || o.name;
+    const knownLabel = KIND_LABEL[kind] || ID_LABEL[o.id.toLowerCase()];
+    const label = knownLabel ? translate(knownLabel) : o.name;
     if (o.type === "select") {
       const choices = flatChoices(o).map((c) => choice(kind, c, o.id));
       // two-valued on/off selects read like switches
@@ -161,7 +174,7 @@ export function describeOptions(configOptions: acp.SessionConfigOption[], modes?
     out.unshift({
       id: "__mode",
       kind: "mode",
-      label: "权限",
+      label: translate("权限"),
       name: "Mode",
       description: null,
       type: "select",
@@ -186,7 +199,7 @@ export function defaultsSummary(d: Record<string, string> | undefined): string[]
   for (const [id, v] of Object.entries(d)) {
     const kind = optKind({ id });
     if (kind === "model") out.unshift(choiceLabel("model", v, v));
-    else if (kind === "effort") out.push(`推理 ${choiceLabel("effort", v, v)}`);
+    else if (kind === "effort") out.push(translate("推理 {level}", { level: choiceLabel("effort", v, v) }));
   }
   return out;
 }
@@ -194,15 +207,16 @@ export function defaultsSummary(d: Record<string, string> | undefined): string[]
 /** Sidebar subtitle: short harness name · friendly model; drops internal ids like builtin:… */
 export function agentSubtitle(harness: string, d: Record<string, string> | undefined): string {
   const h = harness.replace(/\s*[（(].*?[）)]\s*/g, "").trim();
-  const model = defaultsSummary(d)
-    .filter((x) => !x.startsWith("推理"))
+  const model = Object.entries(d ?? {})
+    .filter(([id]) => optKind({ id }) === "model")
+    .reverse()
     .map(
-      (x) =>
-        x
+      ([, value]) =>
+        choiceLabel("model", value, value)
           .replace(/^builtin:/i, "")
           .split(/[/:]/)
           .pop() ?? "",
     )
-    .find((x) => x && x.length <= 24);
+    .find((value) => value && value.length <= 24);
   return model ? `${h} · ${model}` : h;
 }

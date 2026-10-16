@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app, type BrowserWindow, ipcMain, Notification, nativeImage, shell } from "electron";
+import { type Locale, translate } from "../../shared/i18n";
 
 export interface NotifyPayload {
   title: string;
@@ -51,11 +52,14 @@ function signature(): Promise<string> {
  * main process. Post a single welcome notification on the first launch of a packaged build so the
  * permission prompt appears right away (remembered in userData).
  */
-export function registerOnFirstLaunch() {
+export function registerOnFirstLaunch(locale: Locale = "zh-CN") {
   if (process.platform !== "darwin" || !app.isPackaged || !Notification.isSupported()) return;
   const flag = join(app.getPath("userData"), "notifications-registered");
   if (existsSync(flag)) return;
-  const n = new Notification({ title: "团团", body: "通知已就绪：Agent 回复完成或需要你批准时会提醒你。" });
+  const n = new Notification({
+    title: translate(locale, "团团"),
+    body: translate(locale, "通知已就绪：Agent 回复完成或需要你批准时会提醒你。"),
+  });
   live.add(n);
   n.once("show", () => {
     log("first-launch show");

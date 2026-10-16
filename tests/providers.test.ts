@@ -64,6 +64,9 @@ describe("provider env injection (per process only)", () => {
       ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro",
       ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro",
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-flash",
+      ANTHROPIC_CUSTOM_MODEL_OPTION: "deepseek-v4-pro",
+      CLAUDE_CODE_MODEL_CAPABILITIES:
+        "deepseek-v4-pro=effort,thinking,adaptive_thinking,-xhigh_effort,max_effort;deepseek-flash=effort,thinking,adaptive_thinking,-xhigh_effort,max_effort",
     });
     expect(e.unset).toContain("ANTHROPIC_API_KEY");
     expect(e.unset).toContain("ANTHROPIC_SMALL_FAST_MODEL");
@@ -97,6 +100,10 @@ describe("provider env injection (per process only)", () => {
 
   test("BYOK mapping and masking", () => {
     expect(providerAsCustom(prov())).toMatchObject({ format: "openai-chat", baseUrl: "https://api.deepseek.com/v1" });
+    expect(providerAsCustom(prov({ wireApi: "responses" }))).toMatchObject({
+      format: "openai-responses",
+      baseUrl: "https://api.deepseek.com/v1",
+    });
     expect(providerAsCustom(prov({ openaiBaseUrl: "" }))).toMatchObject({
       format: "anthropic",
       baseUrl: "https://api.deepseek.com/anthropic/v1",

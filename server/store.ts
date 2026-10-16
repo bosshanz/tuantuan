@@ -6,6 +6,7 @@ import { messagePreview, type RoomPreview } from "../shared/roomPreview";
 import { emptyTimeline, type Timeline } from "../shared/timeline";
 import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
 import { type CustomFormat, type CustomSecret, type Item, maskKey } from "./custom";
+import { ModelCatalog } from "./model-catalog";
 import type { ProviderSecret } from "./providers";
 
 /** SQLite is the source of truth for agents, rooms, messages and ACP session bindings. */
@@ -209,6 +210,8 @@ export const MIGRATIONS: string[] = [
      updated_at INTEGER NOT NULL,
      PRIMARY KEY (room_id, agent_id)
    );`,
+  // Alias capability references only; API credentials remain in the existing secret columns.
+  `ALTER TABLE providers ADD COLUMN model_catalog TEXT NOT NULL DEFAULT '{}';`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -366,12 +369,20 @@ type Row = Record<string, unknown>;
 
 export class Store {
   readonly db: Database;
+  readonly modelCatalog: ModelCatalog;
 
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path, { strict: true });
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     this.migrate();
+    let cachedCatalog: unknown = null;
+    try {
+      cachedCatalog = this.getSetting("modelCatalog", null);
+    } catch {
+      cachedCatalog = {};
+    } // Invalid cache is reported by ModelCatalog and falls back to the bundle.
+    this.modelCatalog = new ModelCatalog(cachedCatalog, (data) => this.setSetting("modelCatalog", data));
     for (const { id } of this.db.query("SELECT id FROM agents WHERE avatar_shape = ''").all() as { id: string }[])
       this.db.query("UPDATE agents SET avatar_shape = ? WHERE id = ?").run(defaultAvatar(id).shape, id);
     // Streams cannot survive a restart: mark them so the UI does not show a forever-typing message.
@@ -758,12 +769,14 @@ export class Store {
 
   // ---- 服务商 ----
   listProviders(): ProviderSecret[] {
-    return (this.db.query("SELECT * FROM providers ORDER BY created_at").all() as Row[]).map(toProvider);
+    return (this.db.query("SELECT * FROM providers ORDER BY created_at").all() as Row[]).map((row) =>
+      this.modelCatalog.capture(toProvider(row)),
+    );
   }
 
   getProvider(id: string): ProviderSecret | null {
     const r = this.db.query("SELECT * FROM providers WHERE id = ?").get(id) as Row | null;
-    return r ? toProvider(r) : null;
+    return r ? this.modelCatalog.capture(toProvider(r)) : null;
   }
 
   saveProvider(
@@ -784,15 +797,16 @@ export class Store {
       model: input.model,
       small_model: input.smallModel,
       wire_api: input.wireApi,
+      model_catalog: JSON.stringify(input.modelCatalog ?? old?.modelCatalog ?? {}),
       created_at: old?.createdAt ?? now,
       updated_at: Math.max(now, (old?.updatedAt ?? 0) + 1),
     };
     this.db
       .query(
-        `INSERT INTO providers (id,name,preset,anthropic_base_url,openai_base_url,api_key,mgmt_key,model,small_model,wire_api,created_at,updated_at)
-         VALUES ($id,$name,$preset,$anthropic_base_url,$openai_base_url,$api_key,$mgmt_key,$model,$small_model,$wire_api,$created_at,$updated_at)
+        `INSERT INTO providers (id,name,preset,anthropic_base_url,openai_base_url,api_key,mgmt_key,model,small_model,wire_api,model_catalog,created_at,updated_at)
+         VALUES ($id,$name,$preset,$anthropic_base_url,$openai_base_url,$api_key,$mgmt_key,$model,$small_model,$wire_api,$model_catalog,$created_at,$updated_at)
          ON CONFLICT(id) DO UPDATE SET name=$name,preset=$preset,anthropic_base_url=$anthropic_base_url,openai_base_url=$openai_base_url,
-           api_key=$api_key,mgmt_key=$mgmt_key,model=$model,small_model=$small_model,wire_api=$wire_api,updated_at=$updated_at`,
+           api_key=$api_key,mgmt_key=$mgmt_key,model=$model,small_model=$small_model,wire_api=$wire_api,model_catalog=$model_catalog,updated_at=$updated_at`,
       )
       .run(row);
     return this.getProvider(id) as ProviderSecret;
@@ -993,6 +1007,7 @@ function toProvider(r: Row): ProviderSecret {
     model: r.model as string,
     smallModel: r.small_model as string,
     wireApi: (r.wire_api as string) === "responses" ? "responses" : "chat",
+    modelCatalog: JSON.parse((r.model_catalog as string) || "{}"),
     createdAt: r.created_at as number,
     updatedAt: r.updated_at as number,
   };

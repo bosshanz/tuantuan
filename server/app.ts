@@ -6,6 +6,7 @@ import { methods as acpMethods, RequestError } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
 import { missingKeyVar } from "../shared/auth";
+import { translate } from "../shared/i18n";
 import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
 import { messagePreview } from "../shared/roomPreview";
 import { replayTurns } from "../shared/timeline";
@@ -26,7 +27,7 @@ import {
   visibleHarnesses,
 } from "./harness";
 import { ENV_NAME, harnessSecretEnv, openTerminal, publicHarnessEnv, setHarnessEnv } from "./harness-secrets";
-import { HarnessHost, withProviderMeta } from "./host";
+import { HarnessHost, nativeReasoningPreferences, withProviderMeta } from "./host";
 import { Installer } from "./installer";
 import * as library from "./library";
 import { installManaged, readManifest, setManagedRoot, uninstallManaged } from "./managed";
@@ -34,11 +35,14 @@ import { EVERYONE_NAMES } from "./mentions";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import { ProfileSchema, readProfile } from "./profile";
 import { PROJECT_TERMINAL_LIMITS, ProjectTerminals } from "./project-terminal";
+import { providerReasoningDefaults } from "./provider-reasoning";
+import { prepareProviderRuntime } from "./provider-runtime";
 import {
   codexProviderSet,
   PRESETS,
   presetFor,
   providerBalance,
+  providerConfigOptions,
   providerEnv,
   providerSupports,
   publicProvider,
@@ -191,17 +195,22 @@ export function createApp(deps: AppDeps) {
     else if (event.type === "message") {
       const last = messagePreview(event.message);
       if (last) publishAll({ type: "room.preview", roomId, last });
-      const n = notifyForMessage(roomId, event.message);
+      const n = notifyForMessage(roomId, event.message, readProfile(store.getSetting("profile", {})).language);
       if (n) publishAll(n);
     } else if (event.type === "permission" && event.ask) {
       const agent = store.getAgent(event.ask.agentId);
+      const locale = readProfile(store.getSetting("profile", {})).language;
       publishAll({
         type: "notify",
         kind: "permission",
         roomId,
         agentId: event.ask.agentId,
         agentName: agent?.name ?? "Agent",
-        text: preview(`想要：${event.ask.toolCall.title ?? "执行操作"}`),
+        text: preview(
+          translate(locale, "想要：{action}", {
+            action: event.ask.toolCall.title ?? translate(locale, "执行操作"),
+          }),
+        ),
         id: event.ask.id,
       });
     }
@@ -234,6 +243,8 @@ export function createApp(deps: AppDeps) {
     if (a.providerId) {
       const prov = store.getProvider(a.providerId);
       if (!prov) throw new ValidationError("服务商不存在");
+      if ((a.harness === "opencode" || a.harness === "pi") && !prov.model.trim())
+        throw new ValidationError("OpenCode / Pi 使用服务商前，请先在服务商中填写主模型");
       if (!providerSupports(prov, a.harness)) throw new ValidationError(`「${prov.name}」不能用于这个 Harness`);
     }
     if (a.harness === CUSTOM_HARNESS && !a.providerId) {
@@ -338,9 +349,11 @@ export function createApp(deps: AppDeps) {
   const optionsInflight = new Map<string, Promise<unknown>>();
   /** Options cache key: per harness, and per 服务商 version when one is applied. */
   const optionsKey = (id: string, prov: { id: string; updatedAt: number } | null) =>
-    prov ? `${id}|${prov.id}|${prov.updatedAt}` : id;
+    prov ? `${id}|${prov.id}|${prov.updatedAt}|${store.modelCatalog.status().sha256}` : id;
   async function harnessOptionsFor(id: string, refresh: boolean, providerId: string | null = null) {
     const prov = providerId ? store.getProvider(providerId) : null;
+    if (providerId && !prov) throw new ValidationError("服务商不存在");
+    if (prov && !providerSupports(prov, id)) throw new ValidationError(`「${prov.name}」不能用于这个 Harness`);
     const key = optionsKey(id, prov && providerSupports(prov, id) ? prov : null);
     const hit = harnessOptions.get(key);
     if (hit && !refresh && !hit.error && Date.now() - hit.at < 30 * 60_000) return hit;
@@ -656,6 +669,8 @@ export function createApp(deps: AppDeps) {
     const env = { ...(await loginShellEnv()), ...status.env, ...secrets };
     // With a 服务商, probe exactly as the agent will run: same env, routing and settings tier.
     const prov = providerId ? store.getProvider(providerId) : null;
+    if (providerId && !prov) throw new ValidationError("服务商不存在");
+    if (prov && !providerSupports(prov, id)) throw new ValidationError(`「${prov.name}」不能用于这个 Harness`);
     const useProv = prov && providerSupports(prov, id) ? prov : null;
     if (useProv) {
       const pe = providerEnv(useProv, id, env);
@@ -665,10 +680,22 @@ export function createApp(deps: AppDeps) {
     const cacheKey = optionsKey(id, useProv);
     const scratch = mkdtempSync(join(tmpdir(), "tuantuan-probe-"));
     const usageCollector = new RegistryUsageCollector();
-    const p = new AcpProcess(
-      { command, args: status.args, env, cwd: scratch },
-      { onUpdate: usageCollector.onUpdate, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
-    );
+    let runtime: ReturnType<typeof prepareProviderRuntime> | undefined;
+    let p: AcpProcess;
+    try {
+      runtime = useProv
+        ? prepareProviderRuntime(useProv, id, env, status.version, { command, args: status.args, cwd: scratch })
+        : undefined;
+      p = new AcpProcess(
+        { command, args: status.args, env: runtime?.env ?? env, cwd: scratch },
+        { onUpdate: usageCollector.onUpdate, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },
+      );
+    } catch (error) {
+      runtime?.cleanup();
+      rmSync(scratch, { recursive: true, force: true });
+      throw error;
+    }
+    void p.exited.then(() => runtime?.cleanup());
     try {
       const init = await p.initialize(30_000);
       const authMethods = (init.authMethods ?? []).map((m) => {
@@ -790,14 +817,61 @@ export function createApp(deps: AppDeps) {
             return p.agent.request(acpMethods.agent.session.new, {
               cwd: scratch,
               mcpServers: [],
-              _meta: withProviderMeta(undefined, { harness: id, providerId: useProv?.id ?? null }, store),
+              _meta: withProviderMeta(undefined, { harness: id, providerId: useProv?.id ?? null }, store, {
+                provider: useProv,
+                env: p.launch.env,
+              }),
             });
           })(),
           60_000,
           "session/new 超时",
         );
         createdSession = created;
-        configOptions = created.configOptions ?? [];
+        configOptions = providerConfigOptions(useProv, id, created.configOptions ?? [], p.launch.env);
+        const modelOption = configOptions.find((option) => option.category === "model" || option.id === "model");
+        if (
+          useProv?.model &&
+          id === "claude-code" &&
+          modelOption?.type === "select" &&
+          modelOption.currentValue !== useProv.model &&
+          modelOption.options
+            .flatMap((item) => ("options" in item ? item.options : [item]))
+            .some((item) => item.value === useProv.model)
+        ) {
+          try {
+            const applied = await withTimeout(
+              p.agent.request(acpMethods.agent.session.setConfigOption, {
+                sessionId: created.sessionId,
+                configId: modelOption.id,
+                value: useProv.model,
+              }),
+              20_000,
+              "设置服务商模型超时",
+            );
+            configOptions = providerConfigOptions(useProv, id, applied.configOptions, p.launch.env);
+          } catch {
+            /* Keep the real model if the optional raw-ID picker is rejected. */
+          }
+        }
+        for (const [configId, value] of Object.entries({
+          ...(runtime?.reasoningPreferences ?? providerReasoningDefaults(useProv, id, configOptions)),
+          ...nativeReasoningPreferences(id, env),
+        })) {
+          try {
+            const applied = await withTimeout(
+              p.agent.request(acpMethods.agent.session.setConfigOption, {
+                sessionId: created.sessionId,
+                configId,
+                value,
+              }),
+              20_000,
+              "设置服务商默认推理等级超时",
+            );
+            configOptions = providerConfigOptions(useProv, id, applied.configOptions, p.launch.env);
+          } catch {
+            // A rejected default is optional; show the harness's actual current configuration.
+          }
+        }
         modes = created.modes ?? null;
         harnessOptions.set(cacheKey, { at: Date.now(), configOptions, modes, error: null });
         loggedIn = true;
@@ -889,6 +963,7 @@ export function createApp(deps: AppDeps) {
       if (method === "PUT") {
         const p = ProfileSchema.parse(await body());
         store.setSetting("profile", p);
+        publishAll({ type: "profile.updated", profile: p });
         return json(p);
       }
     }
@@ -929,6 +1004,19 @@ export function createApp(deps: AppDeps) {
     }
 
     if (resource === "providers") {
+      if (id === "models" && method === "GET")
+        return json({
+          ...store.modelCatalog.status(),
+          items: store.modelCatalog.search((url.searchParams.get("query") ?? "").slice(0, 200)),
+        });
+      if (id === "models" && sub === "sync" && method === "POST") {
+        srv.timeout(req, 45);
+        try {
+          return json(await store.modelCatalog.sync());
+        } catch (error) {
+          throw new ValidationError(`模型能力同步失败：${(error as Error).message}`, 502);
+        }
+      }
       const ProviderBody = z.object({
         name: z.string().trim().min(1, "名称不能为空").max(40),
         preset: z.string().max(32).default("custom"),
@@ -939,12 +1027,22 @@ export function createApp(deps: AppDeps) {
         model: z.string().trim().max(200).default(""),
         smallModel: z.string().trim().max(200).default(""),
         wireApi: z.enum(["responses", "chat"]).default("chat"),
+        modelCatalog: z
+          .record(z.string().trim().min(1).max(200), z.string().trim().max(400))
+          .refine((value) => Object.keys(value).length <= 20, "模型能力来源最多 20 项")
+          .optional(),
       });
       const urlOk = (u: string) => !u || /^https?:\/\//.test(u);
-      const check = (b: z.infer<typeof ProviderBody>) => {
+      const check = (b: z.infer<typeof ProviderBody>, previous?: Record<string, string>) => {
         if (!b.anthropicBaseUrl && !b.openaiBaseUrl) throw new ValidationError("至少填写一个接口地址");
         if (!urlOk(b.anthropicBaseUrl) || !urlOk(b.openaiBaseUrl))
           throw new ValidationError("地址需以 http(s):// 开头");
+        for (const [model, reference] of Object.entries(b.modelCatalog ?? {})) {
+          // A catalog removal must not prevent unrelated provider edits. Keep an
+          // unchanged binding as user intent; unknown capabilities stay unknown.
+          if (reference && reference !== previous?.[model] && !store.modelCatalog.has(reference))
+            throw new ValidationError("模型能力来源不存在，请从目录建议中选择");
+        }
       };
       const usedBy = (pid: string) =>
         store
@@ -990,7 +1088,14 @@ export function createApp(deps: AppDeps) {
       if (id && !prov) throw new ValidationError("服务商不存在", 404);
       if (prov && !sub && method === "PUT") {
         const b = ProviderBody.parse(await body());
-        check(b);
+        check(b, prov.modelCatalog);
+        const incompatible = store
+          .listAgents()
+          .filter((a) => a.providerId === prov.id && !providerSupports(b, a.harness));
+        if (incompatible.length)
+          throw new ValidationError(
+            `这个配置无法用于 ${incompatible.map((a) => a.name).join("、")}，请保留所需的接口地址、格式和主模型，或先切换这些 Agent 的服务商`,
+          );
         // agents using it pick the change up on their next turn (process signature changes)
         return json({ ...publicProvider(store.saveProvider({ ...b, id: prov.id })), usedBy: usedBy(prov.id) });
       }

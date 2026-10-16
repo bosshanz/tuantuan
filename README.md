@@ -19,8 +19,9 @@ https://github.com/user-attachments/assets/d6d0b112-2b6f-4f10-ba21-a4bdf45a910b
 - **多 Harness**：Claude Code、Codex、Grok Build、OpenCode 等通过 ACP 接入；优先用本机版本，没有时一键安装。
 - **多 Agent 会话**：按项目组织；@ 指定成员，群主分工、跟进、汇总，`handoff` 交接。
 - **完整过程**：流式回复、思考、工具卡片（diff / 终端）、计划、权限请求、Mermaid 图表。
-- **服务商与用量**：BYOK、可复用服务商、CC Switch 只读导入、Token 统计与额度。
+- **服务商与用量**：自定义 API 可接入 Claude Code、OpenCode、Pi、Codex；通过 models.dev 目录与 Pi AI 兼容规则适配已知模型的思考档位，保留会话选择；另有纯对话 BYOK、CC Switch 只读导入、Token 统计与额度。
 - **Skills 与插件**：自动发现本机 Skills / Claude 插件，按 Agent 勾选。
+- **界面语言**：在「设置 → 个人资料 → 界面语言」选择简体中文、繁体中文、英语或日语，默认简体中文；保存后即时切换，聊天内容与模型回复语言保持原样。
 - **桌面版**：macOS / Windows / Linux（Electron），也可浏览器 + 本机服务；团团从不改 `~/.claude` / `~/.codex`。
 
 完整清单见 [功能一览](docs/features.md)。
@@ -54,7 +55,7 @@ bun run desktop:install && bun run desktop:build   # 产物在 desktop/release/
 
 ## 参与贡献
 
-见 [CONTRIBUTING.md](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)、[安全策略](SECURITY.md)；第三方许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+见 [CONTRIBUTING.md](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)、[安全策略](SECURITY.md)；第三方许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，模型目录与适配参考见 [server/data/NOTICE.md](server/data/NOTICE.md)。
 
 ## License
 

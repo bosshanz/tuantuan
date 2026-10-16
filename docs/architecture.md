@@ -23,6 +23,9 @@
 | `server/custom.ts` | BYOK「自定义 API」harness：OpenAI Chat / Responses / Anthropic Messages 的 SSE 流式与 tool call，输出 ACP `session/update`；Key 只在服务端 |
 | `server/skills.ts` | Skills：解析 SKILL.md；统一原生来源与 Agent 选择，按需路径索引；导入（目录 / git / GitHub / SKILL.md 链接，先预览再选）；不写共享项目链接；BYOK 的 `load_skill` 仅访问当前选择 |
 | `server/providers.ts` | 服务商：预设、Key 打码、按 Harness 注入（Claude Code 用进程 env，Codex 用 ACP `providers/set` + `CODEX_CONFIG` 里的 model，BYOK 直接用）、测速、公开余额接口、只读导入 CC Switch |
+| `shared/providerSupport.ts` / `server/provider-runtime.ts` / `server/provider-reasoning.ts` | 前后端共用服务商兼容规则；消费统一模型能力，生成 Pi 兼容元数据、推荐值及各 Harness 进程配置。探测和实际会话使用同一注入入口；Pi 保留原生配置目录，临时文件不含密钥并在退出时清理 |
+| `server/model-catalog.ts` / `model-catalog-schema.ts` / `model-capabilities.ts` | 每个 Store 的目录实例、能力契约、官方地址 / 预设 / 显式引用识别、搜索、受限下载和字段白名单校验；数据来自内置或持久化快照 |
+| `server/provider-opencode.ts` / `provider-codex.ts` / `provider-claude.ts` | OpenCode V1 / V2 variants、Codex 临时目录与内置目录保护、Claude Code 自定义模型能力及真实 effort 选项限制 |
 | `usage_log` 表 | 每轮 Token（Harness 报告的 usage、模型、缓存读 / 写、思考、费用差分）；`GET /api/usage/stats?since=&tz=` 按 Agent / 模型 / Harness 汇总并按天分桶，`reporting` 列出报告过数据的 Harness |
 | `server/library.ts` | 「Skills 与插件」：只读扫描 ~/.claude / ~/.agents / ~/.codex / 项目目录，解析 Claude 插件（plugin.json），导入到 `<data>/library`（更新 / 删除），算各 Harness 支持；按 Agent 勾选的插件在建会话时变成 Claude `_meta.claudeCode.options.plugins` 或 Skill 索引 + stdio MCP |
 | `web/src/brands.ts` | 模型 id → 厂商（含 `openrouter/…`、`anthropic/…` 前缀），未知一律中性图标；Logo 来自 @lobehub/icons（MIT） |
@@ -35,9 +38,13 @@
 | `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；直达 / 群主统筹路由、逐轮职责、成员结果收集与群主续轮、单个 Agent 回合、交接预算与定向取消 |
 | `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
 | `server/store.ts` | SQLite 迁移与读写 |
+| `server/profile.ts` | 个人资料校验与默认值，`language` 限定为 `zh-CN` / `zh-TW` / `en` / `ja`；生成给 Agent 的用户说明时不包含界面语言 |
+| `shared/i18n.ts` / `shared/locales/*` | 前端、服务端通知与桌面共用的文案目录、占位符替换及日期语言映射；已知应用错误按限定模板翻译，未知诊断保留原文 |
+| `web/src/i18n.ts` / `Profile.tsx` | 响应式界面语言与启动缓存；个人资料编辑草稿、串行保存和失败重试 |
 | `web/src/Harness.tsx` | 时间线渲染（工具卡片、diff、终端、计划）、权限弹窗、会话栏 |
 | `web/src/Onboarding.tsx` / `Setup.tsx` / `Registry.tsx` | 首次引导（一页三步）；Harness 管理页；「更多 Agent」（Registry 列表、安装、握手、图标） |
 | `desktop/` | Electron 壳：主进程启动随包 Bun 服务端（子进程组、`/api/health`、父进程看门狗）、单实例、菜单、preload（文件夹对话框、全屏状态）；`scripts/` 打包（stage / electron-builder / afterPack）与 Xvfb 冒烟 |
+| `desktop/src/power.ts` / `shared/desktopPower.ts` | 桌面任务防休眠：主进程拥有唯一 prevent-app-suspension 实例，监听全局 activity 并用全部房间快照校准；增量覆盖在途旧快照，断线释放并重连恢复。偏好保存到 userData/settings.json，preload 只提供状态与开关 |
 | `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
@@ -53,11 +60,21 @@
 
 前端直接 `import type` 后端的数据类型（`Agent`、`Message`、`RoomEvent`…），契约只有一份定义。
 
+## 模型能力与思考配置
+
+`Store.modelCatalog` 是当前数据库的唯一目录所有者，内置快照为 231 个服务商、8,902 个模型。`GET /api/providers/models?query=` 只做本地搜索（最多 50 条）；`POST /api/providers/models/sync` 才请求固定公共地址 `https://models.dev/api.json`，不传凭据、用户模型或对话数据，限制 30 秒 / 15 MB。Zod 白名单丢弃 headers、body、npm 等配置；完整校验并写入 `settings.modelCatalog` 后才切换内存快照，并发同步共用一个任务，任一步失败保留旧目录。
+
+读取服务商时捕获当前目录快照，已运行进程的能力解析不会随同步变化，新房间 / 新进程再读取新数据；同步不使当前任务重启。`providers.model_catalog` 保存原始模型 ID 到能力引用的映射，API 字段为 `modelCatalog`，只改变能力解析来源，路由 ID 保持原样。未显式关联时按当前协议的官方 URL 优先、预设其次识别，未知不猜；目录控制等级、输入类型和上下文 / 输出上限，Pi 的未知模型保持文本与 128,000 / 8,192 占位，费用仍只记录 Harness 报告值。
+
+协议适配参考 Pi AI 1.0.4 的公开兼容契约，依赖用户 Pi Harness 的请求实现，不新增团团请求传输 SDK。新会话先应用模型选择，再以会话 → Agent → 已识别的明确原生配置 → 团团推荐 → Harness 的顺序应用实际 ACP 支持的等级；推荐值从目录可用等级按 high / medium / low / on / minimal / xhigh / max 的顺序选出，ACP 不支持该值时保留原生状态。恢复或切模型只重放明确意图，不支持的值继续保存在团团。Claude Code 原生模型能力与 Codex 原生 / 用户模型目录保持优先，各适配边界见 [服务商](providers.md#模型能力目录与思考等级)。数据与参考来源、MIT 许可见 [server/data/NOTICE.md](../server/data/NOTICE.md)。
+
 ## 数据与状态归属
 
 | 状态 | 所有者 | 说明 |
 | --- | --- | --- |
 | Agent（Harness、env、权限策略、身份文档、MCP 服务器）、项目（名称、目录）、房间/会话（所属项目、主 Agent）、消息（含时间线 JSON）、ACP 会话映射、会话配置偏好（`room_config`，含模型）、设置（Harness 路径覆盖、`onboarded`） | SQLite（`Store`） | 唯一权威来源 |
+| 模型目录与服务商能力关联 | `Store.modelCatalog`；SQLite `settings.modelCatalog` / `providers.model_catalog` | 已校验目录持久化；服务商对象捕获快照供既有进程使用，显式关联不改变模型请求 ID |
+| 个人资料（含 `profile.language`） | SQLite（`settings` 表的 `profile` 值） | 服务端权威配置；前端 `localStorage["tuantuan:language"]` 仅作启动缓存，保存后的 `profile.updated` 同步已连接窗口 |
 | Harness 进程、挂起的权限请求、终端输出 | `HarnessHost` 内存 | 进程退出即丢失；重启后用 `acp_sessions` 里的 sessionId resume / load |
 | 待执行 / 活动任务、交接父子关系、每条人类消息的负责人和交接预算 | `Orchestrator` 内存 | taskId 标识单个任务，runId 关联原始人类消息；协调 run 冻结 coordinatorId / rootTaskId，parentTaskId 表示取消依赖，reviewOf 关联待收集的分工批次；房间下每个 Agent 一个 FIFO。整轮无剩余任务后清理；服务重启不重放队列，无数据库迁移 |
 | ACP session 自身的对话历史 | Harness；当前 slot 暂存 load 回放 | `/replay` 按用户消息文本去掉本房间已有轮次，前端只读显示其余回放 |
@@ -70,6 +87,10 @@
 | 终端面板开合、高度与焦点意图 | `ChatView` | 外层网格裁切连续改变占位，内部 xterm 保持实际尺寸，避免动效逐帧触发 PTY resize；首次加载与结束共用外层，隐藏立即 inert，结束后在退场完成时卸载。减少动态效果直接切换，拖动高度立即响应 |
 | 图表源码、主题与最后一次渲染结果 | `MermaidBlock` | 仅前端派生状态；源码变化不复用旧图，同一源码换主题保留上次结果直至重绘完成；不写数据库 |
 | 图片预览开合、原图模式与加载错误 | `PreviewImage` / `ImagePreview` | 组件局部状态；相同入口更新图片地址时保持预览与焦点，加载错误按地址隔离 |
+
+界面语言默认 `zh-CN`，另支持 `zh-TW`、`en`、`ja`。`App.applyProfile` 在启动读取、保存响应及 `profile.updated` 到达时更新界面语言；个人资料读取带修订号，迟到的旧响应不能覆盖更新事件。前端启动先读取语言缓存，成功读取服务端配置后以服务端为准。`ProfilePage` 保留编辑草稿并串行提交；语言选择立即提交，其他字段合并短时间内的修改，失败保留草稿并提供重试。语言字段复用现有 JSON 设置，无新增数据库迁移。
+
+文案以简体中文源字符串为键，在组件渲染时响应语言变化；模块常量保留源文案，ACP 选项保留原始数据后生成展示标签。用户数据与聊天正文不进入翻译流程，已知错误模板中的名称、路径和模型 ID 只作原值插入，未知第三方诊断回退到原文。`profileInstructions` 不写入界面语言，模型回答语言仍由用户指令和 Harness 决定。
 
 迁移按 `PRAGMA user_version` 顺序执行，只追加：
 
@@ -91,6 +112,7 @@
 | 16 | `agents.use_profile`：是否附带用户个人资料 |
 | 17 | `messages.quote`：群聊引用的服务端有界快照（原消息 id、作者、角色及摘录），旧消息为空 |
 | 18 | `custom_history`：按房间 / Agent 保存有界 BYOK 上下文，房间或 Agent 删除时外键级联清理 |
+| 19 | `providers.model_catalog`：模型 ID 到能力来源引用的 JSON 映射，旧服务商默认 `{}` 自动识别 |
 
 BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计算完整 JSON body 的序列化字符数，上限 65,536；包含系统提示、工具定义、当前任务、工具链及 JSON 包装。超限先按完整旧轮淘汰，不截断当前任务或系统提示，不拆散工具调用与结果；当前轮自身超限则在发送前明确报错。完成轮按相同字符预算和最多 20 轮持久化；最终回复使单轮超限时保留可见回复、报告错误并保留上一成功上下文。这是字符预算，不是字节数或模型 token 窗口。
 
@@ -170,4 +192,5 @@ Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio M
 
 - 服务端不进 asar：`resources/server`（源码 + 生产依赖）+ `resources/bin/bun`。主进程选空闲端口启动子进程组，等 `/api/health` 后加载窗口。退出时除服务端原组外，还追踪其 Harness / ACP 终端 / 安装任务的独立子进程组，按 pid 与启动时间保留身份，服务端退出后继续回收已记录组，避免误杀复用的组号；4 秒强退兜底。POSIX 依赖 `ps` 发现子组，不可用时仅回收原服务组；Windows 走 `taskkill` 进程树，平台实际验收分开记录。服务端收到退出信号时关闭 host / installer，并用 `TUANTUAN_PARENT_PID` 看门狗兜底。
 - 登录 shell 环境在主进程解析一次，传给服务端，Harness 继承它（CC Switch 写的变量照常生效）。
+- 主进程启动时读取 `/api/profile` 初始化菜单语言；前端全局通知模块在语言变化时经 preload 的 `tuantuan:set-locale` 同步，主进程重建应用菜单和托盘菜单。系统通知使用当前语言生成应用标题、状态和提示，消息预览保留原文。浏览器桥接检查不能替代真实原生菜单显示验收。
 - macOS：`titleBarStyle: "hidden"`，红绿灯位置 `{x: 18, y: 20}`；网页侧 `html[data-desktop="darwin"]` 让侧栏顶行左侧留出红绿灯位置，搜索和「+」排在红绿灯右边；`data-fullscreen` 由主进程在进入 / 退出全屏时经 preload 设置，全屏时不再留空。

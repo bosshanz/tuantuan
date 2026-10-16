@@ -20,7 +20,7 @@ export function harnessProcessEnv(
   const env: Record<string, string> = { ...loginEnv, ...safeSkill, ...agentEnv };
   if (spec.identity === "codex-env" && identity.trim()) {
     // Merge into whatever CODEX_CONFIG the login shell already had (provider stays).
-    env.CODEX_CONFIG = mergeCodexConfig(loginEnv.CODEX_CONFIG, identity);
+    env.CODEX_CONFIG = mergeCodexConfig(env.CODEX_CONFIG, identity);
   }
   return env;
 }

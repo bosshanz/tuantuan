@@ -1,6 +1,7 @@
 import { Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent, Room } from "./api";
+import { useI18n } from "./i18n";
 import { AgentAvatar, RoomIcon } from "./ui";
 
 interface Item {
@@ -18,6 +19,7 @@ export function CommandPalette(props: {
   onGo: (path: string) => void;
   state?: "open" | "closing";
 }) {
+  const { t } = useI18n();
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const returnFocus = useRef<Element | null>(document.activeElement);
@@ -28,7 +30,7 @@ export function CommandPalette(props: {
       ...props.rooms.map((r) => ({
         key: `r${r.id}`,
         label: r.name,
-        hint: "会话",
+        hint: t("会话"),
         icon: <RoomIcon room={r} agents={props.agents} size={24} />,
         path: `c/${r.id}`,
       })),
@@ -39,12 +41,12 @@ export function CommandPalette(props: {
         icon: <AgentAvatar agent={a} size={24} />,
         path: `a/${a.id}`,
       })),
-      { key: "new-agent", label: "新建 Agent", hint: "操作", icon: <Plus size={16} />, path: "a/new" },
-      { key: "new-room", label: "新建会话", hint: "操作", icon: <Plus size={16} />, path: "c/new" },
+      { key: "new-agent", label: t("新建 Agent"), hint: t("操作"), icon: <Plus size={16} />, path: "a/new" },
+      { key: "new-room", label: t("新建会话"), hint: t("操作"), icon: <Plus size={16} />, path: "c/new" },
     ];
     const s = q.trim().toLowerCase();
     return s ? all.filter((i) => i.label.toLowerCase().includes(s)) : all;
-  }, [q, props.agents, props.rooms]);
+  }, [q, props.agents, props.rooms, t]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => inputRef.current?.focus(), []);
@@ -58,12 +60,12 @@ export function CommandPalette(props: {
       data-state={props.state ?? "open"}
       onClick={(e) => e.target === e.currentTarget && props.onClose()}
     >
-      <div className="palette" role="dialog" aria-modal="true" aria-label="快速切换">
+      <div className="palette" role="dialog" aria-modal="true" aria-label={t("快速切换")}>
         <div className="palette-input">
           <Search size={18} className="muted" />
           <input
             ref={inputRef}
-            placeholder="搜索会话、Agent 或操作…"
+            placeholder={t("搜索会话、Agent 或操作…")}
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
@@ -83,7 +85,7 @@ export function CommandPalette(props: {
           />
         </div>
         <div className="palette-list" role="listbox">
-          {items.length === 0 && <div className="pick-empty">没有匹配的结果</div>}
+          {items.length === 0 && <div className="pick-empty">{t("没有匹配的结果")}</div>}
           {items.map((it, i) => (
             <button
               type="button"
@@ -104,13 +106,16 @@ export function CommandPalette(props: {
         </div>
         <div className="palette-foot">
           <span>
-            <kbd>↑</kbd> <kbd>↓</kbd> 选择
+            <kbd>↑</kbd> <kbd>↓</kbd>
+            {t("选择")}
           </span>
           <span>
-            <kbd>Enter</kbd> 打开
+            <kbd>Enter</kbd>
+            {t("打开")}
           </span>
           <span>
-            <kbd>Esc</kbd> 关闭
+            <kbd>Esc</kbd>
+            {t("关闭")}
           </span>
         </div>
       </div>

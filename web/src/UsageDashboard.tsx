@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Agent, Meta } from "./api";
 import { api } from "./api";
 import { harnessBrand } from "./brands";
+import { translateError, useI18n } from "./i18n";
 import { BrandLogo, brandFor } from "./ModelPicker";
 import { AgentAvatar } from "./ui";
 
@@ -66,6 +67,7 @@ const fmtCost = (c: number, cur: string | null) =>
   `${cur === "USD" || !cur ? "$" : `${cur} `}${c < 0.01 ? c.toFixed(4) : c.toFixed(2)}`;
 
 export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }) {
+  const { t } = useI18n();
   const [range, setRange] = useState<RangeId>("7d");
   const [group, setGroup] = useState<GroupId>("agent");
   const [stats, setStats] = useState<UsageStatsView | null>(null);
@@ -94,7 +96,7 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
   }, [range]);
 
   const harnessName = (id: string | null) =>
-    meta.harnesses.find((h) => h.id === id)?.name ?? (id?.startsWith("reg:") ? id.slice(4) : (id ?? "未知"));
+    t(meta.harnesses.find((h) => h.id === id)?.name ?? (id?.startsWith("reg:") ? id.slice(4) : (id ?? "未知")));
   const reporting = new Set(stats?.reporting ?? []);
 
   const rows = (() => {
@@ -107,7 +109,7 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
         out.push({
           id: r.key ?? "none",
           icon: <AgentAvatar agent={a} name={a?.name ?? "?"} size={26} />,
-          name: a?.name ?? "已删除的 Agent",
+          name: a?.name ?? t("已删除的 Agent"),
           sub: a ? harnessName(a.harness) : undefined,
           t: r,
         });
@@ -130,7 +132,7 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
               <BrandLogo brand={brandFor(r.key ?? "", "")} size={15} />
             </span>
           ),
-          name: r.key ?? "未标明模型",
+          name: r.key ?? t("未标明模型"),
           t: r,
         });
     } else {
@@ -162,51 +164,63 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
     return out;
   })();
   const max = Math.max(1, ...rows.map((r) => r.t?.total ?? 0));
-  const t = stats?.totals;
-  const cache = t ? t.cacheRead + t.cacheWrite : 0;
+  const totals = stats?.totals;
+  const cache = totals ? totals.cacheRead + totals.cacheWrite : 0;
 
   return (
-    <section className="card ud" aria-label="Token 统计">
+    <section className="card ud" aria-label={t("Token 统计")}>
       <div className="card-head card-head-row">
         <div>
-          <h3>Token 统计</h3>
-          <p>按每轮回复里 Harness 报告的数字统计，不估算。</p>
+          <h3>{t("Token 统计")}</h3>
+          <p>{t("按每轮回复里 Harness 报告的数字统计，不估算。")}</p>
         </div>
-        <fieldset className="segmented" aria-label="时间范围">
+        <fieldset className="segmented" aria-label={t("时间范围")}>
           {RANGES.map((r) => (
             <button key={r.id} type="button" aria-pressed={range === r.id} onClick={() => setRange(r.id)}>
-              {r.label}
+              {t(r.label)}
             </button>
           ))}
         </fieldset>
       </div>
       <div className="card-body">
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error">{translateError(error)}</div>}
         {!stats && !error && <Loader2 size={16} className="spin" />}
-        {t && (
+        {totals && (
           <>
             <div className="ud-cards">
-              <Stat label="总计" value={fmtTokens(t.total)} sub={`${t.turns} 轮`} strong />
-              <Stat label="输入" value={fmtTokens(t.input)} />
               <Stat
-                label="输出"
-                value={fmtTokens(t.output)}
-                sub={t.thought ? `含思考 ${fmtTokens(t.thought)}` : undefined}
+                label={t("总计")}
+                value={fmtTokens(totals.total)}
+                sub={t("{count} 轮", { count: totals.turns })}
+                strong
+              />
+              <Stat label={t("输入")} value={fmtTokens(totals.input)} />
+              <Stat
+                label={t("输出")}
+                value={fmtTokens(totals.output)}
+                sub={totals.thought ? t("含思考 {count}", { count: fmtTokens(totals.thought) }) : undefined}
               />
               <Stat
-                label="缓存"
+                label={t("缓存")}
                 value={fmtTokens(cache)}
-                sub={cache ? `读 ${fmtTokens(t.cacheRead)} · 写 ${fmtTokens(t.cacheWrite)}` : undefined}
+                sub={
+                  cache
+                    ? t("读 {read} · 写 {write}", {
+                        read: fmtTokens(totals.cacheRead),
+                        write: fmtTokens(totals.cacheWrite),
+                      })
+                    : undefined
+                }
               />
               <Stat
-                label="费用"
-                value={t.cost !== null ? fmtCost(t.cost, t.currency) : "无数据"}
-                muted={t.cost === null}
+                label={t("费用")}
+                value={totals.cost !== null ? fmtCost(totals.cost, totals.currency) : t("无数据")}
+                muted={totals.cost === null}
               />
             </div>
             <Trend days={trend ?? []} since={range === "today" ? sinceFor("7d") : sinceFor(range)} />
             <div className="ud-group-head">
-              <div className="segmented" role="tablist" aria-label="分组">
+              <div className="segmented" role="tablist" aria-label={t("分组")}>
                 {GROUPS.map((g) => (
                   <button
                     key={g.id}
@@ -215,21 +229,21 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
                     aria-selected={group === g.id}
                     onClick={() => setGroup(g.id)}
                   >
-                    {g.label}
+                    {t(g.label)}
                   </button>
                 ))}
               </div>
               <span className="ud-legend">
                 <i data-k="input" />
-                输入
+                {t("输入")}
                 <i data-k="output" />
-                输出
+                {t("输出")}
                 <i data-k="cache" />
-                缓存
+                {t("缓存")}
               </span>
             </div>
             <ol className="ud-table" key={`${group}-${range}`}>
-              {rows.length === 0 && <li className="ud-empty">这段时间没有记录</li>}
+              {rows.length === 0 && <li className="ud-empty">{t("这段时间没有记录")}</li>}
               {rows.map((r, i) => (
                 <li key={r.id} className="ud-row" style={{ ["--i" as string]: i }} data-testid={`usage-row-${r.name}`}>
                   <span className="ud-rank">{r.t ? i + 1 : ""}</span>
@@ -242,7 +256,11 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
                     <>
                       <span
                         className="ud-bar"
-                        title={`输入 ${r.t.input} · 输出 ${r.t.output} · 缓存 ${r.t.cacheRead + r.t.cacheWrite}`}
+                        title={t("输入 {input} · 输出 {output} · 缓存 {cache}", {
+                          input: r.t.input,
+                          output: r.t.output,
+                          cache: r.t.cacheRead + r.t.cacheWrite,
+                        })}
                       >
                         <span style={{ width: `${(r.t.total / max) * 100}%` }}>
                           <i data-k="input" style={{ flex: r.t.input }} />
@@ -255,7 +273,7 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
                     </>
                   ) : (
                     <>
-                      <span className="ud-bar ud-nodata">无数据</span>
+                      <span className="ud-bar ud-nodata">{t("无数据")}</span>
                       <span className="ud-num muted">—</span>
                       <span className="ud-cost" />
                     </>
@@ -282,6 +300,7 @@ function Stat(p: { label: string; value: string; sub?: string; strong?: boolean;
 
 /** Daily stacked bars (input / output / cache); empty days are drawn as gaps, not guesses. */
 function Trend({ days, since }: { days: UsageStatsView["daily"]; since: number }) {
+  const { t } = useI18n();
   const today = startOfToday();
   const first = since || (days[0] ? new Date(`${days[0].day}T00:00:00`).getTime() : today);
   const n = Math.min(90, Math.max(1, Math.round((today - first) / DAY) + 1));
@@ -294,7 +313,7 @@ function Trend({ days, since }: { days: UsageStatsView["daily"]; since: number }
   const max = Math.max(1, ...series.map((s) => s.d?.total ?? 0));
   const W = 100 / n;
   return (
-    <div className="ud-trend" role="img" aria-label="每日 Token 趋势">
+    <div className="ud-trend" role="img" aria-label={t("每日 Token 趋势")}>
       <div className="ud-trend-plot">
         {series.map(({ t, d }) => {
           const h = d ? (d.total / max) * 100 : 0;
@@ -325,8 +344,8 @@ function Trend({ days, since }: { days: UsageStatsView["daily"]; since: number }
       </div>
       <div className="ud-trend-axis">
         <span>{fmtDay(series[0]?.t ?? today)}</span>
-        <span>峰值 {fmtTokens(max === 1 ? 0 : max)}</span>
-        <span>今天</span>
+        <span>{t("峰值 {count}", { count: fmtTokens(max === 1 ? 0 : max) })}</span>
+        <span>{t("今天")}</span>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import type { Message } from "../server/store";
+import { type Locale, translate } from "./i18n";
 
 export interface RoomPreview {
   messageId: string;
@@ -37,7 +38,7 @@ export function newerPreview(current: RoomPreview | undefined, incoming: RoomPre
   return incoming;
 }
 
-export function previewText(last: RoomPreview): string {
+export function previewText(last: RoomPreview, locale: Locale = "zh-CN"): string {
   if (last.text) return last.text;
   const empty = {
     streaming: "正在回复…",
@@ -46,5 +47,5 @@ export function previewText(last: RoomPreview): string {
     cancelled: "已取消",
     interrupted: "已中断",
   };
-  return empty[last.status];
+  return translate(locale, empty[last.status]);
 }

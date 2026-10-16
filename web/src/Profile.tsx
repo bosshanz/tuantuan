@@ -1,9 +1,8 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Profile } from "../../server/profile";
-import { AvatarPicker } from "./AvatarPicker";
 import { api } from "./api";
-import { BotAvatar } from "./BotAvatar";
+import { LANGUAGE_NAMES, LOCALES, type Locale, translateError, useI18n } from "./i18n";
 
 export type { Profile };
 export const EMPTY_PROFILE: Profile = {
@@ -45,58 +44,126 @@ const zones = (() => {
 })();
 
 export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) => void }) {
+  const { t } = useI18n();
   const [p, setP] = useState(props.profile);
   const [state, setState] = useState<"idle" | "saving" | "saved" | string>("idle");
-  const first = useRef(true);
-  const seq = useRef(0);
-  // Autosave: short debounce, the server validates.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: save on profile edits only
-  useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
+  const draft = useRef(props.profile);
+  const pending = useRef<Profile | null>(null);
+  const saving = useRef(false);
+  const mounted = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onChange = useRef(props.onChange);
+  onChange.current = props.onChange;
+
+  // Serialize writes and keep the latest draft, so rapid language/appearance changes cannot save out of order.
+  async function flush() {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    if (saving.current) return;
+    saving.current = true;
+    while (pending.current) {
+      const next = pending.current;
+      pending.current = null;
+      try {
+        const saved = await api<Profile>("PUT", "/api/profile", next);
+        onChange.current(saved);
+        if (mounted.current && !pending.current) setState("saved");
+      } catch (error) {
+        if (mounted.current && !pending.current) setState((error as Error).message);
+      }
     }
-    applyAppearance(p);
+    saving.current = false;
+  }
+
+  // The cleanup flush reads refs only, including the current draft and callback.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: flush uses mutable refs, not render state
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      void flush();
+    };
+  }, []);
+  useEffect(() => {
+    if (!saving.current && !pending.current) {
+      draft.current = props.profile;
+      setP(props.profile);
+    }
+  }, [props.profile]);
+  const set = <K extends keyof Profile>(key: K, value: Profile[K]) => {
+    const next = { ...draft.current, [key]: value };
+    draft.current = pending.current = next;
+    setP(next);
+    applyAppearance(next);
     setState("saving");
-    const n = ++seq.current;
-    const t = setTimeout(() => {
-      api<Profile>("PUT", "/api/profile", p)
-        .then((saved) => {
-          // Only the latest edit decides what the page says (an older save can land after a newer edit).
-          if (n !== seq.current) return;
-          props.onChange(saved);
-          setState("saved");
-        })
-        .catch((e) => n === seq.current && setState((e as Error).message));
-    }, 400);
-    return () => clearTimeout(t);
-  }, [p]);
-  const set = <K extends keyof Profile>(k: K, v: Profile[K]) => setP((cur) => ({ ...cur, [k]: v }));
+    if (timer.current) clearTimeout(timer.current);
+    if (key === "language") void flush();
+    else timer.current = setTimeout(() => void flush(), 400);
+  };
   const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
     <>
       <header className="main-head">
         <div className="title">
-          <h2>个人资料</h2>
+          <h2>{t("个人资料")}</h2>
         </div>
         <span className="muted profile-state" role="status">
-          {state === "saving" ? "保存中…" : state === "saved" ? "已保存" : state === "idle" ? "" : `保存失败：${state}`}
+          {state === "saving"
+            ? t("保存中…")
+            : state === "saved"
+              ? t("已保存")
+              : state === "idle"
+                ? ""
+                : t("保存失败：{error}", { error: translateError(state) })}
         </span>
+        {!["idle", "saving", "saved"].includes(state) && (
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => {
+              pending.current = draft.current;
+              setState("saving");
+              void flush();
+            }}
+          >
+            {t("重试")}
+          </button>
+        )}
       </header>
       <div className="page">
         <div className="page-inner profile">
           <section className="card">
             <div className="card-head">
-              <h3>显示名</h3>
-              <p>显示在你自己的消息上。</p>
+              <h3>{t("界面语言")}</h3>
+              <p>{t("选择后自动保存并切换界面，不改变聊天内容或 Agent 的回答语言。")}</p>
+            </div>
+            <div className="card-body">
+              <select
+                className="input profile-input"
+                aria-label={t("界面语言")}
+                value={p.language}
+                onChange={(event) => set("language", event.target.value as Locale)}
+              >
+                {LOCALES.map((language) => (
+                  <option key={language} value={language} lang={language}>
+                    {LANGUAGE_NAMES[language]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+          <section className="card">
+            <div className="card-head">
+              <h3>{t("显示名")}</h3>
+              <p>{t("显示在你自己的消息上。")}</p>
             </div>
             <div className="card-body">
               <input
                 className="input profile-input"
-                aria-label="显示名"
+                aria-label={t("显示名")}
                 maxLength={32}
-                placeholder="我"
+                placeholder={t("我")}
                 value={p.name}
                 onChange={(e) => set("name", e.target.value)}
               />
@@ -105,16 +172,16 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
 
           <section className="card">
             <div className="card-head">
-              <h3>关于我</h3>
-              <p>你的角色、习惯和想要的回答风格。会附在每个 Agent 的说明里，可在 Agent 编辑页单独关掉。</p>
+              <h3>{t("关于我")}</h3>
+              <p>{t("你的角色、习惯和想要的回答风格。会附在每个 Agent 的说明里，可在 Agent 编辑页单独关掉。")}</p>
             </div>
             <div className="card-body">
               <textarea
                 className="textarea"
                 rows={5}
                 maxLength={4000}
-                aria-label="关于我"
-                placeholder={ABOUT_HINT}
+                aria-label={t("关于我")}
+                placeholder={t(ABOUT_HINT)}
                 value={p.about}
                 onChange={(e) => set("about", e.target.value)}
               />
@@ -123,16 +190,16 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
 
           <section className="card">
             <div className="card-head">
-              <h3>外观</h3>
+              <h3>{t("外观")}</h3>
             </div>
             <div className="card-body profile-grid">
-              <span className="label">主题</span>
+              <span className="label">{t("主题")}</span>
               <div className="seg">
                 {(
                   [
-                    ["system", "跟随系统", Monitor],
-                    ["light", "浅色", Sun],
-                    ["dark", "深色", Moon],
+                    ["system", t("跟随系统"), Monitor],
+                    ["light", t("浅色"), Sun],
+                    ["dark", t("深色"), Moon],
                   ] as const
                 ).map(([v, label, Icon]) => (
                   <button
@@ -147,14 +214,14 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
                   </button>
                 ))}
               </div>
-              <span className="label">强调色</span>
+              <span className="label">{t("强调色")}</span>
               <div className="accent-row">
                 <button
                   type="button"
                   aria-pressed={!p.accent}
-                  aria-label="默认"
+                  aria-label={t("默认")}
                   className="accent-dot default"
-                  title="默认"
+                  title={t("默认")}
                   onClick={() => set("accent", null)}
                 />
                 {ACCENTS.map((c) => (
@@ -174,17 +241,17 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
 
           <section className="card">
             <div className="card-head">
-              <h3>时区</h3>
-              <p>附在「关于我」里，Agent 说“今天”“明天”时按这个时区算。</p>
+              <h3>{t("时区")}</h3>
+              <p>{t("附在「关于我」里，Agent 说“今天”“明天”时按这个时区算。")}</p>
             </div>
             <div className="card-body">
               <select
                 className="input profile-input"
-                aria-label="时区"
+                aria-label={t("时区")}
                 value={p.timezone}
                 onChange={(e) => set("timezone", e.target.value)}
               >
-                <option value="">跟随系统（{localTz}）</option>
+                <option value="">{t("跟随系统（{timezone}）", { timezone: localTz })}</option>
                 {zones.map((z) => (
                   <option key={z} value={z}>
                     {z}

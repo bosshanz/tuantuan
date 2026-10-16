@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { PreviewImage } from "./ImagePreview";
+import { useI18n } from "./i18n";
 import { type DiagramTheme, mermaidSourceError, renderMermaid } from "./mermaidRendering";
 
 function readTheme(): DiagramTheme {
@@ -21,6 +22,7 @@ function readTheme(): DiagramTheme {
 type RenderState = { source: string; theme: string; attempt: number; url?: string; failed?: boolean };
 
 export function MermaidBlock({ source }: { source: string }) {
+  const { t: tr } = useI18n();
   const [theme, setTheme] = useState<DiagramTheme | null>(null);
   const [rendered, setRendered] = useState<RenderState | null>(null);
   const [retry, setRetry] = useState(0);
@@ -79,19 +81,19 @@ export function MermaidBlock({ source }: { source: string }) {
   }, [source, theme, themeKey, sourceError, retry]);
 
   const status =
-    sourceError ??
+    (sourceError ? tr(sourceError) : null) ??
     (current?.failed
       ? displayUrl
-        ? "图表更新失败，当前显示上次图表，可查看源码"
-        : "图表暂时无法显示，可查看源码"
+        ? tr("图表更新失败，当前显示上次图表，可查看源码")
+        : tr("图表暂时无法显示，可查看源码")
       : displayUrl
-        ? "正在更新图表…"
-        : "正在绘制图表…");
+        ? tr("正在更新图表…")
+        : tr("正在绘制图表…"));
   return (
     <div className="mermaid-block">
       {displayUrl && (
         <div className="mermaid-canvas">
-          <PreviewImage imageClassName="mermaid-svg" src={displayUrl} alt="Mermaid 图表" />
+          <PreviewImage imageClassName="mermaid-svg" src={displayUrl} alt={tr("Mermaid 图表")} />
         </div>
       )}
       {(!displayUrl || !current || current.failed) && (
@@ -99,14 +101,14 @@ export function MermaidBlock({ source }: { source: string }) {
           <span>{status}</span>
           {current?.failed && !sourceError && (
             <button type="button" className="linkish" onClick={() => setRetry((value) => value + 1)}>
-              重试
+              {tr("重试")}
             </button>
           )}
         </div>
       )}
       {displayUrl ? (
         <details className="mermaid-source">
-          <summary>Mermaid 源码</summary>
+          <summary>{tr("Mermaid 源码")}</summary>
           <pre>
             <code className="language-mermaid">{source}</code>
           </pre>
