@@ -25,6 +25,8 @@ export function usePresence(open: boolean, ms = 160): { mounted: boolean; state:
   return { mounted: open || mounted, state: open ? "open" : "closing" };
 }
 
+let activeTransitions = 0;
+
 /** Run a DOM-changing state update as a View Transition where supported (route and conversation switches). */
 export function withViewTransition(update: () => void) {
   const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
@@ -38,5 +40,14 @@ export function withViewTransition(update: () => void) {
   } | null;
   // A newer navigation may skip this one (e.g. the first-launch redirect); that is not an error.
   t?.ready?.catch(() => {});
-  t?.finished?.catch(() => {});
+  // While a transition runs, hit-testing lands on the ::view-transition pseudo (the <html> element), so
+  // expose it: tests wait for it instead of guessing a delay before probing what is clickable.
+  const root = document.documentElement;
+  activeTransitions++;
+  root.dataset.viewTransition = "";
+  const done = () => {
+    if (--activeTransitions === 0) delete root.dataset.viewTransition;
+  };
+  if (t?.finished) t.finished.then(done, done);
+  else done();
 }

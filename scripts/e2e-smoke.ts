@@ -1182,8 +1182,20 @@ for await (const line of createInterface({input:process.stdin})) {
   for (const hash of ["#/c", `#/c/${app.store.listRooms()[0]?.id}`, "#/a", "#/harness", "#/library", "#/providers"]) {
     await page.goto(`http://localhost:${server.port}/${hash}`);
     await page.locator(".side-top .side-icon").first().waitFor();
-    await page.waitForTimeout(300);
-    const bad = await page.evaluate(() => {
+    // Route switches run as a View Transition; until it finishes every hit-test lands on <html>.
+    const bad = await page.evaluate(async () => {
+      // A late redirect (e.g. #/c -> latest conversation) can start another transition; settle them all,
+      // then probe within the same task so nothing new can start in between.
+      const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      for (let quiet = 0; quiet < 2; ) {
+        const active = (document as Document & { activeViewTransition?: { finished: Promise<void> } })
+          .activeViewTransition;
+        if (active || "viewTransition" in document.documentElement.dataset) {
+          quiet = 0;
+          await active?.finished.catch(() => {});
+        } else quiet++;
+        await frame();
+      }
       document.documentElement.dataset.desktop = "darwin";
       const region = (el: Element) => getComputedStyle(el).getPropertyValue("-webkit-app-region") || "none";
       const out: string[] = [];
