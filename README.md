@@ -3,7 +3,7 @@
 ![团团 Tuantuan · 开源](docs/assets/poster.png)
 
 <!-- 宣传视频占位：把 GitHub user-attachments 视频链接（https://github.com/user-attachments/assets/...）单独粘贴在下一行，GitHub 会自动渲染成播放器。 -->
-<!-- VIDEO_PLACEHOLDER -->
+[<!-- VIDEO_PLACEHOLDER -->](https://github.com/bosshanz/tuantuan/tree/main/docs/assets)
 
 **一群 Agent，团团协作。** 多 Agent 协作工作台。
 
