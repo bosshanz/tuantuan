@@ -9,6 +9,7 @@ const config = () =>
     log: string;
     unsupported?: boolean;
     delay?: number;
+    usageDelay?: number;
     markdown?: string;
     quotaError?: boolean;
     initializeError?: boolean;
@@ -83,6 +84,8 @@ acp
     record("prompt:/usage");
     if (!existsSync(config().authFile)) throw acp.RequestError.authRequired();
     if (config().quotaError) throw acp.RequestError.internalError(undefined, "fixture failure");
+    const usageDelay = config().usageDelay;
+    if (usageDelay) await Bun.sleep(usageDelay);
     await ctx.client.notify(acp.methods.client.session.update, {
       sessionId: ctx.params.sessionId,
       update: {

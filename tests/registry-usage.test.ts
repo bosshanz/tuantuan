@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -231,6 +231,104 @@ test("installed cards are cache-only until an explicit operation; login probe re
     limits: [{ usedPercent: 9 }, { usedPercent: 0 }, { usedPercent: 1 }, { usedPercent: 18 }],
   });
 });
+
+test("only validated local long-operation requests extend the HTTP idle timeout", async () => {
+  const timeouts: { request: Request; seconds: number }[] = [];
+  const srv = {
+    timeout: (request: Request, seconds: number) => timeouts.push({ request, seconds }),
+  } as unknown as Parameters<typeof current.app.fetch>[1];
+  const request = (path: string, options: RequestInit = {}) =>
+    new Request(`http://localhost:${current.server.port}${path}`, { method: "POST", ...options });
+  const usagePath = "/api/usage/reg%3Aantigravity-acp/live";
+  const harnessPath = "/api/harnesses/reg%3Aantigravity-acp";
+  const invalid: [Request, number][] = [
+    [request(usagePath, { headers: { origin: "https://untrusted.invalid" } }), 403],
+    [request(usagePath, { headers: { host: "untrusted.invalid" } }), 403],
+    [request("/api/usage/unknown/live"), 404],
+    [request(usagePath, { method: "GET" }), 404],
+    [request(`${usagePath}/extra`), 404],
+    [request("/api/harnesses/unknown/test"), 404],
+    [request(`${harnessPath}/test/extra`), 404],
+    [request(`${harnessPath}/authenticate`, { body: "{}" }), 400],
+    [request(`${harnessPath}/authenticate`, { body: "not json" }), 400],
+    [request("/api/harnesses/unknown/authenticate", { body: '{"methodId":"fixture-login"}' }), 404],
+  ];
+  for (const [req, status] of invalid) {
+    expect((await current.app.fetch(req, srv))?.status).toBe(status);
+    expect(timeouts).toHaveLength(0);
+  }
+  for (const req of [
+    request(usagePath),
+    request(`${harnessPath}/test`),
+    request(`${harnessPath}/authenticate`, { body: '{"methodId":"fixture-login"}' }),
+  ]) {
+    expect((await current.app.fetch(req, srv))?.status).toBe(200);
+    expect(timeouts.at(-1)).toEqual({ request: req, seconds: 0 });
+  }
+  expect(timeouts).toHaveLength(3);
+});
+
+test.skipIf(process.platform === "win32")(
+  "slow native quota refresh survives the default HTTP deadline and delayed cleanup EPERM",
+  async () => {
+    const id = "antigravity-acp";
+    const before = methods(id).length;
+    saveConfig(id, { usageDelay: 12_500 });
+    const realKill = process.kill.bind(process);
+    let targetPid: number | undefined;
+    let delayedFailure = false;
+    const killSpy = spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (targetPid !== undefined && pid === -targetPid && signal === "SIGKILL") {
+        delayedFailure = true;
+        throw Object.assign(new Error("fixture delayed group signal failure"), { code: "EPERM" });
+      }
+      return realKill(pid, signal);
+    });
+    const started = Date.now();
+    const refresh = api("POST", "/api/usage/reg%3Aantigravity-acp/live");
+    try {
+      const prompted = await until(() =>
+        methods(id)
+          .slice(before)
+          .find((call) => call.method === "prompt:/usage"),
+      );
+      targetPid = prompted.pid;
+      const result = await refresh;
+      expect(Date.now() - started).toBeGreaterThan(10_000);
+      const usage = (result.harnesses as HarnessUsage[]).find((entry) => entry.harness === `reg:${id}`);
+      expect(usage?.plan).toBe("Google AI Pro");
+      expect(usage?.limits.map((limit) => limit.usedPercent)).toEqual([9, 0, 1, 18]);
+      expect(usage?.notes.join(" ")).not.toContain("查询失败");
+      await until(() => delayedFailure);
+      await until(() => {
+        try {
+          realKill(prompted.pid, 0);
+          return false;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+          return true;
+        }
+      });
+      expect(await api("GET", "/api/health")).toMatchObject({ ok: true });
+      expect(await card(id)).toMatchObject({ plan: "Google AI Pro", limits: usage?.limits });
+      const calls = methods(id).slice(before);
+      expect(calls.map((call) => call.method)).toEqual(["initialize", "session/new", "prompt:/usage"]);
+      expect(new Set(calls.map((call) => call.pid)).size).toBe(1);
+    } finally {
+      killSpy.mockRestore();
+      saveConfig(id, { usageDelay: 0 });
+      if (targetPid !== undefined) {
+        try {
+          realKill(targetPid, "SIGKILL");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") console.warn("Quota fixture cleanup failed", error);
+        }
+      }
+      await Promise.allSettled([refresh]);
+    }
+  },
+  20_000,
+);
 
 test("probe initialization failure replaces an existing quota snapshot with public unknown state", async () => {
   const previous = await card("antigravity-acp");

@@ -861,7 +861,7 @@ export function createApp(deps: AppDeps) {
     return { room, agent, identity: orchestrator.identityFor(room, agent) };
   }
 
-  async function handleApi(req: Request, url: URL): Promise<Response> {
+  async function handleApi(req: Request, url: URL, srv: Server<WsData>): Promise<Response> {
     const parts = url.pathname
       .split("/")
       .filter(Boolean)
@@ -1014,15 +1014,19 @@ export function createApp(deps: AppDeps) {
         const tz = Number(url.searchParams.get("tz") ?? 0) || 0;
         return json({ ...store.usageStats(since, tz), reporting: store.usageHarnesses() });
       }
-      if ((id === "claude-code" || id === "codex") && sub === "live" && method === "POST") {
+      if ((id === "claude-code" || id === "codex") && sub === "live" && parts.length === 3 && method === "POST") {
+        // ACP supplies bounded operation deadlines; the HTTP connection must survive those operations.
+        srv.timeout(req, 0);
         await harnessLiveLimits(id);
         return json({ harnesses: await usageOverview() });
       }
-      if (id && isRegistryUsageId(id) && sub === "live" && method === "POST") {
+      if (id && isRegistryUsageId(id) && sub === "live" && parts.length === 3 && method === "POST") {
+        srv.timeout(req, 0);
         await registryLiveLimits(id);
         return json({ harnesses: await usageOverview() });
       }
-      if (id === "grok" && sub === "live" && method === "POST") {
+      if (id === "grok" && sub === "live" && parts.length === 3 && method === "POST") {
+        srv.timeout(req, 0);
         await Promise.all([grokUsage(true), harnessLiveLimits(id)]);
         return json({ harnesses: await usageOverview() });
       }
@@ -1081,7 +1085,11 @@ export function createApp(deps: AppDeps) {
         store.setSetting("harnessPaths", overrides);
         return json(await harnessStatuses());
       }
-      if (id && sub === "test" && method === "POST") return json(await probeHarness(id));
+      if (id && sub === "test" && parts.length === 3 && method === "POST") {
+        if (!harnessSpec(id)) throw new ValidationError(`未知 Harness：${id}`, 404);
+        srv.timeout(req, 0);
+        return json(await probeHarness(id));
+      }
       // API keys for this harness (env_var auth): saved masked, injected into its processes only.
       if (id && sub === "env") {
         if (!harnessSpec(id)) throw new ValidationError(`未知 Harness：${id}`, 404);
@@ -1131,8 +1139,10 @@ export function createApp(deps: AppDeps) {
           return json(installer.start(id, inst, env), 202);
         }
       }
-      if (id && sub === "authenticate" && method === "POST") {
+      if (id && sub === "authenticate" && parts.length === 3 && method === "POST") {
         const { methodId } = z.object({ methodId: z.string().min(1) }).parse(await body());
+        if (!harnessSpec(id)) throw new ValidationError(`未知 Harness：${id}`, 404);
+        srv.timeout(req, 0);
         return json(await probeHarness(id, methodId));
       }
     }
@@ -1486,7 +1496,7 @@ export function createApp(deps: AppDeps) {
       if (url.pathname.startsWith("/mcp/")) return mcp.handle(url.pathname.slice(5), req);
       if (url.pathname.startsWith("/api/")) {
         try {
-          return await handleApi(req, url);
+          return await handleApi(req, url, srv);
         } catch (e) {
           if (e instanceof ValidationError) return json({ error: e.message }, e.status);
           if (e instanceof z.ZodError) return json({ error: e.issues.map((i) => i.message).join("；") }, 400);
