@@ -1435,9 +1435,12 @@ function Composer(props: {
   const skillHits = dollar && !dismissed && options.length === 0 ? matchingSkills(props.skills, dollar.query) : [];
   const pickCommand = (name: string, prefix: "/" | "$") => {
     if (props.sending) return;
+    // Read the live caret: React's select event can lag the last arrow key, and a stale token would splice the wrong text.
+    const liveCaret = ref.current?.selectionStart ?? caret;
+    const token = prefix === "$" ? (skillTokenAt(props.value, liveCaret) ?? dollar) : null;
     const next =
-      prefix === "$" && dollar
-        ? insertSkill(props.value, dollar, name)
+      prefix === "$" && token
+        ? insertSkill(props.value, token, name)
         : { value: `${prefix}${name} ${props.value.slice(caret)}`, caret: name.length + 2 };
     props.onChange(next.value);
     setCaret(next.caret);
