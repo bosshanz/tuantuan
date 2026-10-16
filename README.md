@@ -53,7 +53,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-下载 Releases 里的安装包（macOS `.dmg`、Windows `.exe`、Linux `.AppImage`），打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包（AppImage 约 157 MB），第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置（约 +300 MB）。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+**暂未发布安装包，请从源码构建**（步骤见下方「打包」：`bun install && bun run desktop:install && bun run desktop:build`，产物在 `desktop/release/`，macOS `.dmg`、Windows `.exe`、Linux `.AppImage`）。装好后打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包（AppImage 约 157 MB），第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置（约 +300 MB）。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](docs/screenshots/desktop-linux.png)
 
@@ -359,6 +359,21 @@ Harness 本来就会读取的全局 / 项目技能在设置里显示「原生可
 - [docs/architecture.md](docs/architecture.md)：模块、状态归属、路由机制与取舍
 - [docs/plan-harness-acp.md](docs/plan-harness-acp.md)：ACP 改造计划、里程碑状态与决策记录
 
+
+## 已知限制
+
+- **macOS 包未签名、未公证**：没有 Developer ID 证书时只做本机 ad-hoc 签名，第一次打开需在 Finder 里右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/团团.app`。
+- **Windows 版未测试**：能打包，但还没在真实 Windows 机器上验证过。
+- **部分功能待 Mac 真机验证**：系统通知与权限申请、程序坞未读数、无边框标题栏的拖动区域，目前只在 Linux/模拟环境中测试过。
+- 界面目前只有中文。
+
+## 商标说明
+
+界面中出现的 Anthropic、OpenAI、Google、xAI、智谱、Moonshot、通义千问、DeepSeek、MiniMax 等模型厂商 Logo（来自 [@lobehub/icons](https://github.com/lobehub/lobe-icons)，MIT）仅用于标识对应厂商的模型。这些商标归各自所有者所有，本项目与这些公司没有关联，也未获其背书。
+
+## 参与贡献
+
+见 [CONTRIBUTING.md](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)、[安全策略](SECURITY.md)；第三方许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## License
 
