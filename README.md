@@ -1,5 +1,3 @@
-
-https://github.com/user-attachments/assets/0b5c8a24-a011-425a-880d-6dad9c9a782e
 # 团团 Tuantuan
 
 ![团团 Tuantuan · 开源](docs/assets/poster.png)
