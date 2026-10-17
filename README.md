@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
-https://github.com/user-attachments/assets/5238c2d1-7040-43f6-bc48-70aa0d9adae1
+<a href="https://bosshanz.github.io/tuantuan/assets/six-windows.mp4"><img src="docs/assets/six-windows-poster.jpg" alt="Watch the Tuantuan promo video (35 s)" width="100%"></a>
 
 **A local workspace for multi-agent collaboration.**
 
