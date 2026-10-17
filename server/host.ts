@@ -32,6 +32,7 @@ import {
 } from "./custom";
 import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./harness";
 import { harnessProcessEnv } from "./harness-env";
+import { harnessRuntimeIdentity } from "./harness-runtime";
 import { pluginOverlay } from "./library";
 import { loadSkillBody, materializeSkills, selectedSkillIndex } from "./skills";
 import type { Agent, Room, Store } from "./store";
@@ -79,6 +80,7 @@ interface Proc {
   roomId: string;
   agentId: string;
   signature: string;
+  runtimeCurrent: () => boolean;
   acp: AcpProcess;
   spec: HarnessSpec;
   provider: ProviderSecret | null;
@@ -212,7 +214,9 @@ export class HarnessHost {
       Object.assign(env, pe.set);
     }
     const key = `${roomId}|${agent.id}|${cwd}`;
+    const runtimeIdentity = harnessRuntimeIdentity(status, env);
     const signature = JSON.stringify([
+      runtimeIdentity,
       status.command,
       status.args,
       env.CODEX_CONFIG ?? "",
@@ -227,13 +231,21 @@ export class HarnessHost {
     }
     if (existing) this.dropProc(existing);
 
-    const runtime: ReturnType<typeof prepareProviderRuntime> = prov
-      ? prepareProviderRuntime(prov, agent.harness, env, status.version, {
+    const runtime: Awaited<ReturnType<typeof prepareProviderRuntime>> = prov
+      ? await prepareProviderRuntime(prov, agent.harness, env, status.version, {
           command: status.command,
           args: status.args,
           cwd,
         })
       : { env, cleanup: () => {} };
+    try {
+      assertCurrent();
+      if (harnessRuntimeIdentity(status, env) !== runtimeIdentity)
+        throw new ValidationError("会话配置已更改，请重试", 409);
+    } catch (error) {
+      runtime.cleanup();
+      throw error;
+    }
     const nativePreferences = nativeReasoningPreferences(agent.harness, env);
 
     const proc: Proc = {
@@ -241,6 +253,7 @@ export class HarnessHost {
       roomId,
       agentId: agent.id,
       signature,
+      runtimeCurrent: () => harnessRuntimeIdentity(status, env) === runtimeIdentity,
       spec,
       provider: prov,
       reasoningPreferences:
@@ -275,6 +288,7 @@ export class HarnessHost {
     }
     const useProv = prov && providerSupports(prov, agent.harness) ? prov : null;
     proc.ready = proc.acp.initialize().then(async (init) => {
+      if (!proc.runtimeCurrent()) throw new ValidationError("会话配置已更改，请重试", 409);
       if (useProv && agent.harness === "codex")
         await proc.acp.agent.request(
           methods.agent.providers.set,
@@ -437,6 +451,11 @@ export class HarnessHost {
   ): Promise<{ proc: Proc; slot: SessionSlot }> {
     const cwd = this.cwdFor(room, agent);
     const proc = await this.proc(room.id, agent, cwd, identity, assertCurrent);
+    const assertConfiguration = assertCurrent;
+    assertCurrent = () => {
+      assertConfiguration();
+      if (!proc.runtimeCurrent()) throw new ValidationError("会话配置已更改，请重试", 409);
+    };
     const init = await proc.ready;
     assertCurrent();
     const slotKey = `${room.id}|${agent.id}`;

@@ -1,7 +1,8 @@
 /** Shared, provider-specific model facts. No credentials or executable catalog fields. */
 export type ModelApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 
-export type ThinkingLevel = "off" | "on" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+/** Catalog/ACP identifiers are extensible; adapters still verify native support. */
+export type ThinkingLevel = string;
 
 export type ThinkingFormat =
   | "openai"

@@ -103,8 +103,8 @@ for (const protocol of ["chat", "responses", "anthropic"] as const) {
         PI_ACP_PI_COMMAND: pi as string,
         NO_PROXY: "127.0.0.1,localhost",
       };
-      const launch = () => {
-        const runtime = prepareProviderRuntime(provider, "pi", env);
+      const launch = async () => {
+        const runtime = await prepareProviderRuntime(provider, "pi", env);
         const acp = new AcpProcess(
           { command: process.execPath, args: [piAcp as string], cwd, env: runtime.env },
           {
@@ -117,7 +117,7 @@ for (const protocol of ["chat", "responses", "anthropic"] as const) {
         );
         return { runtime, acp };
       };
-      let running = launch();
+      let running = await launch();
       const stop = async () => {
         running.acp.kill();
         await withTimeout(running.acp.exited, 5000, "Pi exit");
@@ -167,7 +167,7 @@ for (const protocol of ["chat", "responses", "anthropic"] as const) {
           if (level === "off") {
             // A launcher default must not override the user's saved choice on resume.
             await stop();
-            running = launch();
+            running = await launch();
             await running.acp.initialize(15000);
             const loaded = await running.acp.agent.request(methods.agent.session.load, {
               sessionId: session.sessionId,

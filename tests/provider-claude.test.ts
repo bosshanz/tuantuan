@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import type * as acp from "@agentclientprotocol/sdk";
+import { captureModelCatalog } from "../server/model-catalog";
+import { catalogSnapshot } from "../server/model-catalog-schema";
 import { claudeConfigOptions, claudeProviderEnv } from "../server/provider-claude";
 import type { ProviderSecret } from "../server/providers";
 
@@ -110,4 +112,47 @@ test("a known non-reasoning model never inherits effort from a native alias", ()
     "=-effort,-thinking,-adaptive_thinking",
   );
   expect(levels(claudeConfigOptions(nonreasoner, options(model)))).toEqual([]);
+});
+
+test("future native off and effort IDs follow the catalog intersection without changing the real current value", () => {
+  const future = captureModelCatalog(
+    {
+      ...provider,
+      model: "future-model",
+      smallModel: "",
+      preset: "custom",
+      modelCatalog: { "future-model": "fixture/future-model" },
+    },
+    catalogSnapshot(
+      JSON.stringify({
+        fixture: {
+          name: "Fixture",
+          models: {
+            "future-model": {
+              name: "Future model",
+              reasoning: true,
+              reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "ultra"] }],
+              limit: { context: 128000, output: 8192 },
+              modalities: { input: ["text"] },
+            },
+          },
+        },
+      }),
+      "2026-10-17T00:00:00Z",
+    ),
+  );
+  const original = options(future.model);
+  const effort = original.find((item) => item.id === "effort");
+  if (effort?.type !== "select") throw new Error("Missing fixture effort");
+  effort.currentValue = "native-unlisted";
+  effort.options = ["default", "off", "low", "ultra", "native-unlisted"].map((value) => ({ value, name: value }));
+  const result = claudeConfigOptions(future, original, claudeProviderEnv(future, {}));
+  expect(levels(result)).toEqual(["default", "off", "low", "ultra"]);
+  expect(result.find((item) => item.id === "effort")?.currentValue).toBe("native-unlisted");
+  const explicit = claudeProviderEnv(future, { CLAUDE_CODE_MODEL_CAPABILITIES: "future-model=effort,-ultra_effort" });
+  expect(levels(claudeConfigOptions(future, original, explicit))).toEqual(["default", "off", "low", "native-unlisted"]);
+  effort.options = [{ value: "native-unlisted", name: "Native" }];
+  const empty = claudeConfigOptions(future, original);
+  expect(empty.find((item) => item.id === "effort")?.currentValue).toBe("native-unlisted");
+  expect(levels(empty)).toEqual([]);
 });

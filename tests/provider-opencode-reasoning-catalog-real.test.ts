@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { methods, type SessionConfigOption } from "@agentclientprotocol/sdk";
@@ -13,6 +13,78 @@ import type { ProviderSecret } from "../server/providers";
 // They prove ACP choices and request serialization; no paid model is contacted.
 const binary = process.env.TUANTUAN_TEST_OPENCODE || Bun.which("opencode");
 const enabled = process.env.TUANTUAN_REAL_PROVIDER_RUNTIMES === "1" && !!binary;
+
+test.skipIf(!enabled || process.platform !== "darwin")(
+  "real OpenCode config reader identifies an unknown-version schema without model requests",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "tt-opencode-unknown-schema-"));
+    const trace = join(root, "metadata-processes.jsonl");
+    const wrapper = join(root, "opencode-metadata");
+    writeFileSync(
+      wrapper,
+      `#!${process.execPath}
+import { appendFileSync, readFileSync, readdirSync } from "node:fs";
+const args = process.argv.slice(2);
+const scoped = args[0] === "debug" && readdirSync(process.env.OPENCODE_CONFIG_DIR).some(name => name.startsWith("service") && name.endsWith(".json") && JSON.parse(readFileSync(process.env.OPENCODE_CONFIG_DIR + "/" + name, "utf8")).disabled === true);
+appendFileSync(${JSON.stringify(trace)}, JSON.stringify({ pid: process.pid, home: process.env.HOME, args, scoped }) + "\\n");
+const child = Bun.spawnSync([${JSON.stringify(binary)}, ...args], { env: process.env, stdout: "inherit", stderr: "inherit" });
+process.exit(child.exitCode);
+`,
+      { mode: 0o700 },
+    );
+    const provider: ProviderSecret = {
+      id: "metadata-only",
+      name: "Metadata fixture",
+      preset: "custom",
+      model: "metadata-only",
+      smallModel: "",
+      anthropicBaseUrl: "",
+      openaiBaseUrl: "http://127.0.0.1:9/v1",
+      wireApi: "chat",
+      apiKey: "unused-metadata-fixture",
+      mgmtKey: "",
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    try {
+      const runtime = await prepareProviderRuntime(
+        provider,
+        "opencode",
+        { HOME: root, PATH: process.env.PATH ?? "" },
+        "unknown-future-version",
+        { command: wrapper, args: ["acp"] },
+      );
+      const config = JSON.parse(runtime.env.OPENCODE_CONFIG_CONTENT as string);
+      expect(config.providers?.tuantuan ?? config.provider?.tuantuan).toBeDefined();
+      expect(config.model).toBe("tuantuan/metadata-only");
+      runtime.cleanup();
+      const launches = readFileSync(trace, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(launches[0].args).toEqual(["service", "set", "disabled", "true"]);
+      expect(launches.some((launch) => launch.scoped)).toBe(true);
+      for (const launch of launches) {
+        expect(existsSync(launch.home)).toBe(false);
+        let running = true;
+        for (let retry = 0; retry < 100 && running; retry++) {
+          try {
+            process.kill(-launch.pid, 0);
+            await Bun.sleep(20);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+            running = false;
+          }
+        }
+        expect(running).toBe(false);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  25_000,
+);
+
 const cases: { reference: string; api: ModelApi; picks: string[] }[] = [
   { reference: "alibaba-cn/qwen3.8-max", api: "openai-completions", picks: ["xhigh", "none", "low"] },
   { reference: "zhipuai/glm-5.3", api: "openai-completions", picks: ["max", "low"] },
@@ -77,7 +149,7 @@ for (const fixture of cases) {
       const version = await new Response(
         Bun.spawn([binary as string, "--version"], { env, stdout: "pipe" }).stdout,
       ).text();
-      const runtime = prepareProviderRuntime(provider, "opencode", env, version);
+      const runtime = await prepareProviderRuntime(provider, "opencode", env, version);
       const engine = new AcpProcess(
         { command: binary as string, args: ["acp"], env: runtime.env, cwd },
         { onUpdate() {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" } }) },

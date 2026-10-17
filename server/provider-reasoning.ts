@@ -26,16 +26,9 @@ export function piReasoningModel(provider: ProviderSecret, model: string, api: s
     maxTokens: capabilities.maxTokens,
   };
   if (!capabilities.reasoning || !levels.length) return { ...metadata, reasoning: false };
-  const thinkingLevelMap = Object.fromEntries(
-    ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((level) => [
-      level,
-      levels.includes(level as (typeof levels)[number]) || (level === "high" && levels.includes("on"))
-        ? level === "off"
-          ? "none"
-          : level
-        : null,
-    ]),
-  );
+  // The extension intersects this declaration with the actual engine's public
+  // getSupportedThinkingLevels result. No app-owned list caps future Pi levels.
+  const thinkingLevelMap = Object.fromEntries(levels.map((level) => [level, level === "off" ? "none" : level]));
   return {
     ...metadata,
     thinkingLevelMap,
@@ -84,6 +77,7 @@ export function providerReasoningDefaults(
   );
   if (option?.type !== "select") return {};
   const choices = option.options.flatMap((item) => ("options" in item ? item.options : [item]));
-  const value = recommended === "on" && harness === "pi" ? "high" : recommended;
+  const value =
+    recommended === "on" && harness === "pi" && !choices.some((choice) => choice.value === "on") ? "high" : recommended;
   return choices.some((choice) => choice.value === value) ? { [option.id]: value } : {};
 }

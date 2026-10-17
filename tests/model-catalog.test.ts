@@ -164,14 +164,14 @@ describe("model identity and verified controls", () => {
     }
   });
 
-  test("explicit model aliases bind capabilities without replacing the outgoing model ID", () => {
+  test("explicit model aliases bind capabilities without replacing the outgoing model ID", async () => {
     const fixture = capture({ model: "company-main", modelCatalog: { "company-main": "deepseek/shared-model" } });
     expect(resolveModelCapabilities(fixture)).toMatchObject({
       providerId: "deepseek",
       modelId: "shared-model",
       effort: true,
     });
-    const runtime = prepareProviderRuntime(fixture, "opencode", {}, "2.0.29");
+    const runtime = await prepareProviderRuntime(fixture, "opencode", {}, "2.0.29");
     try {
       const config = JSON.parse(runtime.env.OPENCODE_CONFIG_CONTENT as string);
       expect(config.model).toBe("tuantuan/company-main");
@@ -194,6 +194,37 @@ describe("model identity and verified controls", () => {
 });
 
 describe("bounded catalog download and atomic replacement", () => {
+  test("new effort IDs survive sync and restart without inventing their priority", async () => {
+    let persisted = data();
+    const catalog = new ModelCatalog(persisted, (next) => {
+      persisted = next;
+    });
+    const old = catalog.capture(provider({ preset: "deepseek" }));
+    await catalog.sync(fetchCatalog(rawCatalog(["high", "ultra", "vendor-v2", "default"])));
+    expect(resolveModelCapabilities(old)?.levels).toEqual(["off", "low", "high", "max"]);
+    const restored = new ModelCatalog(persisted, () => {});
+    expect(resolveModelCapabilities(restored.capture(provider({ preset: "deepseek" })))).toMatchObject({
+      levels: ["off", "high", "ultra", "vendor-v2"],
+      defaultLevel: "high",
+    });
+    await catalog.sync(fetchCatalog(rawCatalog(["ultra"])));
+    expect(resolveModelCapabilities(catalog.capture(provider({ preset: "deepseek" })))).toMatchObject({
+      levels: ["off", "ultra"],
+      defaultLevel: undefined,
+    });
+  });
+
+  test("malformed effort identifiers cannot replace a valid catalog", async () => {
+    const catalog = new ModelCatalog(data(), () => {
+      throw new Error("must not persist malformed IDs");
+    });
+    const before = catalog.status();
+    for (const effort of ["", "high\n", "x".repeat(65), "value;option=on"]) {
+      await expect(catalog.sync(fetchCatalog(rawCatalog([effort])))).rejects.toThrow();
+      expect(catalog.status()).toEqual(before);
+    }
+  });
+
   test("sync requests only the public fixed endpoint, without provider credentials or executable catalog fields", async () => {
     const requests: { url: string; init?: RequestInit }[] = [];
     const result = await downloadModelCatalog((async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {

@@ -1,2 +1,0 @@
-# Preserve the pinned upstream prompt byte for byte, including its whitespace.
-server/provider-codex-prompt-0.160.1.txt -text whitespace=-blank-at-eol

@@ -12,6 +12,8 @@ The thinking-level and protocol compatibility mapping in `provider-reasoning.ts`
 Source: <https://github.com/earendil-works/pi/tree/main/packages/ai>.
 Pi is MIT licensed; see `pi-ai.LICENSE`. Pi's SDK is loaded by the user's Pi Harness,
 not bundled as a new Tuantuan request transport dependency.
+The extension reads the installed engine's public `getSupportedThinkingLevels` API;
+the reference version above is provenance, not a maximum engine version or level list.
 
 Update the bundled data explicitly with `bun run models:update`. The desktop/web
 client's manual sync instead stores a validated snapshot in the local database.

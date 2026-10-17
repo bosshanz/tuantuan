@@ -2,6 +2,46 @@ import type { MessageCatalog } from "./types";
 
 /** Application-owned errors only. Placeholder values retain paths, names and third-party details. */
 export const errorMessages: MessageCatalog = {
+  "无法定位 OpenCode，未能探测服务商配置格式": {
+    "zh-TW": "無法定位 OpenCode，未能探測服務商設定格式",
+    en: "OpenCode was not found. Its provider configuration format could not be detected",
+    ja: "OpenCode が見つからず、プロバイダーの設定形式を確認できませんでした",
+  },
+  "无法安全隔离 OpenCode 配置探测的网络；未知版本的服务商配置格式尚未确认": {
+    "zh-TW": "無法安全隔離 OpenCode 設定探測的網路；未知版本的服務商設定格式尚未確認",
+    en: "Network isolation is unavailable for the OpenCode configuration probe. This version’s provider configuration format has not been verified",
+    ja: "OpenCode の設定確認に必要なネットワーク分離が利用できません。このバージョンのプロバイダー設定形式は未確認です",
+  },
+  "无法为 OpenCode 配置探测禁用后台服务：{detail}": {
+    "zh-TW": "無法為 OpenCode 設定探測停用背景服務：{detail}",
+    en: "Could not disable the background service for the OpenCode configuration probe: {detail}",
+    ja: "OpenCode の設定確認用バックグラウンドサービスを無効にできませんでした：{detail}",
+  },
+  "OpenCode 配置格式探测超时": {
+    "zh-TW": "OpenCode 設定格式探測逾時",
+    en: "OpenCode configuration format detection timed out",
+    ja: "OpenCode の設定形式の確認がタイムアウトしました",
+  },
+  "OpenCode 服务商配置格式未确认：{detail}": {
+    "zh-TW": "OpenCode 服務商設定格式尚未確認：{detail}",
+    en: "OpenCode provider configuration format could not be verified: {detail}",
+    ja: "OpenCode のプロバイダー設定形式を確認できませんでした：{detail}",
+  },
+  未返回可识别的配置形状: {
+    "zh-TW": "未傳回可辨識的設定結構",
+    en: "No recognized configuration structure was returned",
+    ja: "認識可能な設定構造が返されませんでした",
+  },
+  "Pi 未提供公开思考能力接口，无法确认自定义模型支持的等级": {
+    "zh-TW": "Pi 未提供公開思考能力介面，無法確認自訂模型支援的等級",
+    en: "Pi does not expose its thinking capability API. Supported levels for the custom model could not be verified",
+    ja: "Pi が思考機能の公開 API を提供していないため、カスタムモデルが対応するレベルを確認できませんでした",
+  },
+  "Pi 返回了无效的思考能力列表": {
+    "zh-TW": "Pi 傳回了無效的思考能力清單",
+    en: "Pi returned an invalid list of thinking capabilities",
+    ja: "Pi が無効な思考機能の一覧を返しました",
+  },
   "模型能力同步失败：{detail}": {
     "zh-TW": "模型能力同步失敗：{detail}",
     en: "Model capability sync failed: {detail}",

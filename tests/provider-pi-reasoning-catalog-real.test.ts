@@ -192,8 +192,8 @@ for (const fixture of cases) {
         no_proxy: "127.0.0.1,localhost",
       };
       const updates: acp.SessionUpdate[] = [];
-      const launch = () => {
-        const runtime = prepareProviderRuntime(provider, "pi", env);
+      const launch = async () => {
+        const runtime = await prepareProviderRuntime(provider, "pi", env);
         const command = [process.execPath, piAcp as string];
         if (process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec"))
           command.unshift(
@@ -212,7 +212,7 @@ for (const fixture of cases) {
         );
         return { runtime, acp };
       };
-      let running = launch();
+      let running = await launch();
       const stop = async () => {
         running.acp.kill();
         await withTimeout(running.acp.exited, 5000, "Pi fixture exit timed out");
@@ -301,7 +301,7 @@ for (const fixture of cases) {
         }
         const selected = fixture.selected.at(-1) as string;
         await stop();
-        running = launch();
+        running = await launch();
         await running.acp.initialize(15_000);
         const restored = await running.acp.agent.request(methods.agent.session.load, {
           sessionId: session.sessionId,

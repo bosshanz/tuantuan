@@ -88,19 +88,24 @@ export function claudeConfigOptions(
   const explicit = explicitCapabilities(provider, model, env);
   return options.flatMap((option) => {
     if (option.id !== "effort" || option.type !== "select") return [option];
-    if (!(explicit.get("effort") ?? capabilities.effort)) return [];
-    const levels = new Set<string>(["default", ...capabilities.levels.filter((level) => level !== "off")]);
-    if (explicit.get("effort")) for (const level of ["low", "medium", "high"]) levels.add(level);
-    for (const level of ["xhigh", "max"]) {
-      if (explicit.get(`${level}_effort`) === true) levels.add(level);
-      else if (explicit.get(`${level}_effort`) === false) levels.delete(level);
+    const levels = new Set<string>(["default", ...capabilities.levels]);
+    const native = option.options.flatMap((item) => ("options" in item ? item.options : [item]));
+    // Explicit user declarations own their native choices, including controls introduced
+    // by a newer CLI. An explicit negative capability still suppresses that effort.
+    if (explicit.get("effort") === true) for (const item of native) levels.add(item.value);
+    for (const [flag, enabled] of explicit) {
+      if (!flag.endsWith("_effort")) continue;
+      const level = flag.slice(0, -"_effort".length);
+      if (enabled) levels.add(level);
+      else levels.delete(level);
     }
+    if (explicit.get("effort") === false) return [];
+    const choices = native.filter((item) => levels.has(item.value));
+    if (!capabilities.effort && !explicit.get("effort") && !choices.some((item) => item.value !== "default")) return [];
     return [
       {
         ...option,
-        options: option.options
-          .flatMap((item) => ("options" in item ? item.options : [item]))
-          .filter((item) => levels.has(item.value)),
+        options: choices,
       },
     ];
   });

@@ -86,7 +86,7 @@ test("Pi registers real DeepSeek choices and protocol-specific reasoning replay"
   expect(piReasoningModel(provider, "unrecognized", "openai-completions")).toEqual({ reasoning: false });
   expect(piReasoningModel(provider, provider.model, "openai-completions")).toMatchObject({
     reasoning: true,
-    thinkingLevelMap: { minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: "max" },
+    thinkingLevelMap: { off: "none", low: "low", high: "high", max: "max" },
     compat: {
       thinkingFormat: "deepseek",
       requiresReasoningContentOnAssistantMessages: true,
@@ -98,4 +98,14 @@ test("Pi registers real DeepSeek choices and protocol-specific reasoning replay"
     compat: { forceAdaptiveThinking: true, allowEmptySignature: true },
   });
   expect(piReasoningModel(provider, provider.model, "openai-responses")).not.toHaveProperty("compat");
+});
+
+test("Pi toggle recommendations use a real on control when the updated engine offers it", () => {
+  const toggle = { ...provider, preset: "kimi", model: "kimi-k2.6", openaiBaseUrl: "https://api.moonshot.cn/v1" };
+  expect(
+    providerReasoningDefaults(toggle, "pi", options("tuantuan/kimi-k2.6", "thought_level", ["off", "on"])),
+  ).toEqual({ thought_level: "on" });
+  expect(
+    providerReasoningDefaults(toggle, "pi", options("tuantuan/kimi-k2.6", "thought_level", ["off", "high"])),
+  ).toEqual({ thought_level: "high" });
 });

@@ -49,12 +49,19 @@ function fakePi(root: string) {
   writeFileSync(
     executable,
     `#!${process.execPath}
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 const args = process.argv.slice(2);
-const { default: setup } = await import(args[args.indexOf("--extension") + 1]);
+const extension = args[args.indexOf("--extension") + 1];
+const compat = join(dirname(extension), "node_modules", "@earendil-works", "pi-ai");
+mkdirSync(compat, { recursive: true });
+writeFileSync(join(compat, "package.json"), JSON.stringify({ type: "module", exports: { "./compat": "./compat.js" } }));
+writeFileSync(join(compat, "compat.js"), 'export function getSupportedThinkingLevels(model) { return ["off", "minimal", "low", "medium", "high", "xhigh", "max"].filter(level => model.thinkingLevelMap?.[level] !== null && (!["xhigh", "max"].includes(level) || model.thinkingLevelMap?.[level] !== undefined)); }');
+const { default: setup } = await import(extension);
 const scenario = JSON.parse(args.at(-1));
 let hook, aborted = false, registration;
 const notifications = [];
-setup({
+await setup({
   registerProvider(id, config) { registration = config; },
   on(name, handler) { if (name === "before_provider_request") hook = handler; },
   getThinkingLevel() { return scenario.level; },
@@ -81,7 +88,7 @@ test.skipIf(process.platform === "win32")(
   "Pi's generated public request hook enforces catalog budgets without changing off or other deployments",
   async () => {
     const root = mkdtempSync(join(tmpdir(), "tt-pi-budget-hook-"));
-    const runtime = prepareProviderRuntime(boundedProvider(), "pi", {
+    const runtime = await prepareProviderRuntime(boundedProvider(), "pi", {
       HOME: root,
       PATH: process.env.PATH ?? "",
       PI_ACP_PI_COMMAND: fakePi(root),
@@ -136,7 +143,7 @@ test.skipIf(process.platform === "win32")(
 
 test.skipIf(process.platform === "win32")(
   "Pi explicit settings suppress recommendations while native precedence and project trust remain authoritative",
-  () => {
+  async () => {
     const root = mkdtempSync(join(tmpdir(), "tt-pi-native-thinking-"));
     const home = join(root, "home");
     const cwd = join(root, "cwd");
@@ -146,8 +153,8 @@ test.skipIf(process.platform === "win32")(
     mkdirSync(explicitDir);
     mkdirSync(join(cwd, ".pi"), { recursive: true });
     const executable = fakePi(root);
-    const check = (env: Record<string, string>) => {
-      const runtime = prepareProviderRuntime(
+    const check = async (env: Record<string, string>) => {
+      const runtime = await prepareProviderRuntime(
         boundedProvider(),
         "pi",
         { HOME: home, PATH: process.env.PATH ?? "", PI_ACP_PI_COMMAND: executable, ...env },
@@ -158,19 +165,19 @@ test.skipIf(process.platform === "win32")(
       return runtime.reasoningPreferences;
     };
     try {
-      expect(check({})).toBeUndefined();
+      expect(await check({})).toBeUndefined();
       writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ thinkingBudgets: { low: 1 } }));
-      expect(check({})).toBeUndefined();
+      expect(await check({})).toBeUndefined();
       writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultThinkingLevel: "off" }));
-      expect(check({})).toEqual({});
-      expect(check({ PI_CODING_AGENT_DIR: explicitDir })).toBeUndefined();
+      expect(await check({})).toEqual({});
+      expect(await check({ PI_CODING_AGENT_DIR: explicitDir })).toBeUndefined();
       writeFileSync(join(explicitDir, "settings.json"), JSON.stringify({ defaultThinkingLevel: "low" }));
-      expect(check({ PI_CODING_AGENT_DIR: "~/custom-agent" })).toEqual({});
+      expect(await check({ PI_CODING_AGENT_DIR: "~/custom-agent" })).toEqual({});
       rmSync(join(agentDir, "settings.json"));
       writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ defaultThinkingLevel: "off" }));
-      expect(check({})).toEqual({});
+      expect(await check({})).toEqual({});
       writeFileSync(join(cwd, ".pi", "settings.json"), "malformed native settings");
-      expect(check({})).toEqual({});
+      expect(await check({})).toEqual({});
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

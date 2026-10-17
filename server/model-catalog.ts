@@ -176,7 +176,7 @@ export function resolveModelCapabilities(
   const controls = data.reasoning_options ?? [];
   const efforts = controls
     .flatMap((option) => (option.type === "effort" ? option.values : []))
-    .filter((level): level is Exclude<ThinkingLevel, "off" | "on"> | "none" => level !== null && level !== "default");
+    .filter((level): level is string => level !== null && level !== "default");
   const toggle = controls.some((option) => option.type === "toggle");
   const budget = controls.find((option) => option.type === "budget_tokens");
   const maxTokens = data.limit.output || 8192;

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { methods } from "@agentclientprotocol/sdk";
 import { AcpProcess, withTimeout } from "../server/acp";
 import { killProcessTree, processGroupOptions } from "../server/process-tree";
@@ -10,7 +10,7 @@ import { prepareCodexProviderRuntime } from "../server/provider-codex";
 import type { ProviderSecret } from "../server/providers";
 import { codexProviderSet } from "../server/providers";
 
-// Uses the pinned real CLI/adapter, a disposable home and a local HTTP fixture.
+// Uses the selected real CLI/adapter, a disposable home and a local HTTP fixture.
 // TUANTUAN_REAL_CODEX_PROVIDER=1 bun test tests/provider-codex-real.test.ts
 const enabled = process.env.TUANTUAN_REAL_CODEX_PROVIDER === "1";
 const sandbox = process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec");
@@ -134,7 +134,11 @@ for (const fixture of [
       };
       const require = createRequire(import.meta.url);
       const adapter = require.resolve("@agentclientprotocol/codex-acp/dist/index.js");
-      const runtime = prepareCodexProviderRuntime(provider, env, { command: process.execPath, args: [adapter], cwd });
+      const runtime = await prepareCodexProviderRuntime(provider, env, {
+        command: process.execPath,
+        args: [adapter],
+        cwd,
+      });
       let acp: AcpProcess | undefined;
       const close = async () => {
         if (!acp) return;
@@ -162,6 +166,25 @@ for (const fixture of [
         return acp;
       };
       try {
+        const [catalogExecutable, ...catalogArgs] = command([
+          runtime.env.CODEX_PATH as string,
+          "debug",
+          "models",
+          "--bundled",
+        ]);
+        const exported = Bun.spawn([catalogExecutable as string, ...catalogArgs], {
+          cwd,
+          env: runtime.env,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const bundled = JSON.parse(await new Response(exported.stdout).text());
+        expect(await exported.exited).toBe(0);
+        const extended = JSON.parse(
+          readFileSync(join(dirname(runtime.env.CODEX_PATH as string), "models.json"), "utf8"),
+        );
+        expect(extended.models.slice(0, bundled.models.length)).toEqual(bundled.models);
         const [executable, ...args] = command([runtime.env.CODEX_PATH as string, "app-server"]);
         const native = Bun.spawn([executable as string, ...args], {
           cwd,
@@ -209,13 +232,12 @@ for (const fixture of [
           );
           expect(listed.error).toBeUndefined();
           expect(listed.result.data.map((model: { id: string }) => model.id)).toEqual(
-            [fixture.model, fixture.smallModel].filter(Boolean),
+            expect.arrayContaining([fixture.model, fixture.smallModel].filter(Boolean)),
           );
-          expect(listed.result.data[0].defaultReasoningEffort).toBe("high");
+          const custom = listed.result.data.find((model: { id: string }) => model.id === fixture.model);
+          expect(custom.defaultReasoningEffort).toBe("high");
           expect(
-            listed.result.data[0].supportedReasoningEfforts.map(
-              (value: { reasoningEffort: string }) => value.reasoningEffort,
-            ),
+            custom.supportedReasoningEfforts.map((value: { reasoningEffort: string }) => value.reasoningEffort),
           ).toEqual(fixture.efforts);
         } finally {
           killProcessTree(native);
@@ -255,9 +277,12 @@ for (const fixture of [
           });
         };
         for (const effort of [...fixture.efforts.filter((value) => value !== "none"), "none"]) await prompt(effort);
-        expect(messages.at(-1)?.instructions).toBe(
-          readFileSync(new URL("../server/provider-codex-prompt-0.160.1.txt", import.meta.url), "utf8"),
+        const catalog = JSON.parse(
+          readFileSync(join(dirname(runtime.env.CODEX_PATH as string), "models.json"), "utf8"),
         );
+        const customModel = catalog.models.find((model: { slug: string }) => model.slug === fixture.model);
+        expect(messages.at(-1)?.instructions).toBe(customModel.base_instructions);
+        expect(messages.at(-1)?.instructions?.length).toBeGreaterThan(1000);
         await close();
         running = await launch();
         const resumed = await withTimeout(

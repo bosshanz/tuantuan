@@ -142,8 +142,8 @@ for (const harness of ["opencode", "pi"] as const) {
         const nativeConfigPath = join(home, ".config", "opencode", "opencode.json");
         writeFileSync(nativeConfigPath, nativeConfig);
         const replies: string[] = [];
-        const launch = (p: ProviderSecret) => {
-          const runtime = prepareProviderRuntime(p, harness, env, version);
+        const launch = async (p: ProviderSecret) => {
+          const runtime = await prepareProviderRuntime(p, harness, env, version);
           const acp = new AcpProcess(
             {
               command: harness === "opencode" ? (opencode as string) : process.execPath,
@@ -161,7 +161,7 @@ for (const harness of ["opencode", "pi"] as const) {
           );
           return { acp, runtime };
         };
-        let running: ReturnType<typeof launch> | undefined;
+        let running: Awaited<ReturnType<typeof launch>> | undefined;
         const close = async () => {
           if (!running) return;
           running.acp.kill();
@@ -199,7 +199,7 @@ for (const harness of ["opencode", "pi"] as const) {
           }
         };
         try {
-          running = launch(profile);
+          running = await launch(profile);
           await running.acp.initialize(15_000);
           const session = await withTimeout(
             running.acp.agent.request(methods.agent.session.new, { cwd, mcpServers: [] }),
@@ -225,7 +225,7 @@ for (const harness of ["opencode", "pi"] as const) {
             anthropicBaseUrl: `${base}/edited/anthropic`,
             openaiBaseUrl: protocol === "anthropic" ? "" : `${base}/edited/v1`,
           };
-          running = launch(edited);
+          running = await launch(edited);
           await running.acp.initialize(15_000);
           await withTimeout(
             running.acp.agent.request(methods.agent.session.load, {
@@ -273,7 +273,7 @@ test.skipIf(!enabled || !opencodeV2)(
     });
     const configPath = join(configDir, "opencode.json");
     writeFileSync(configPath, native);
-    const runtime = prepareProviderRuntime(
+    const runtime = await prepareProviderRuntime(
       {
         id: "policy-fixture",
         name: "Policy fixture",

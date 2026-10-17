@@ -194,6 +194,32 @@ export function providerConfigOptions(
   const models = providerModelValues(s, harness);
   if (!models) return options;
   return options.map((o) => {
+    if (
+      s &&
+      harness === "opencode" &&
+      o.type === "select" &&
+      (o.category === "thought_level" || /thinking|reasoning|effort|variant/.test(o.id))
+    ) {
+      const model = options.find(
+        (item) => item.type === "select" && (item.category === "model" || item.id === "model"),
+      );
+      const raw = model?.type === "select" ? model.currentValue.replace(/^tuantuan\//, "") : s.model;
+      const capability = resolveModelCapabilities(s, raw);
+      if (capability) {
+        // V1 can add new automatic variants after an upgrade. Only catalog-backed
+        // choices may be selected; retain the real current value and native default.
+        const allowed = new Set([
+          "default",
+          ...capability.levels.flatMap((level) => (level === "off" ? ["off", "none"] : [level])),
+        ]);
+        return {
+          ...o,
+          options: o.options
+            .flatMap((item) => ("options" in item ? item.options : [item]))
+            .filter((item) => allowed.has(item.value)),
+        };
+      }
+    }
     if (s && harness === "pi" && o.type === "select" && (o.category === "thought_level" || /thinking/.test(o.id))) {
       const model = options.find(
         (item) => item.type === "select" && (item.category === "model" || item.id === "model"),

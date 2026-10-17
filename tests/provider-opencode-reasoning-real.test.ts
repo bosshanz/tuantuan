@@ -103,7 +103,7 @@ for (const api of ["openai-completions", "openai-responses", "anthropic-messages
         Bun.spawn([binary as string, "--version"], { env, stdout: "pipe" }).stdout,
       ).text();
       const v2 = /(?:^|\s)v?2\./.test(version);
-      const runtime = prepareProviderRuntime(provider, "opencode", env, version);
+      const runtime = await prepareProviderRuntime(provider, "opencode", env, version);
       // The helper can be verified independently while runtime integration is edited elsewhere.
       const config = JSON.parse(runtime.env.OPENCODE_CONFIG_CONTENT || "{}");
       const definition = (v2 ? config.providers : config.provider).tuantuan;

@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { resolveModelCapabilities } from "./model-catalog";
 import { prepareCodexProviderRuntime } from "./provider-codex";
-import { opencodeReasoningModel } from "./provider-opencode";
+import { opencodeConfigV2, opencodeReasoningModel } from "./provider-opencode";
 import { piReasoningModel } from "./provider-reasoning";
 import type { ProviderSecret } from "./providers";
 
@@ -23,13 +23,13 @@ export function providerRuntimeModel(model: string): string {
 }
 
 /** Configure only this ACP process; native user settings and credentials stay in place. */
-export function prepareProviderRuntime(
+export async function prepareProviderRuntime(
   provider: ProviderSecret,
   harness: string,
   env: Record<string, string>,
   version?: string | null,
   adapterLaunch?: { command: string; args: string[]; cwd?: string },
-): Runtime {
+): Promise<Runtime> {
   const kind = harness;
   if (kind === "codex") return prepareCodexProviderRuntime(provider, env, adapterLaunch);
   if (kind !== "opencode" && kind !== "pi") return { env, cleanup: () => {} };
@@ -46,7 +46,7 @@ export function prepareProviderRuntime(
   if (kind === "opencode") {
     const existing: unknown = env.OPENCODE_CONFIG_CONTENT ? Bun.JSON5.parse(env.OPENCODE_CONFIG_CONTENT) : {};
     if (!isRecord(existing)) throw new Error("OPENCODE_CONFIG_CONTENT 必须是 JSON 对象");
-    const v2 = Number(version?.match(/(?:^|\s)v?(\d+)\./)?.[1] ?? 1) >= 2;
+    const v2 = await opencodeConfigV2(version, env, adapterLaunch);
     // Unlike the Anthropic SDK used by Pi/Claude, OpenCode's provider runtimes
     // append /messages to a versioned API base rather than /v1/messages.
     const options = {
@@ -125,8 +125,29 @@ export function prepareProviderRuntime(
     const extension = join(dir, "provider.js");
     writeFileSync(
       extension,
-      `export default function (pi) {
+      `export default async function (pi) {
   const { _thinkingBudgets = {}, ...config } = JSON.parse(process.env.${CONFIG_ENV});
+  if (config.models.some((model) => model.reasoning)) {
+    const native = await import("@earendil-works/pi-ai/compat");
+    if (typeof native.getSupportedThinkingLevels !== "function")
+      throw new Error("Pi 未提供公开思考能力接口，无法确认自定义模型支持的等级");
+    config.models = config.models.map((model) => {
+      if (!model.reasoning) return model;
+      const declared = { ...model.thinkingLevelMap };
+      const supported = native.getSupportedThinkingLevels({
+        type: "chat", provider: ${JSON.stringify(PROVIDER_ID)}, api: config.api, baseUrl: config.baseUrl,
+        ...model, thinkingLevelMap: declared,
+      });
+      if (!Array.isArray(supported) || !supported.every((level) => typeof level === "string" && level.length))
+        throw new Error("Pi 返回了无效的思考能力列表");
+      // Older Pi represents a toggle as high. Prefer a real native on control when present.
+      if (Object.hasOwn(declared, "on") && !supported.includes("on") && supported.includes("high"))
+        declared.high = "high";
+      const thinkingLevelMap = Object.fromEntries([...new Set([...supported, ...Object.keys(declared)])]
+        .map((level) => [level, Object.hasOwn(declared, level) ? declared[level] : null]));
+      return { ...model, thinkingLevelMap };
+    });
+  }
   pi.registerProvider(${JSON.stringify(PROVIDER_ID)}, {
     ...config,
     apiKey: process.env.${KEY_ENV},

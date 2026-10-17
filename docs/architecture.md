@@ -14,6 +14,7 @@
 | `server/project-terminal.ts` / `shared/project-terminal.ts` | 项目交互式终端：Bun PTY、每项目多个独立 shell、输入 / 尺寸校验、有界输出重放、退出与进程清理；独立于 ACP 工具终端 |
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件；HTTP / WS 共用 Host、Origin 与跨站请求检查 |
 | `server/harness.ts` | Harness 定义（常用 6 个 + mock，及 `reg:<id>` 形式的任意 Registry Agent）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖、来源判定 |
+| `server/harness-runtime.ts` | 所选 ACP 与配套引擎的启动身份、Codex 命令解析及安装失效代次；Host 进程与探测缓存共用，不把 Registry / ACP 版本误当作底层引擎版本 |
 | `server/registry.ts` | 官方 ACP Registry 客户端：本地缓存 → 随包快照兜底、zod 校验（坏条目跳过）、6 小时刷新、图标缓存（只接受 SVG）；平台键；额外的实验性条目（ZCode 桥接） |
 | `server/managed.ts` | 团团安装的 Harness（`<数据目录>/harnesses`）：npx 包用 Bun 或托管 Node 22（`npm install --omit=dev`）、uvx 用 uv（用户的或下载的）、二进制按平台下载 + sha256 校验 + 解压；`manifest.json` 记录版本与命令；卸载 |
 | `server/harness-secrets.ts` | 按 Harness 保存的 API Key（`settings.harnessEnv`，打码给前端，只注入该 Harness 进程）；打开终端（osascript / x-terminal-emulator…）；缺 Key 错误识别在 `shared/auth.ts` |
@@ -64,9 +65,13 @@
 
 `Store.modelCatalog` 是当前数据库的唯一目录所有者，内置快照为 231 个服务商、8,902 个模型。`GET /api/providers/models?query=` 只做本地搜索（最多 50 条）；`POST /api/providers/models/sync` 才请求固定公共地址 `https://models.dev/api.json`，不传凭据、用户模型或对话数据，限制 30 秒 / 15 MB。Zod 白名单丢弃 headers、body、npm 等配置；完整校验并写入 `settings.modelCatalog` 后才切换内存快照，并发同步共用一个任务，任一步失败保留旧目录。
 
+effort ID 保留为有长度和字符约束的字符串，新档位不会因团团的固定枚举导致整次同步失败。推荐排序只覆盖语义已知的等级；未知等级不猜强弱，必须由对应 Harness 的实际选项 / 原生能力实现支持。
+
 读取服务商时捕获当前目录快照，已运行进程的能力解析不会随同步变化，新房间 / 新进程再读取新数据；同步不使当前任务重启。`providers.model_catalog` 保存原始模型 ID 到能力引用的映射，API 字段为 `modelCatalog`，只改变能力解析来源，路由 ID 保持原样。未显式关联时按当前协议的官方 URL 优先、预设其次识别，未知不猜；目录控制等级、输入类型和上下文 / 输出上限，Pi 的未知模型保持文本与 128,000 / 8,192 占位，费用仍只记录 Harness 报告值。
 
 协议适配参考 Pi AI 1.0.4 的公开兼容契约，依赖用户 Pi Harness 的请求实现，不新增团团请求传输 SDK。新会话先应用模型选择，再以会话 → Agent → 已识别的明确原生配置 → 团团推荐 → Harness 的顺序应用实际 ACP 支持的等级；推荐值从目录可用等级按 high / medium / low / on / minimal / xhigh / max 的顺序选出，ACP 不支持该值时保留原生状态。恢复或切模型只重放明确意图，不支持的值继续保存在团团。Claude Code 原生模型能力与 Codex 原生 / 用户模型目录保持优先，各适配边界见 [服务商](providers.md#模型能力目录与思考等级)。数据与参考来源、MIT 许可见 [server/data/NOTICE.md](../server/data/NOTICE.md)。
+
+CLI / ACP 升级与模型目录同步是两条独立来源。Host 进程签名和 Harness 选项缓存包含实际启动文件、配套引擎文件及安装代次；同路径更新和配套引擎更新都会失效。探测结果发布前再次核对身份，旧版本的在途响应不能进入新版本缓存。成功安装只标记失效，不终止活动回合；下一次空闲接入重新建立进程，并沿用原有会话恢复及明确选择重放机制。
 
 ## 数据与状态归属
 

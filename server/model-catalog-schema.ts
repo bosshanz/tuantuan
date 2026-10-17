@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-const effort = z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "default"]).nullable();
+// New effort IDs must not invalidate a complete catalog update. Keep them opaque;
+// only a matching native runtime can establish how to send them to a provider.
+const effort = z
+  .string()
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/)
+  .nullable();
 export const ReasoningOption = z.discriminatedUnion("type", [
   z.object({ type: z.literal("toggle") }),
   z.object({ type: z.literal("effort"), values: z.array(effort) }),

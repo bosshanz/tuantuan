@@ -18,9 +18,10 @@
 | --- | --- | --- |
 | [models.dev](https://github.com/anomalyco/models.dev) | 随包模型能力快照；来源与更新时间记在快照中 | [MIT](server/data/models-dev.LICENSE) |
 | [Pi AI 1.0.4](https://github.com/earendil-works/pi/tree/main/packages/ai) | 思考等级、协议兼容字段与预算适配参考 | [MIT](server/data/pi-ai.LICENSE) |
-| [Codex 0.160.1](https://github.com/openai/codex/tree/rust-v0.160.1) | 目录外模型使用的完整通用编码指令 | [Apache-2.0](server/provider-codex-prompt-0.160.1.LICENSE)；[来源说明](server/provider-codex-prompt-0.160.1.NOTICE) |
 
 目录快照不包含可执行配置；Pi SDK 由用户的 Pi Harness 加载，未作为新的团团请求依赖引入。详见 [模型数据说明](server/data/NOTICE.md)。
+
+Codex 模型目录、effort schema 与通用指令在运行时从用户实际选择的 CLI 读取，不再随团团源码复制固定版本的提示词；临时派生目录在进程退出后删除。Codex 本身及其输出内容仍受上游适用许可证约束。
 
 ## 运行时依赖
 

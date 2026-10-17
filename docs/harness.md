@@ -25,6 +25,7 @@
 - 一键安装只在点按钮后执行，装到团团自己的目录（`<数据目录>/harnesses/agents/<id>/<版本>`，可用 `TUANTUAN_HARNESS_DIR` 改），固定版本，不用 sudo，不装全局：npx 包用团团自带的 Bun 安装运行；需要 Node ≥ 22 的（如 MiniMax Code）自动下载团团专用的 Node 22（校验 SHASUMS256）；uvx 包用你的 uv，没有就下载一份；二进制包按平台下载，带 sha256 时校验。
 - Registry 的 Agent id、版本必须是安全的单个目录段；拒绝路径穿越和保留名称。二进制 / npx 安装先写入独立随机暂存目录，成功后更新版本目录与 manifest，失败或取消时清理暂存；uvx 因 venv 固定路径仍直接写目标版本目录，失败时清理该目录。
 - Registry 版本变了显示「更新到 x」；可卸载团团装的版本。你自己装的版本始终优先（`TUANTUAN_PREFER_MANAGED=1` 反过来）。
+- ACP / CLI 更新后，团团按实际启动文件及其配套引擎的身份重新读取能力，同一路径覆盖安装也会使旧选项缓存失效。运行中的任务继续完成，下次空闲接入时更换进程并重新握手；已保存的模型与 Think 选择仍按新版实际支持的选项恢复。Registry 刷新只发现更新，安装仍由用户触发。
 - 装好的 Agent 可在新建 Agent 时选择；安装完成自动握手，已有安装可点「握手」重新检查。卡片按 Harness 声明提供登录按钮、终端命令或 Key 输入框；登录期间显示等待状态，失败保留入口供重试，无法确认登录状态时明确显示未知。
 - **API Key 登录**：Agent 通过 ACP 声明 `env_var` 登录方式（如 glm-acp-agent 的 `Z_AI_API_KEY`）时，握手结果里直接出现输入框；普通登录方式在错误中明确指出缺少的 Key 变量名时，也会出现对应输入框。Key 保存在团团的数据库里（和服务商 Key 一样只在服务端、打码显示），只注入这个 Harness 的进程环境（Agent 自己的环境变量优先），保存后自动重新握手，可修改、清除。回复因为缺 Key 失败时，会话里显示「需要 API Key」并可当场填写。
 - **终端登录**：终端类登录方式（ACP `terminal`，或说明里写着 `xxx --setup` 的）提供「在终端中打开」：用团团安装的绝对路径和运行时（如 `…/bun …/dist/index.js --setup`）打开 macOS「终端」（osascript）或 Linux 的终端程序；同时总有一行可复制的完整命令。团团不把它装进 PATH。
@@ -34,6 +35,8 @@
 ![更多 Agent：从 Registry 安装并握手](screenshots/harness-registry.png)
 
 源码运行时的内置适配器体积：每个平台约 250 MB（Claude Code）+ 330–400 MB（Codex），`bun install` 只下载当前平台的那一份。
+
+ACP 适配器与底层 CLI 可能是不同版本：Claude Code 默认使用所选适配器依赖的 SDK 引擎（可由 `CLAUDE_CODE_EXECUTABLE` 指定），Codex 使用适配器配套 CLI（可由 `CODEX_PATH` 指定），Pi 使用 `PI_ACP_PI_COMMAND` 或 PATH 中的引擎。升级一个未被当前适配器使用的全局 CLI 不会改变实际会话。新增 ACP 选项直接来自握手 / 会话响应；若上游改变协议或配置格式，团团需识别新契约后才能启用对应增强，不能仅凭版本号推测参数。
 
 「Harness」页的「握手测试」会报告是否已登录。未登录时，如果 Harness 通过 ACP 声明了自带的登录流程（如 Codex 的 ChatGPT / API Key、Grok 的 grok.com、OpenCode 的 opencode-login），点「用「…」登录」由 Harness 自己完成（可能会打开浏览器），完成后自动重新检测；否则复制旁边的登录命令到终端执行，再点「重新检测」。所有 Agent 共用同一份 Harness 登录。
 

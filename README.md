@@ -16,7 +16,7 @@ https://github.com/user-attachments/assets/d6d0b112-2b6f-4f10-ba21-a4bdf45a910b
 
 ## 主要功能
 
-- **多 Harness**：Claude Code、Codex、Grok Build、OpenCode 等通过 ACP 接入；优先用本机版本，没有时一键安装。
+- **多 Harness**：Claude Code、Codex、Grok Build、OpenCode 等通过 ACP 接入；优先用本机版本，没有时一键安装，升级后自动刷新能力并保留用户选择。
 - **多 Agent 会话**：按项目组织；@ 指定成员，群主分工、跟进、汇总，`handoff` 交接。
 - **完整过程**：流式回复、思考、工具卡片（diff / 终端）、计划、权限请求、Mermaid 图表。
 - **服务商与用量**：自定义 API 可接入 Claude Code、OpenCode、Pi、Codex；通过 models.dev 目录与 Pi AI 兼容规则适配已知模型的思考档位，保留会话选择；另有纯对话 BYOK、CC Switch 只读导入、Token 统计与额度。

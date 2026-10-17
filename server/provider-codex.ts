@@ -1,54 +1,65 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { harnessRuntimeIdentity, resolveCodexCommand } from "./harness-runtime";
 import type { ModelCapabilities } from "./model-capabilities";
 import { resolveModelCapabilities } from "./model-catalog";
-import genericInstructions from "./provider-codex-prompt-0.160.1.txt";
+import { killProcessTree, processGroupOptions } from "./process-tree";
 import type { ProviderSecret } from "./providers";
 
-// Preserve the native descriptors (including their coding instructions). This
-// matches rust-v0.160.1 models-manager/models.json and manager.rs prefix lookup.
-const bundledModels = [
-  "gpt-6-astra",
-  "gpt-6.1-sol",
-  "gpt-6-sol",
-  "gpt-6-luna",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-  "gpt-daybreak-blue-latest",
-  "gpt-daybreak-red-latest",
-  "gpt-5.5",
-  "codex-auto-review",
-];
+type AdapterLaunch = { command: string; args: string[]; cwd?: string };
+type NativeModel = Record<string, unknown> & { slug: string };
+type NativeMetadata = {
+  catalog: Record<string, unknown> & { models: NativeModel[] };
+  // Null means the current CLI's public schema accepts arbitrary nonempty strings.
+  efforts: string[] | null;
+  instructions: string;
+};
+const metadata = new Map<string, Promise<NativeMetadata>>();
+const probeTimeout = 10000;
+const maxCatalogBytes = 16 * 1024 * 1024;
 
 /** Model metadata is loaded by the app server at startup, before any ACP session exists. */
-export function prepareCodexProviderRuntime(
+export async function prepareCodexProviderRuntime(
   provider: ProviderSecret,
   env: Record<string, string>,
-  adapterLaunch?: { command: string; args: string[]; cwd?: string },
-): {
+  adapterLaunch?: AdapterLaunch,
+): Promise<{
   env: Record<string, string>;
   cleanup: () => void;
   /** Undefined allows app defaults. An object preserves native intent; {} keeps the ACP's actual value. */
   reasoningPreferences?: Record<string, string>;
-} {
+}> {
   const native = nativeConfiguration(env, adapterLaunch?.cwd);
   const unchanged = { env, cleanup: () => {}, reasoningPreferences: native.reasoningPreferences };
   if (provider.wireApi !== "responses" || !provider.openaiBaseUrl) return unchanged;
   const ids = [...new Set([provider.model, provider.smallModel].filter(Boolean))];
-  if (ids.some(hasBundledModel) || native.catalog) return unchanged;
-  const main = resolveModelCapabilities(provider, provider.model, "openai-responses");
-  if (!main || !nativeEfforts(main).length) return unchanged;
+  if (native.catalog) return unchanged;
   const models = ids
     .map((id) => {
       const capabilities = resolveModelCapabilities(provider, id, "openai-responses");
       return capabilities ? { ...capabilities, modelId: id } : null;
     })
     .filter((model): model is ModelCapabilities => !!model && nativeEfforts(model).length > 0);
-  const command = codexCommand(env, adapterLaunch);
+  if (!models.length) return unchanged;
+  const command = resolveCodexCommand(env, adapterLaunch);
   if (!command) return unchanged;
+  let engine: NativeMetadata;
+  try {
+    engine = await nativeMetadata(command, env, adapterLaunch);
+  } catch (error) {
+    // Never print a custom launcher's output: it can contain private config.
+    console.warn(`[codex] Model metadata probe failed (${probeFailure(error)}); keeping native configuration.`);
+    return unchanged;
+  }
+  const candidates = models.filter((model) => !hasNativeModel(model.modelId, engine.catalog.models));
+  if (!candidates.length) return unchanged;
+  const additions = candidates.filter((model) => nativeEfforts(model, engine.efforts).length);
+  if (!additions.length) {
+    console.warn("[codex] Model reasoning levels are unsupported by this CLI; keeping native configuration.");
+    return unchanged;
+  }
   const dir = mkdtempSync(join(tmpdir(), "tuantuan-codex-provider-"));
   const cleanup = () => rmSync(dir, { recursive: true, force: true });
   try {
@@ -56,36 +67,37 @@ export function prepareCodexProviderRuntime(
     writeFileSync(
       catalog,
       JSON.stringify({
-        models: models.map((model, priority) => ({
-          slug: model.modelId,
-          display_name: model.modelId,
-          // Preserve the pinned CLI's unknown-model coding instructions verbatim.
-          // Source (Apache-2.0, accompanying LICENSE/NOTICE):
-          // https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/models-manager/prompt.md
-          // Its fallback descriptor is in src/model_info.rs beside that prompt.
-          // Native model_instructions_file/developer_instructions still override
-          // or extend this through the ordinary session configuration.
-          model_messages: { instructions_template: genericInstructions },
-          default_reasoning_level: defaultEffort(model),
-          supported_reasoning_levels: nativeEfforts(model).map((effort) => ({
-            effort,
-            description: effort,
+        ...engine.catalog,
+        models: [
+          ...engine.catalog.models,
+          ...additions.map((model, priority) => ({
+            slug: model.modelId,
+            display_name: model.modelId,
+            // Captured from this engine's unknown-model session, never from a GPT
+            // descriptor. Native instruction overrides still have their usual priority.
+            model_messages: { instructions_template: engine.instructions },
+            base_instructions: engine.instructions,
+            default_reasoning_level: defaultEffort(model, engine.efforts),
+            supported_reasoning_levels: nativeEfforts(model, engine.efforts).map((effort) => ({
+              effort,
+              description: effort,
+            })),
+            shell_type: "unified_exec",
+            visibility: "list",
+            supported_in_api: true,
+            priority: 99 + priority,
+            include_apps_usage_instructions: false,
+            support_verbosity: false,
+            supports_reasoning_summary_parameter: false,
+            truncation_policy: { mode: "bytes", limit: 10000 },
+            ...(Number.isSafeInteger(model.contextWindow) && model.contextWindow > 0
+              ? { context_window: model.contextWindow, max_context_window: model.contextWindow }
+              : {}),
+            effective_context_window_percent: 95,
+            input_modalities: model.input,
+            experimental_supported_tools: [],
           })),
-          shell_type: "unified_exec",
-          visibility: "list",
-          supported_in_api: true,
-          priority: 99 + priority,
-          include_apps_usage_instructions: false,
-          support_verbosity: false,
-          supports_reasoning_summary_parameter: false,
-          truncation_policy: { mode: "bytes", limit: 10000 },
-          ...(Number.isSafeInteger(model.contextWindow) && model.contextWindow > 0
-            ? { context_window: model.contextWindow, max_context_window: model.contextWindow }
-            : {}),
-          effective_context_window_percent: 95,
-          input_modalities: model.input,
-          experimental_supported_tools: [],
-        })),
+        ],
       }),
       { mode: 0o600 },
     );
@@ -109,62 +121,281 @@ export function prepareCodexProviderRuntime(
   }
 }
 
-function codexCommand(
-  env: Record<string, string>,
-  adapterLaunch?: { command: string; args: string[]; cwd?: string },
-): string[] | null {
-  if (env.CODEX_PATH) {
-    const executable = Bun.which(env.CODEX_PATH, { PATH: env.PATH });
-    if (!executable) throw new Error(`找不到 CODEX_PATH 可执行文件：${env.CODEX_PATH}`);
-    return [executable];
-  }
-  if (adapterLaunch) {
-    try {
-      const script = adapterLaunch.args[0];
-      const hasInterpreter = script && /\.[cm]?js$/i.test(script);
-      const entry = realpathSync(
-        hasInterpreter ? script : (Bun.which(adapterLaunch.command, { PATH: env.PATH }) ?? adapterLaunch.command),
-      );
-      if (!/\.[cm]?js$/i.test(entry)) return null;
-      // Managed installs already selected their Node/Bun interpreter. For an
-      // executable npm bin (often a PATH symlink), use its own simple shebang.
-      const interpreter = hasInterpreter
-        ? adapterLaunch.command
-        : readFileSync(entry, "utf8")
-            .split("\n", 1)[0]
-            ?.match(/^#!\s*(?:\/usr\/bin\/env\s+)?(\S+)\s*$/)?.[1];
-      const runtime = interpreter ? Bun.which(interpreter, { PATH: env.PATH }) : null;
-      if (!runtime) return null;
-      return [runtime, createRequire(entry).resolve("@openai/codex/bin/codex.js")];
-    } catch {
-      // External binary adapters can keep private/embedded engine resolution.
-      // Never replace that engine with an unrelated project or global Codex.
-      return null;
-    }
-  }
-  // Resolve from the adapter, just as its own startCodexConnection does. An
-  // unrelated globally installed codex can use a different catalog schema.
-  const require = createRequire(import.meta.url);
-  const adapter = createRequire(require.resolve("@agentclientprotocol/codex-acp/package.json"));
-  return [process.execPath, adapter.resolve("@openai/codex/bin/codex.js")];
-}
-
-function nativeEfforts(model: ModelCapabilities): string[] {
+function nativeEfforts(model: ModelCapabilities, accepted?: string[] | null): string[] {
   if (!model.reasoning || !model.effort) return [];
   return [
-    ...new Set(model.levels.filter((level) => level !== "on").map((level) => (level === "off" ? "none" : level))),
+    ...new Set(
+      model.levels
+        .filter((level) => level !== "on")
+        .map((level) => (level === "off" ? "none" : level))
+        .filter((effort) => !accepted || accepted.includes(effort)),
+    ),
   ];
 }
 
-function defaultEffort(model: ModelCapabilities): string | undefined {
-  const efforts = nativeEfforts(model);
+function defaultEffort(model: ModelCapabilities, accepted: string[] | null): string | undefined {
+  const efforts = nativeEfforts(model, accepted);
   const preferred = model.defaultLevel === "off" ? "none" : model.defaultLevel;
   return preferred && efforts.includes(preferred) ? preferred : efforts[0];
 }
 
-function hasBundledModel(id: string): boolean {
+function hasNativeModel(id: string, models: NativeModel[]): boolean {
   const suffix = /^[A-Za-z0-9_-]+\/([^/]+)$/.exec(id)?.[1];
-  return bundledModels.some((model) => id.startsWith(model) || suffix?.startsWith(model));
+  return models.some((model) => id.startsWith(model.slug) || suffix?.startsWith(model.slug));
+}
+
+async function nativeMetadata(command: string[], env: Record<string, string>, launch?: AdapterLaunch) {
+  const selected = launch ?? { command: command[0] as string, args: command.slice(1) };
+  const identity = harnessRuntimeIdentity(
+    { id: "codex", ...selected, source: null, version: null, registryId: null },
+    env,
+  );
+  const cached = metadata.get(identity);
+  if (cached) return cached;
+  const pending = probeMetadata(command, env);
+  metadata.set(identity, pending);
+  // An opaque CODEX_PATH wrapper can select an engine we cannot fingerprint.
+  // Share concurrent probes, but recheck it on the next preparation.
+  void pending.then(
+    () => {
+      if (env.CODEX_PATH && metadata.get(identity) === pending) metadata.delete(identity);
+    },
+    () => {
+      if (metadata.get(identity) === pending) metadata.delete(identity);
+    },
+  );
+  while (metadata.size > 16) metadata.delete(metadata.keys().next().value as string);
+  return pending;
+}
+
+class MetadataProbeError extends Error {}
+
+function probeFailure(error: unknown) {
+  return error instanceof MetadataProbeError ? error.message : "unavailable";
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readProbeFile(path: string) {
+  const stat = statSync(path);
+  if (!stat.isFile() || stat.size > maxCatalogBytes) throw new MetadataProbeError("invalid probe file");
+  return readFileSync(path, "utf8");
+}
+
+async function readLimited(stream: ReadableStream<Uint8Array>, limit: number) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = "";
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) return text + decoder.decode();
+      size += next.value.byteLength;
+      if (size > limit) throw new MetadataProbeError("output limit exceeded");
+      text += decoder.decode(next.value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function probeCommand(command: string[], args: string[], env: Record<string, string>, cwd: string) {
+  const proc = Bun.spawn([...command, ...args], {
+    env,
+    cwd,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    ...processGroupOptions,
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    killProcessTree(proc, "SIGKILL");
+  }, probeTimeout);
+  try {
+    const [output, , code] = await Promise.all([
+      readLimited(proc.stdout, maxCatalogBytes),
+      readLimited(proc.stderr, 256 * 1024),
+      proc.exited,
+    ]);
+    if (timedOut) throw new MetadataProbeError("timeout");
+    if (code !== 0) throw new MetadataProbeError("unsupported CLI command");
+    return output;
+  } finally {
+    clearTimeout(timer);
+    killProcessTree(proc, "SIGKILL");
+    await proc.exited;
+  }
+}
+
+async function probeMetadata(command: string[], sourceEnv: Record<string, string>): Promise<NativeMetadata> {
+  const root = mkdtempSync(join(tmpdir(), "tuantuan-codex-metadata-"));
+  const home = join(root, "home");
+  mkdirSync(home, { mode: 0o700 });
+  // No inherited keys, user configs, auth store, workspace instructions, proxies
+  // or hooks. The thread uses our bundled catalog and a dummy local provider;
+  // it never submits a turn or requests a model response.
+  const env: Record<string, string> = {
+    PATH: sourceEnv.PATH || "",
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: home,
+    XDG_CONFIG_HOME: home,
+    APPDATA: home,
+    LOCALAPPDATA: home,
+    TMPDIR: root,
+    TEMP: root,
+    TMP: root,
+    RUST_LOG: "off",
+  };
+  if (process.platform === "win32" && process.env.SystemRoot) env.SystemRoot = process.env.SystemRoot;
+  try {
+    const schemaDir = join(root, "schema");
+    const outputs = await Promise.allSettled([
+      probeCommand(command, ["debug", "models", "--bundled"], env, home),
+      probeCommand(command, ["app-server", "generate-json-schema", "--experimental", "--out", schemaDir], env, home),
+    ]);
+    const failed = outputs.find((output) => output.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
+    const raw = (outputs[0] as PromiseFulfilledResult<string>).value;
+    const catalog = record(JSON.parse(raw));
+    if (
+      !catalog ||
+      !Array.isArray(catalog.models) ||
+      !catalog.models.length ||
+      catalog.models.some((model) => typeof record(model)?.slug !== "string" || !record(model)?.slug)
+    )
+      throw new MetadataProbeError("invalid bundled catalog");
+    const schema = JSON.parse(readProbeFile(join(schemaDir, "v2", "ModelListResponse.json")));
+    const effortSchema = record(schema.definitions?.ReasoningEffort);
+    const choices: unknown = effortSchema?.enum;
+    let efforts: string[] | null;
+    if (Array.isArray(choices) && choices.length && choices.every((choice) => typeof choice === "string")) {
+      efforts = choices;
+    } else if (
+      effortSchema?.type === "string" &&
+      effortSchema.minLength === 1 &&
+      Object.keys(effortSchema).every((key) => ["type", "minLength", "description", "title"].includes(key))
+    ) {
+      // Current Codex has ReasoningEffort::Custom(String); its public schema
+      // explicitly accepts model-defined values as long as they are not empty.
+      efforts = null;
+    } else throw new MetadataProbeError("reasoning schema unavailable");
+    const catalogPath = join(root, "bundled-models.json");
+    writeFileSync(catalogPath, raw, { mode: 0o600 });
+    const instructions = await probeFallbackInstructions(command, env, home, catalogPath, catalog.models);
+    return { catalog: catalog as NativeMetadata["catalog"], efforts, instructions };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function probeFallbackInstructions(
+  command: string[],
+  env: Record<string, string>,
+  home: string,
+  catalogPath: string,
+  models: NativeModel[],
+) {
+  const model = `tuantuan-generic-probe-${randomUUID()}`;
+  if (hasNativeModel(model, models)) throw new MetadataProbeError("generic probe model is not unique");
+  const proc = Bun.spawn(
+    [
+      ...command,
+      "-c",
+      'cli_auth_credentials_store="file"',
+      "-c",
+      `model_catalog_json=${catalogPath}`,
+      "-c",
+      'model_provider="tuantuan_metadata_probe"',
+      "-c",
+      'model_providers.tuantuan_metadata_probe={name="Tuantuan metadata probe",base_url="http://127.0.0.1:9/v1",wire_api="responses",requires_openai_auth=false}',
+      "app-server",
+    ],
+    { env, cwd: home, stdin: "pipe", stdout: "pipe", stderr: "pipe", ...processGroupOptions },
+  );
+  const timer = setTimeout(() => killProcessTree(proc, "SIGKILL"), probeTimeout);
+  const stderr = readLimited(proc.stderr, 256 * 1024);
+  // Drain stderr without reporting a launcher's potentially private output.
+  void stderr.catch(() => killProcessTree(proc, "SIGKILL"));
+  const reader = proc.stdout.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let bytes = 0;
+  let nextId = 0;
+  const request = async (method: string, params: Record<string, unknown>) => {
+    const id = ++nextId;
+    proc.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+    while (true) {
+      const split = buffer.indexOf("\n");
+      if (split < 0) {
+        const next = await reader.read();
+        if (next.done) throw new MetadataProbeError("app-server probe ended");
+        bytes += next.value.byteLength;
+        if (bytes > maxCatalogBytes) throw new MetadataProbeError("output limit exceeded");
+        buffer += decoder.decode(next.value, { stream: true });
+        continue;
+      }
+      const message = record(JSON.parse(buffer.slice(0, split)));
+      buffer = buffer.slice(split + 1);
+      if (message?.id !== id) continue;
+      const result = record(message.result);
+      if (!result || message.error) throw new MetadataProbeError("app-server probe rejected");
+      return result;
+    }
+  };
+  try {
+    await request("initialize", {
+      clientInfo: { name: "tuantuan-metadata-probe", version: "0" },
+      capabilities: { experimentalApi: true },
+    });
+    proc.stdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
+    const created = await request("thread/start", {
+      model,
+      modelProvider: "tuantuan_metadata_probe",
+      allowProviderModelFallback: false,
+      cwd: home,
+      ephemeral: false,
+      approvalPolicy: "never",
+    });
+    if (created.model !== model || created.modelProvider !== "tuantuan_metadata_probe")
+      throw new MetadataProbeError("generic probe model was replaced");
+    const threadId = record(created.thread)?.id;
+    if (typeof threadId !== "string") throw new MetadataProbeError("thread metadata unavailable");
+    // Newer CLIs defer the rollout until its first turn. Archiving materializes
+    // this disposable empty thread without ever calling turn/start.
+    await request("thread/archive", { threadId });
+    const read = await request("thread/read", { threadId, includeTurns: true });
+    const path = record(read.thread)?.path;
+    if (typeof path !== "string") throw new MetadataProbeError("rollout path unavailable");
+    const canonical = realpathSync(path);
+    const inside = relative(realpathSync(home), canonical);
+    if (!inside || inside.startsWith("..") || isAbsolute(inside))
+      throw new MetadataProbeError("rollout path outside probe home");
+    const line = record(JSON.parse(readProbeFile(canonical).split("\n", 1)[0] as string));
+    const payload = record(line?.payload);
+    const instructions = record(payload?.base_instructions)?.text;
+    if (
+      line?.type !== "session_meta" ||
+      payload?.id !== threadId ||
+      typeof instructions !== "string" ||
+      !instructions.trim()
+    )
+      throw new MetadataProbeError("generic instructions unavailable");
+    return instructions;
+  } finally {
+    clearTimeout(timer);
+    reader.releaseLock();
+    killProcessTree(proc, "SIGKILL");
+    await proc.exited;
+    await stderr.catch(() => {});
+  }
 }
 
 function nativeConfiguration(

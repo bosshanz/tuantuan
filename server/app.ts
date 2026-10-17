@@ -26,6 +26,7 @@ import {
   specForRegistryAgent,
   visibleHarnesses,
 } from "./harness";
+import { harnessRuntimeIdentity, invalidateHarnessRuntime } from "./harness-runtime";
 import { ENV_NAME, harnessSecretEnv, openTerminal, publicHarnessEnv, setHarnessEnv } from "./harness-secrets";
 import { HarnessHost, nativeReasoningPreferences, withProviderMeta } from "./host";
 import { Installer } from "./installer";
@@ -259,7 +260,10 @@ export function createApp(deps: AppDeps) {
     return { ...a, avatar: a.avatar ?? ([...a.name][0] as string) };
   }
 
-  const installer = new Installer(() => resetLoginShellEnv());
+  const installer = new Installer((job) => {
+    resetLoginShellEnv();
+    if (job.state === "done") invalidateHarness(job.harnessId);
+  });
   // ACP registry: harnesses Tuantuan installs into <data>/harnesses on click.
   setManagedRoot(join(dataDir, "harnesses"));
   const registry = new Registry(join(dataDir, "registry"));
@@ -347,19 +351,36 @@ export function createApp(deps: AppDeps) {
     { at: number; configOptions: acp.SessionConfigOption[]; modes: acp.SessionModeState | null; error: string | null }
   >();
   const optionsInflight = new Map<string, Promise<unknown>>();
-  /** Options cache key: per harness, and per 服务商 version when one is applied. */
-  const optionsKey = (id: string, prov: { id: string; updatedAt: number } | null) =>
-    prov ? `${id}|${prov.id}|${prov.updatedAt}|${store.modelCatalog.status().sha256}` : id;
-  async function harnessOptionsFor(id: string, refresh: boolean, providerId: string | null = null) {
+  function invalidateHarness(id: string) {
+    invalidateHarnessRuntime(id);
+    for (const key of harnessOptions.keys()) if (key.startsWith(`${id}|`)) harnessOptions.delete(key);
+    terminalCommands.delete(id);
+  }
+  const optionsKey = (id: string, prov: { id: string; updatedAt: number } | null, identity: string) =>
+    `${id}|${identity}|${prov ? `${prov.id}|${prov.updatedAt}|${store.modelCatalog.status().sha256}` : "native"}`;
+  async function harnessProbeLaunch(id: string, providerId?: string | null) {
+    const spec = harnessSpec(id);
+    if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
+    const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
+    const env = { ...(await loginShellEnv()), ...status.env, ...harnessSecretEnv(store, id) };
     const prov = providerId ? store.getProvider(providerId) : null;
     if (providerId && !prov) throw new ValidationError("服务商不存在");
     if (prov && !providerSupports(prov, id)) throw new ValidationError(`「${prov.name}」不能用于这个 Harness`);
-    const key = optionsKey(id, prov && providerSupports(prov, id) ? prov : null);
+    if (prov) {
+      const pe = providerEnv(prov, id, env);
+      for (const key of pe.unset) delete env[key];
+      Object.assign(env, pe.set);
+    }
+    return { spec, status, env, provider: prov, identity: harnessRuntimeIdentity(status, env) };
+  }
+  async function harnessOptionsFor(id: string, refresh: boolean, providerId: string | null = null) {
+    const launch = await harnessProbeLaunch(id, providerId);
+    const key = optionsKey(id, launch.provider, launch.identity);
     const hit = harnessOptions.get(key);
     if (hit && !refresh && !hit.error && Date.now() - hit.at < 30 * 60_000) return hit;
     let job = optionsInflight.get(key);
     if (!job) {
-      job = probeHarness(id, undefined, providerId)
+      job = probeHarness(id, undefined, providerId, launch)
         .then((r) => {
           const res = r as { ok: boolean; error?: string; sessionError?: string | null; loggedIn?: boolean | null };
           if (!harnessOptions.has(key) || harnessOptions.get(key)?.error || refresh) {
@@ -378,6 +399,8 @@ export function createApp(deps: AppDeps) {
       optionsInflight.set(key, job);
     }
     await job;
+    if (harnessRuntimeIdentity(launch.status, launch.env) !== launch.identity)
+      return harnessOptionsFor(id, refresh, providerId);
     return harnessOptions.get(key) ?? { at: Date.now(), configOptions: [], modes: null, error: "无法读取" };
   }
 
@@ -650,10 +673,15 @@ export function createApp(deps: AppDeps) {
     return out;
   }
 
-  async function probeHarness(id: string, methodId?: string, providerId?: string | null) {
-    const spec = harnessSpec(id);
-    if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
-    const status = await detectHarness(spec, store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null);
+  async function probeHarness(
+    id: string,
+    methodId?: string,
+    providerId?: string | null,
+    launch?: Awaited<ReturnType<typeof harnessProbeLaunch>>,
+  ) {
+    const context = launch ?? (await harnessProbeLaunch(id, providerId));
+    const { spec, status, env, provider: useProv, identity } = context;
+    const current = () => harnessRuntimeIdentity(status, env) === identity;
     const command = status.command;
     if (!command) {
       if (isRegistryUsageId(id))
@@ -665,26 +693,14 @@ export function createApp(deps: AppDeps) {
         }));
       return { ok: false, error: status.error, install: spec.install, login: status.login };
     }
-    const secrets = harnessSecretEnv(store, id);
-    const env = { ...(await loginShellEnv()), ...status.env, ...secrets };
-    // With a 服务商, probe exactly as the agent will run: same env, routing and settings tier.
-    const prov = providerId ? store.getProvider(providerId) : null;
-    if (providerId && !prov) throw new ValidationError("服务商不存在");
-    if (prov && !providerSupports(prov, id)) throw new ValidationError(`「${prov.name}」不能用于这个 Harness`);
-    const useProv = prov && providerSupports(prov, id) ? prov : null;
-    if (useProv) {
-      const pe = providerEnv(useProv, id, env);
-      for (const k of pe.unset) delete env[k];
-      Object.assign(env, pe.set);
-    }
-    const cacheKey = optionsKey(id, useProv);
+    const cacheKey = optionsKey(id, useProv, identity);
     const scratch = mkdtempSync(join(tmpdir(), "tuantuan-probe-"));
     const usageCollector = new RegistryUsageCollector();
-    let runtime: ReturnType<typeof prepareProviderRuntime> | undefined;
+    let runtime: Awaited<ReturnType<typeof prepareProviderRuntime>> | undefined;
     let p: AcpProcess;
     try {
       runtime = useProv
-        ? prepareProviderRuntime(useProv, id, env, status.version, { command, args: status.args, cwd: scratch })
+        ? await prepareProviderRuntime(useProv, id, env, status.version, { command, args: status.args, cwd: scratch })
         : undefined;
       p = new AcpProcess(
         { command, args: status.args, env: runtime?.env ?? env, cwd: scratch },
@@ -766,10 +782,11 @@ export function createApp(deps: AppDeps) {
             .join(" "),
         });
       }
-      terminalCommands.set(
-        id,
-        Object.fromEntries(authMethods.filter((m) => m.command).map((m) => [m.id, m.command as string])),
-      );
+      if (current())
+        terminalCommands.set(
+          id,
+          Object.fromEntries(authMethods.filter((m) => m.command).map((m) => [m.id, m.command as string])),
+        );
       // API-key login offered, no key set anywhere, and no agent-driven login: the first prompt will
       // likely fail (glm-acp-agent opens sessions fine and fails on the prompt). With a terminal
       // method too (e.g. `--setup` storing the key in its own file) we can't tell, so only hint.
@@ -873,7 +890,7 @@ export function createApp(deps: AppDeps) {
           }
         }
         modes = created.modes ?? null;
-        harnessOptions.set(cacheKey, { at: Date.now(), configOptions, modes, error: null });
+        if (current()) harnessOptions.set(cacheKey, { at: Date.now(), configOptions, modes, error: null });
         loggedIn = true;
       } catch (e) {
         const error = e as { message?: string; code?: number } | null;
@@ -902,6 +919,7 @@ export function createApp(deps: AppDeps) {
             registryQuotaFailure(new Error(authError ?? sessionError ?? "authentication required")),
           );
       }
+      if (!current()) throw new ValidationError("会话配置已更改，请重试", 409);
       return {
         ok: true,
         protocolVersion: init.protocolVersion,
@@ -1179,6 +1197,7 @@ export function createApp(deps: AppDeps) {
         if (!spec?.registry) throw new ValidationError(`${id} 不是团团安装的`, 404);
         if (installer.get(id)?.state === "running") throw new ValidationError("正在安装，先取消");
         host.dropHarness(id);
+        invalidateHarness(id);
         uninstallManaged(spec.registry);
         return json(await harnessStatuses());
       }
@@ -1188,6 +1207,7 @@ export function createApp(deps: AppDeps) {
         if (path?.trim()) overrides[id] = path.trim();
         else delete overrides[id];
         store.setSetting("harnessPaths", overrides);
+        invalidateHarness(id);
         return json(await harnessStatuses());
       }
       if (id && sub === "test" && parts.length === 3 && method === "POST") {
@@ -1204,6 +1224,7 @@ export function createApp(deps: AppDeps) {
             .object({ values: z.record(z.string().regex(ENV_NAME), z.string().max(4096).nullable()) })
             .parse(await body());
           setHarnessEnv(store, id, values);
+          invalidateHarness(id);
           host.dropHarness(id); // running processes restart with the new env on next use
           return json({ secretEnv: publicHarnessEnv(store, id) });
         }
