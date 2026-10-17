@@ -37,6 +37,14 @@
 
 桌面版已包含執行環境，不必安裝 Bun。v0.1.1 的 macOS 套件使用 ad-hoc 簽署，未經 Apple 公證；Windows 安裝程式未經程式碼簽署。詳見[安裝與簽署說明（簡體中文）](docs/install.md)。
 
+### 用 Homebrew 安裝（macOS）
+
+```bash
+brew install --cask bosshanz/tap/tuantuan
+```
+
+[這個 tap](https://github.com/bosshanz/homebrew-tap) 安裝後會自動清除隔離標記，開啟時不會再出現下方的 Gatekeeper 攔截。升級請用 `brew upgrade --cask tuantuan`。
+
 ### macOS 首次開啟（未經公證）
 
 團團目前沒有 Apple Developer ID，macOS 會攔截第一次開啟，這是正常的：

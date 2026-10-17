@@ -37,6 +37,14 @@ macOS、Windows、Linux 向けの Electron デスクトップアプリ、また�
 
 デスクトップアプリには実行環境が含まれているため、Bun のインストールは不要です。v0.1.1 の macOS 版はアドホック署名を使用し、Apple の公証を受けていません。Windows 版にはコード署名がありません。詳しくは[インストールと署名の説明（簡体字中国語）](docs/install.md)をご覧ください。
 
+### Homebrew でインストール（macOS）
+
+```bash
+brew install --cask bosshanz/tap/tuantuan
+```
+
+[この tap](https://github.com/bosshanz/homebrew-tap) はインストール後に隔離属性を自動で外すため、下記の Gatekeeper の警告は表示されません。更新は `brew upgrade --cask tuantuan` で行えます。
+
 ### macOS で初めて開くとき（未公証）
 
 Tuantuan はまだ Apple Developer ID を持っていないため、初回起動は macOS にブロックされます。これは想定どおりです。

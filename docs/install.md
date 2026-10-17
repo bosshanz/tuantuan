@@ -8,13 +8,14 @@
 
 | 平台 | 安装包 |
 | --- | --- |
-| macOS · Apple 芯片（arm64） | `Tuantuan-0.1.0-mac-arm64.dmg` |
-| macOS · Intel（x64） | `Tuantuan-0.1.0-mac-x64.dmg` |
-| Windows · x64 | `Tuantuan-0.1.0-win-x64.exe` |
-| Linux · x64 | `Tuantuan-0.1.0-linux-x64.AppImage` |
+| macOS · Apple 芯片（arm64） | `Tuantuan-0.1.1-mac-arm64.dmg` |
+| macOS · Intel（x64） | `Tuantuan-0.1.1-mac-x64.dmg` |
+| Windows · x64 | `Tuantuan-0.1.1-win-x64.exe` |
+| Linux · x64 | `Tuantuan-0.1.1-linux-x64.AppImage` |
 
 macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.1.1 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。自动更新默认关闭，后续版本请从 Release 页面下载。
 
+- **macOS（Homebrew，推荐）**：`brew install --cask bosshanz/tap/tuantuan`。[这个 tap](https://github.com/bosshanz/homebrew-tap) 安装后会自动清除隔离标记，打开时不会被 Gatekeeper 拦截，升级用 `brew upgrade --cask tuantuan`。
 - **macOS**：打开 `.dmg`，把 **tuantuan.app** 拖进「应用程序」后启动（用 `.zip` 时在访达里双击解压，再移到「应用程序」）。不要直接在磁盘映像里运行。因为没有 Developer ID 和公证，第一次打开会被拦截：
   1. 提示无法验证时点「完成」（不要点「移到废纸篓」）。
   2. 打开「系统设置 → 隐私与安全性」，滚动到「安全性」，在「已阻止“tuantuan”」旁点「仍要打开」，输入密码后点「打开」（参见 [Apple 的说明](https://support.apple.com/en-us/102445)）。macOS 14 及更早版本也可以按住 Control 点按 App →「打开」。macOS 15 起这个右键方式不再绕过拦截，只能用「仍要打开」。
@@ -25,8 +26,8 @@ macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需
 - **Linux**：给 `.AppImage` 添加可执行权限后运行：
 
   ```bash
-  chmod +x Tuantuan-0.1.0-linux-x64.AppImage
-  ./Tuantuan-0.1.0-linux-x64.AppImage
+  chmod +x Tuantuan-0.1.1-linux-x64.AppImage
+  ./Tuantuan-0.1.1-linux-x64.AppImage
   ```
 
 ## 从源码运行

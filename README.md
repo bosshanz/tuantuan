@@ -37,6 +37,14 @@ Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/
 
 The desktop app includes its runtime; you do not need to install Bun. The v0.1.1 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
 
+### Install with Homebrew (macOS)
+
+```bash
+brew install --cask bosshanz/tap/tuantuan
+```
+
+The [tap](https://github.com/bosshanz/homebrew-tap) clears the quarantine flag after install, so the app opens without the Gatekeeper prompt below. Update with `brew upgrade --cask tuantuan`.
+
 ### First launch on macOS (not notarized)
 
 Tuantuan has no Apple Developer ID yet, so macOS blocks the first launch. This is expected:
