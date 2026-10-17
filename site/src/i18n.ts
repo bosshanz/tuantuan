@@ -31,6 +31,8 @@ export type Copy = {
   nav: { handoff: string; harnesses: string; features: string; start: string; language: string; skip: string };
   hero: { eyebrow: string; tagline: string; sub: string; meta: string };
   download: { mac: string; win: string; linux: string; any: string; notes: string };
+  /** First launch of the unnotarized macOS build: Gatekeeper prompt and the way past it. */
+  macFirst: { summary: string; blocked: string; prompt: string; steps: [string, string, string]; fallback: string };
   video: { label: string; full: string; play: string; pause: string; soundOn: string; soundOff: string };
   score: { title: string; sub: string; label: string };
   harness: { title: string; sub: string; registry: string; registryMore: string };
@@ -107,6 +109,18 @@ export const COPY: Record<Locale, Copy> = {
       linux: "Download for Linux",
       any: "Download v0.1.0",
       notes: "Install notes",
+    },
+    macFirst: {
+      summary: "First launch on macOS",
+      blocked: "Tuantuan is not notarized by Apple yet, so the first launch shows:",
+      prompt:
+        "“Apple could not verify “tuantuan” is free of malware that may harm your Mac or compromise your privacy.”",
+      steps: [
+        "Move tuantuan.app to Applications, open it once, and click Done.",
+        "Open System Settings → Privacy & Security, scroll to Security, and click Open Anyway next to “tuantuan”.",
+        "Confirm with your password, then click Open. Later launches open normally.",
+      ],
+      fallback: "Still blocked, or told the app is damaged? Run this in Terminal, then open it again:",
     },
     video: {
       label: "Tuantuan promo video: Six Windows",
@@ -238,6 +252,17 @@ export const COPY: Record<Locale, Copy> = {
       any: "下载 v0.1.0",
       notes: "安装说明",
     },
+    macFirst: {
+      summary: "macOS 首次打开",
+      blocked: "团团暂未经过 Apple 公证，第一次打开会提示：",
+      prompt: "“Apple无法验证“tuantuan”是否包含可能危害Mac安全或泄漏隐私的恶意软件。”",
+      steps: [
+        "把 tuantuan.app 移到「应用程序」，打开一次，在提示里点「完成」。",
+        "打开「系统设置 → 隐私与安全性」，滚动到「安全性」，在“tuantuan”旁点「仍要打开」。",
+        "输入密码确认后点「打开」。之后即可正常启动。",
+      ],
+      fallback: "仍然打不开或提示“已损坏”？在「终端」执行下面的命令后再打开：",
+    },
     video: {
       label: "团团宣传片：六个窗口",
       full: "观看完整版",
@@ -351,6 +376,17 @@ export const COPY: Record<Locale, Copy> = {
       linux: "下載 Linux 版",
       any: "下載 v0.1.0",
       notes: "安裝說明",
+    },
+    macFirst: {
+      summary: "macOS 首次開啟",
+      blocked: "團團尚未經過 Apple 公證，第一次開啟會提示：",
+      prompt: "「Apple 無法驗證“tuantuan”是否包含可能危害 Mac 安全或洩漏隱私的惡意軟體。」",
+      steps: [
+        "將 tuantuan.app 移到「應用程式」，開啟一次，在提示中點「完成」。",
+        "開啟「系統設定 → 隱私權與安全性」，捲動到「安全性」，在“tuantuan”旁點「強制打開」。",
+        "輸入密碼確認後點「打開」。之後即可正常啟動。",
+      ],
+      fallback: "仍然打不開或提示「已損毀」？在「終端機」執行下面的指令後再開啟：",
     },
     video: {
       label: "團團宣傳影片：六個視窗",
@@ -468,6 +504,19 @@ export const COPY: Record<Locale, Copy> = {
       linux: "Linux 版をダウンロード",
       any: "v0.1.0 をダウンロード",
       notes: "インストールの説明",
+    },
+    macFirst: {
+      summary: "macOS で初めて開くとき",
+      blocked: "Tuantuan はまだ Apple の公証を受けていないため、初回起動時に次の警告が出ます：",
+      prompt:
+        "「Apple は、“tuantuan”に Mac に損害を与えたり、プライバシーを侵害したりする可能性のあるマルウェアが含まれていないことを検証できませんでした。」",
+      steps: [
+        "tuantuan.app を「アプリケーション」に移して一度開き、「完了」をクリックします。",
+        "「システム設定 → プライバシーとセキュリティ」を開き、「セキュリティ」までスクロールして “tuantuan” の横の「このまま開く」をクリックします。",
+        "パスワードで確認して「開く」をクリックします。以降は普通に起動できます。",
+      ],
+      fallback:
+        "それでも開けない、または「壊れている」と表示される場合は、ターミナルで次を実行してから開き直してください：",
     },
     video: {
       label: "Tuantuan の紹介動画：Six Windows",

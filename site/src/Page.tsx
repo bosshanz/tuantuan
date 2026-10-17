@@ -9,6 +9,7 @@ import {
   Download,
   Eye,
   Globe,
+  Info,
   LayoutGrid,
   LoaderCircle,
   Pause,
@@ -31,6 +32,8 @@ import { COPY, LANG_NAME, LOCALE_PATH, LOCALES, type Locale, README_FILE } from 
 export const REPO = "https://github.com/bosshanz/tuantuan";
 export const RELEASE = `${REPO}/releases/tag/v0.1.0`;
 const ACP = "https://agentclientprotocol.com";
+/** The bundle is tuantuan.app (CFBundleName 团团); the xattr path must use the file name. */
+const XATTR = "xattr -dr com.apple.quarantine /Applications/tuantuan.app";
 const INSTALL_DOC = `${REPO}/blob/main/docs/install.md`;
 
 /** Agent colours used in the demo: Claude Code's coral cat, Codex's blue rabbit (app palette). */
@@ -451,6 +454,24 @@ export function Page({ locale, siteUrl }: { locale: Locale; siteUrl: string }) {
                   <ArrowUpRight size={13} strokeWidth={2} aria-hidden="true" />
                 </a>
               </p>
+              <details className="mac-first" id="mac-first" data-reveal>
+                <summary>
+                  <Info size={15} strokeWidth={2} aria-hidden="true" />
+                  <span>{t.macFirst.summary}</span>
+                  <ChevronDown className="mac-first-chev" size={15} strokeWidth={2} aria-hidden="true" />
+                </summary>
+                <div className="mac-first-body">
+                  <p>{t.macFirst.blocked}</p>
+                  <blockquote>{t.macFirst.prompt}</blockquote>
+                  <ol>
+                    {t.macFirst.steps.map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ol>
+                  <p>{t.macFirst.fallback}</p>
+                  <Code copy={t.start.copy} copied={t.start.copied} lines={[XATTR]} />
+                </div>
+              </details>
             </div>
             <div className="wrap" data-reveal>
               <VideoFigure id="video" base={base} name="six-windows" label={t.video.label} t={t} />
