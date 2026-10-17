@@ -12,7 +12,7 @@
 
 ## 已知限制
 
-- **macOS 包未签名、未公证**：没有 Developer ID 证书时只做本机 ad-hoc 签名，第一次打开需在 Finder 里右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/团团.app`。
+- **macOS 包未签名、未公证**：没有 Developer ID 证书时只做本机 ad-hoc 签名，第一次打开需在「系统设置 → 隐私与安全性」点「仍要打开」（macOS 14 及更早也可按住 Control 点按 →「打开」），或执行 `xattr -dr com.apple.quarantine /Applications/tuantuan.app`，详见[安装与运行](install.md)。
 - **Windows 版未测试**：能打包，但还没在真实 Windows 机器上验证过。
 - **部分功能待 Mac 真机验证**：系统通知与权限申请、程序坞未读数、无边框标题栏的拖动区域，目前只在 Linux/模拟环境中测试过。
 - 界面目前只有中文。

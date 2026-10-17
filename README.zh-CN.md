@@ -39,6 +39,21 @@
 
 桌面版已包含运行时，无需安装 Bun。v0.1.0 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名。详见[安装与签名说明](docs/install.md)。
 
+### macOS 首次打开（未公证）
+
+团团暂时没有 Apple Developer ID，macOS 会拦截第一次打开，这是正常的：
+
+1. 打开 `.dmg`，把 **tuantuan.app** 拖进「应用程序」（用 `.zip` 时在访达里双击解压，再把 `tuantuan.app` 移到「应用程序」）。不要直接在磁盘映像里运行。
+2. 打开一次。macOS 提示无法验证时点「完成」（不要点「移到废纸篓」）。
+3. 打开「系统设置 → 隐私与安全性」，滚动到「安全性」，在「已阻止“tuantuan”」旁点「仍要打开」，输入密码后再点「打开」。macOS 14 及更早版本也可以按住 Control 点按 App → 「打开」→「打开」。
+4. 如果提示「已损坏，无法打开」或仍然打不开，在「终端」执行下面的命令后再打开：
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/tuantuan.app
+   ```
+
+如果窗口提示服务无法启动，日志在 `~/Library/Application Support/团团/logs/server.log`。
+
 ## 快速开始（从源码构建）
 
 需要 [Bun](https://bun.sh) **1.4.2**，与 CI 保持一致。

@@ -37,6 +37,21 @@ Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/
 
 The desktop app includes its runtime; you do not need to install Bun. The v0.1.0 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
 
+### First launch on macOS (not notarized)
+
+Tuantuan has no Apple Developer ID yet, so macOS blocks the first launch. This is expected:
+
+1. Open the `.dmg` and drag **tuantuan.app** into **Applications** (with the `.zip`, double-click it in Finder, then move `tuantuan.app` to Applications). Do not run it from inside the disk image.
+2. Open it once. When macOS says it can't verify the app, click **Done** (not "Move to Trash").
+3. Go to **System Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway** next to "tuantuan was blocked", confirm with your password, then **Open**. On macOS 14 or earlier you can instead Control-click the app → **Open** → **Open**.
+4. If macOS says the app "is damaged" or it still won't open, run this in Terminal and open it again:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/tuantuan.app
+   ```
+
+If the window says the service could not start, the log is in `~/Library/Application Support/团团/logs/server.log`.
+
 ## Quick start from source
 
 Requires [Bun](https://bun.sh) **1.4.2**, the version used in CI.
