@@ -18,4 +18,4 @@ bun run site:verify   # screenshots + layout/link/language checks (needs Chrome)
 ```
 
 Deploys with `.github/workflows/pages.yml` (Settings → Pages → Source: GitHub Actions).
-The hero plays `public/assets/session-score-social.mp4` (15 s, poster `session-score-poster.jpg`) and links the full cut `session-score.mp4`. Replace those files to swap the promo.
+The hero plays `public/assets/six-windows-social.mp4` (21 s, poster `six-windows-poster.jpg`) and links the full cut `six-windows.mp4` (35 s). Lower on the page, the Session Score section plays `session-score-social.mp4` (poster `session-score-poster.jpg`, full cut `session-score.mp4`). Replace those files to swap a promo. The READMEs link their poster (`docs/assets/six-windows-poster.jpg`) to the Pages copy of `six-windows.mp4`.

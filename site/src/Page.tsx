@@ -245,6 +245,58 @@ function Demo({ locale }: { locale: Locale }) {
   );
 }
 
+type SiteCopy = (typeof COPY)[Locale];
+
+/** Muted, in-view autoplaying promo clip with play/pause and sound controls (wired in main.ts). */
+function VideoFigure({
+  id,
+  base,
+  name,
+  label,
+  t,
+}: {
+  id: string;
+  base: string;
+  name: string;
+  label: string;
+  t: SiteCopy;
+}) {
+  return (
+    <figure className="video" id={id}>
+      <video muted loop playsInline preload="metadata" poster={`${base}assets/${name}-poster.jpg`} aria-label={label}>
+        <source src={`${base}assets/${name}-social.mp4`} type="video/mp4" />
+      </video>
+      <button type="button" className="video-play" data-label-play={t.video.play} aria-label={t.video.play}>
+        <Play size={22} strokeWidth={2} fill="currentColor" aria-hidden="true" />
+      </button>
+      <div className="video-ctl">
+        <button
+          type="button"
+          className="icon-btn on-media"
+          data-act="toggle"
+          data-play={t.video.play}
+          data-pause={t.video.pause}
+          aria-label={t.video.play}
+        >
+          <Play className="i-play" size={15} strokeWidth={2} fill="currentColor" aria-hidden="true" />
+          <Pause className="i-pause" size={15} strokeWidth={2} fill="currentColor" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="icon-btn on-media"
+          data-act="sound"
+          data-on={t.video.soundOn}
+          data-off={t.video.soundOff}
+          aria-label={t.video.soundOn}
+        >
+          <VolumeX className="i-muted" size={15} strokeWidth={2} aria-hidden="true" />
+          <Volume2 className="i-sound" size={15} strokeWidth={2} aria-hidden="true" />
+        </button>
+      </div>
+    </figure>
+  );
+}
+
 function rel(from: Locale, to: Locale): string {
   const up = from === "en" ? "" : "../";
   return `${up}${LOCALE_PATH[to]}` || "./";
@@ -401,47 +453,9 @@ export function Page({ locale, siteUrl }: { locale: Locale; siteUrl: string }) {
               </p>
             </div>
             <div className="wrap" data-reveal>
-              <figure className="video" id="video">
-                <video
-                  muted
-                  loop
-                  playsInline
-                  preload="metadata"
-                  poster={`${base}assets/session-score-poster.jpg`}
-                  aria-label={t.video.label}
-                >
-                  <source src={`${base}assets/session-score-social.mp4`} type="video/mp4" />
-                </video>
-                <button type="button" className="video-play" data-label-play={t.video.play} aria-label={t.video.play}>
-                  <Play size={22} strokeWidth={2} fill="currentColor" aria-hidden="true" />
-                </button>
-                <div className="video-ctl">
-                  <button
-                    type="button"
-                    className="icon-btn on-media"
-                    data-act="toggle"
-                    data-play={t.video.play}
-                    data-pause={t.video.pause}
-                    aria-label={t.video.play}
-                  >
-                    <Play className="i-play" size={15} strokeWidth={2} fill="currentColor" aria-hidden="true" />
-                    <Pause className="i-pause" size={15} strokeWidth={2} fill="currentColor" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn on-media"
-                    data-act="sound"
-                    data-on={t.video.soundOn}
-                    data-off={t.video.soundOff}
-                    aria-label={t.video.soundOn}
-                  >
-                    <VolumeX className="i-muted" size={15} strokeWidth={2} aria-hidden="true" />
-                    <Volume2 className="i-sound" size={15} strokeWidth={2} aria-hidden="true" />
-                  </button>
-                </div>
-              </figure>
+              <VideoFigure id="video" base={base} name="six-windows" label={t.video.label} t={t} />
               <p className="video-full">
-                <a href={`${base}assets/session-score.mp4`} target="_blank" rel="noopener">
+                <a href={`${base}assets/six-windows.mp4`} target="_blank" rel="noopener">
                   {t.video.full}
                   <ArrowUpRight size={13} strokeWidth={2} aria-hidden="true" />
                 </a>
@@ -552,6 +566,26 @@ export function Page({ locale, siteUrl }: { locale: Locale; siteUrl: string }) {
                   );
                 })}
               </ul>
+            </div>
+          </section>
+
+          <section className="section" id="session-score">
+            <div className="wrap">
+              <header className="sec-head">
+                <h2 data-reveal>{t.score.title}</h2>
+                <p className="sub" data-reveal>
+                  {t.score.sub}
+                </p>
+              </header>
+              <div data-reveal>
+                <VideoFigure id="score-video" base={base} name="session-score" label={t.score.label} t={t} />
+                <p className="video-full">
+                  <a href={`${base}assets/session-score.mp4`} target="_blank" rel="noopener">
+                    {t.video.full}
+                    <ArrowUpRight size={13} strokeWidth={2} aria-hidden="true" />
+                  </a>
+                </p>
+              </div>
             </div>
           </section>
 

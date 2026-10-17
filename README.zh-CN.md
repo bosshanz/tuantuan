@@ -4,7 +4,7 @@
 
 ![团团 Tuantuan · 开源](docs/assets/poster.png)
 
-https://github.com/user-attachments/assets/5238c2d1-7040-43f6-bc48-70aa0d9adae1
+<a href="https://bosshanz.github.io/tuantuan/assets/six-windows.mp4"><img src="docs/assets/six-windows-poster.jpg" alt="观看团团宣传片（35 秒）" width="100%"></a>
 
 **一群 Agent，团团协作。** 本机多 Agent 协作工作台。
 

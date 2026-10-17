@@ -32,6 +32,7 @@ export type Copy = {
   hero: { eyebrow: string; tagline: string; sub: string; meta: string };
   download: { mac: string; win: string; linux: string; any: string; notes: string };
   video: { label: string; full: string; play: string; pause: string; soundOn: string; soundOff: string };
+  score: { title: string; sub: string; label: string };
   harness: { title: string; sub: string; registry: string; registryMore: string };
   handoff: {
     title: string;
@@ -96,8 +97,8 @@ export const COPY: Record<Locale, Copy> = {
     },
     hero: {
       eyebrow: "v0.1.0 · Open source",
-      tagline: "A local workspace for multi-agent collaboration.",
-      sub: "Put Claude Code, Codex, and other coding agents in one conversation. Watch replies, tools, diffs, and permission requests as they happen.",
+      tagline: "Your coding agents, one room.",
+      sub: "Stop copy-pasting between terminals. Bring Claude Code, Codex, OpenCode, and other coding agents into one project conversation, mention who you need, and watch them work side by side.",
       meta: "Desktop app for macOS, Windows, and Linux. Bring your own harness account or API provider.",
     },
     download: {
@@ -108,12 +109,17 @@ export const COPY: Record<Locale, Copy> = {
       notes: "Install notes",
     },
     video: {
-      label: "Tuantuan promo video",
+      label: "Tuantuan promo video: Six Windows",
       full: "Watch the full video",
       play: "Play video",
       pause: "Pause video",
       soundOn: "Turn sound on",
       soundOff: "Mute",
+    },
+    score: {
+      title: "Hear a session",
+      sub: "Session Score turns a staged session into music: every reply, tool call, diff, and permission request plays a note.",
+      label: "Session Score promo video",
     },
     harness: {
       title: "Works with the agents you use",
@@ -221,8 +227,8 @@ export const COPY: Record<Locale, Copy> = {
     },
     hero: {
       eyebrow: "v0.1.0 · 开源",
-      tagline: "一群 Agent，团团协作。",
-      sub: "把 Claude Code、Codex 等编码 Agent 放进同一个会话。回复、工具调用、diff 和权限请求，实时看得见。",
+      tagline: "你的编码 Agent，同在一室。",
+      sub: "不用再在一堆终端之间复制粘贴。把 Claude Code、Codex、OpenCode 等编码 Agent 放进同一个项目会话，@ 谁谁就开工，进展实时看得见。",
       meta: "macOS、Windows、Linux 桌面版。使用你自己的 Harness 账号或 API 服务商。",
     },
     download: {
@@ -233,12 +239,17 @@ export const COPY: Record<Locale, Copy> = {
       notes: "安装说明",
     },
     video: {
-      label: "团团宣传片",
+      label: "团团宣传片：六个窗口",
       full: "观看完整版",
       play: "播放视频",
       pause: "暂停视频",
       soundOn: "打开声音",
       soundOff: "静音",
+    },
+    score: {
+      title: "听一段会话",
+      sub: "Session Score 把一段演示会话变成音乐：每条回复、工具调用、diff 和权限请求都是一个音符。",
+      label: "Session Score 宣传片",
     },
     harness: {
       title: "接入你在用的 Agent",
@@ -330,8 +341,8 @@ export const COPY: Record<Locale, Copy> = {
     },
     hero: {
       eyebrow: "v0.1.0 · 開源",
-      tagline: "讓多個 Agent 在本機協作的工作台。",
-      sub: "把 Claude Code、Codex 等程式開發 Agent 放進同一段對話。回覆、工具呼叫、diff 和權限請求，即時看得見。",
+      tagline: "你的程式開發 Agent，同在一室。",
+      sub: "不用再在一堆終端機之間複製貼上。把 Claude Code、Codex、OpenCode 等程式開發 Agent 放進同一段專案對話，@ 誰誰就動手，進度即時看得見。",
       meta: "macOS、Windows、Linux 桌面版。使用你自己的 Harness 帳號或 API 服務商。",
     },
     download: {
@@ -342,12 +353,17 @@ export const COPY: Record<Locale, Copy> = {
       notes: "安裝說明",
     },
     video: {
-      label: "團團宣傳影片",
+      label: "團團宣傳影片：六個視窗",
       full: "觀看完整版",
       play: "播放影片",
       pause: "暫停影片",
       soundOn: "開啟聲音",
       soundOff: "靜音",
+    },
+    score: {
+      title: "聽一段對話",
+      sub: "Session Score 把一段示範對話變成音樂：每則回覆、工具呼叫、diff 和權限請求都是一個音符。",
+      label: "Session Score 宣傳影片",
     },
     harness: {
       title: "接入你正在用的 Agent",
@@ -442,8 +458,8 @@ export const COPY: Record<Locale, Copy> = {
     },
     hero: {
       eyebrow: "v0.1.0 · オープンソース",
-      tagline: "複数のエージェントがローカルで協力するためのワークスペース。",
-      sub: "Claude Code や Codex などのコーディングエージェントを 1 つの会話に。返信、ツール呼び出し、diff、権限リクエストをリアルタイムで確認できます。",
+      tagline: "コーディングエージェントを、ひとつの部屋に。",
+      sub: "ターミナル間のコピペはもう要りません。Claude Code、Codex、OpenCode などのコーディングエージェントを 1 つのプロジェクト会話に集め、@ で呼べばすぐに作業開始。進み具合はその場で確認できます。",
       meta: "macOS、Windows、Linux 向けデスクトップアプリ。ハーネスのアカウントや API プロバイダーはご自身のものを使います。",
     },
     download: {
@@ -454,12 +470,17 @@ export const COPY: Record<Locale, Copy> = {
       notes: "インストールの説明",
     },
     video: {
-      label: "Tuantuan の紹介動画",
+      label: "Tuantuan の紹介動画：Six Windows",
       full: "フルバージョンを見る",
       play: "動画を再生",
       pause: "動画を一時停止",
       soundOn: "音声をオン",
       soundOff: "ミュート",
+    },
+    score: {
+      title: "セッションを聴く",
+      sub: "Session Score は演出用のセッションを音楽に変えます。返信、ツール呼び出し、diff、権限リクエストのひとつひとつが音になります。",
+      label: "Session Score の紹介動画",
     },
     harness: {
       title: "使い慣れたエージェントをそのまま",

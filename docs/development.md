@@ -31,7 +31,7 @@ bun run site:verify  # 4 语言 × 明暗 × 4 种宽度：截图、溢出、链
 bun run site:og      # 文案或品牌变化后重新生成 site/public/assets/og/*.png 分享图
 ```
 
-推送到 main 且改动涉及 `site/` 时，`.github/workflows/pages.yml` 自动部署到 GitHub Pages；首次需在仓库 **Settings → Pages → Source** 选 **GitHub Actions**。`SITE_URL` 决定 canonical、hreflang 与 og:image 的绝对地址，工作流会自动传入 Pages 地址。首屏视频为 `site/public/assets/session-score-social.mp4`（15 秒，封面 `session-score-poster.jpg`），并链接完整版 `session-score.mp4`；替换同名文件即可。
+推送到 main 且改动涉及 `site/` 时，`.github/workflows/pages.yml` 自动部署到 GitHub Pages；首次需在仓库 **Settings → Pages → Source** 选 **GitHub Actions**。`SITE_URL` 决定 canonical、hreflang 与 og:image 的绝对地址，工作流会自动传入 Pages 地址。首屏视频为 `site/public/assets/six-windows-social.mp4`（21 秒，封面 `six-windows-poster.jpg`），并链接完整版 `six-windows.mp4`（35 秒）；页面下方的 Session Score 区块播放 `session-score-social.mp4`（封面 `session-score-poster.jpg`，完整版 `session-score.mp4`）。替换同名文件即可。README 顶部的封面图 `docs/assets/six-windows-poster.jpg` 链接到 Pages 上的 `six-windows.mp4`。
 
 ---
 

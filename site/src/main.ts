@@ -81,10 +81,10 @@ const revealIo = new IntersectionObserver(
 );
 for (const el of $$("[data-reveal]")) revealIo.observe(el);
 
-/* ---------- hero video: muted autoplay in view, never under reduced motion ---------- */
-const fig = $("#video");
-const video = fig && $<HTMLVideoElement>("video", fig);
-if (fig && video) {
+/* ---------- promo videos: muted autoplay in view, never under reduced motion ---------- */
+for (const fig of $$(".video")) {
+  const video = $<HTMLVideoElement>("video", fig);
+  if (!video) continue;
   const toggle = $<HTMLButtonElement>('[data-act="toggle"]', fig);
   const sound = $<HTMLButtonElement>('[data-act="sound"]', fig);
   const big = $<HTMLButtonElement>(".video-play", fig);
