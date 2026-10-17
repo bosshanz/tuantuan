@@ -122,8 +122,10 @@ export function ElicitationDialog(props: {
           }
         }}
       >
+        {/* JSON Schema patterns match substrings; native HTML constraints use different rules. */}
         <form
           ref={form}
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             if (!props.pending) submit();
@@ -322,16 +324,9 @@ function ElicitationFieldView(props: {
       </div>
     );
   if (field.kind === "string") {
+    // Keep date-time as text: datetime-local strips the offset and cannot display RFC 3339 defaults.
     const type =
-      field.format === "email"
-        ? "email"
-        : field.format === "uri"
-          ? "url"
-          : field.format === "date"
-            ? "date"
-            : field.format === "date-time"
-              ? "datetime-local"
-              : "text";
+      field.format === "email" ? "email" : field.format === "uri" ? "url" : field.format === "date" ? "date" : "text";
     return (
       <div className="field">
         {label}
@@ -341,9 +336,6 @@ function ElicitationFieldView(props: {
           className="input"
           type={type}
           value={String(props.value ?? "")}
-          minLength={field.minLength ?? undefined}
-          maxLength={field.maxLength ?? undefined}
-          pattern={field.pattern ?? undefined}
           onChange={(event) => props.onChange(event.target.value)}
         />
         {error}

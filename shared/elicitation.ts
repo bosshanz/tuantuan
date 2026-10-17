@@ -209,6 +209,13 @@ function missing(value: unknown): boolean {
   return value === undefined || value === null || (typeof value === "string" && value.trim() === "");
 }
 
+function validDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  // Date.parse normalizes impossible dates such as February 30 instead of rejecting them.
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 function validFormat(format: string, value: string): boolean {
   switch (format) {
     case "email":
@@ -221,9 +228,13 @@ function validFormat(format: string, value: string): boolean {
         return false;
       }
     case "date":
-      return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+      return validDate(value);
     case "date-time":
-      return !Number.isNaN(Date.parse(value));
+      return (
+        /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/i.test(
+          value,
+        ) && validDate(value.slice(0, 10))
+      );
     default:
       // ACP may add formats later; an unknown format must not reject otherwise valid input.
       return true;
@@ -288,7 +299,11 @@ export function validateElicitation(fields: ElicitationField[], values: Elicitat
         if (field.required) issues[field.name] = { code: "required" };
         continue;
       }
-      const number = typeof value === "number" ? value : Number(String(value).trim());
+      if (typeof value !== "number" && typeof value !== "string") {
+        issues[field.name] = { code: "invalid" };
+        continue;
+      }
+      const number = typeof value === "number" ? value : Number(value.trim());
       if (!Number.isFinite(number) || (field.kind === "integer" && !Number.isInteger(number))) {
         issues[field.name] = { code: "invalid" };
         continue;
@@ -316,11 +331,12 @@ export function validateElicitation(fields: ElicitationField[], values: Elicitat
       issues[field.name] = { code: "option" };
       continue;
     }
-    if (field.minLength != null && value.length < field.minLength) {
+    const length = Array.from(value).length;
+    if (field.minLength != null && length < field.minLength) {
       issues[field.name] = { code: "min_length", params: { min: field.minLength } };
       continue;
     }
-    if (field.maxLength != null && value.length > field.maxLength) {
+    if (field.maxLength != null && length > field.maxLength) {
       issues[field.name] = { code: "max_length", params: { max: field.maxLength } };
       continue;
     }

@@ -477,7 +477,7 @@ acp
                         { const: "beta", title: "测试版" },
                       ],
                     },
-                    note: { type: "string", title: "补充说明", minLength: 2, maxLength: 20 },
+                    note: { type: "string", title: "补充说明", minLength: 2, maxLength: 20, pattern: "确认" },
                     batches: { type: "integer", title: "批次数量", minimum: 1, maximum: 5, default: 2 },
                     ratio: { type: "number", title: "灰度比例", minimum: 0, maximum: 1 },
                     confirm: { type: "boolean", title: "确认发布", default: true },
@@ -487,6 +487,12 @@ acp
                       minItems: 1,
                       maxItems: 2,
                       items: { type: "string", enum: ["移动端", "桌面端", "服务端"] },
+                    },
+                    when: {
+                      type: "string",
+                      title: "执行时间",
+                      format: "date-time",
+                      default: "2026-10-17T10:00:00+08:00",
                     },
                   }
                 : { future: { type: "mystery", title: "未来字段" } },

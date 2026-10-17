@@ -7,9 +7,11 @@ import type { ChatSnapshot } from "../web/src/chatState";
 export async function chatToolsSmoke(browser: Browser, base: string, store: Store, shotsDir?: string) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, colorScheme: "light" });
   const errors: string[] = [];
+  let expectedUnavailable = false;
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
-    if (["error", "warning"].includes(message.type())) errors.push(message.text());
+    if (["error", "warning"].includes(message.type()) && !(expectedUnavailable && message.text().includes("503")))
+      errors.push(message.text());
   });
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const response = await fetch(`${base}${path}`, {
@@ -33,6 +35,10 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     agentIds: [agent.id, mate.id],
     mainAgentId: agent.id,
   });
+  const other = await request<{ id: string }>("POST", "/api/rooms", {
+    name: "离开提问回归",
+    agentIds: [agent.id],
+  });
   const history = () => request<ChatSnapshot>("GET", `/api/rooms/${room.id}/messages`);
   const context = {
     goal: "发布 0.2.0 并保留提问记录",
@@ -52,6 +58,11 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     await input.fill("/ask");
     await input.press("Enter");
     await dialog.waitFor();
+    const firstAskId = (await history()).elicitations[0]?.id;
+    await page.reload();
+    await dialog.waitFor();
+    if ((await history()).elicitations[0]?.id !== firstAskId)
+      throw new Error("refresh cancelled the pending question instead of restoring it");
     await dialog.getByText("请确认本次发布的方式").waitFor();
     for (const label of ["发布范围", "发布频道", "补充说明", "批次数量", "灰度比例", "确认发布", "标签"]) {
       await dialog.getByText(label, { exact: false }).first().waitFor();
@@ -63,6 +74,12 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     await dialog.getByLabel("发布范围").selectOption("canary");
     await dialog.getByLabel("补充说明").fill("确认发布");
     await dialog.getByRole("checkbox", { name: "移动端" }).check();
+    if ((await dialog.getByLabel("执行时间").inputValue()) !== "2026-10-17T10:00:00+08:00")
+      throw new Error("date-time default lost its timezone or was blanked by the browser");
+    await dialog.getByLabel("执行时间").fill("2026-02-30T10:00:00Z");
+    await dialog.getByRole("button", { name: "提交回答" }).click();
+    await dialog.getByText("请输入有效的 date-time", { exact: true }).waitFor();
+    await dialog.getByLabel("执行时间").fill("2026-10-17T10:00:00+08:00");
     await shot("elicit-form");
     await dialog.getByRole("button", { name: "提交回答" }).click();
     await dialog.waitFor({ state: "detached" });
@@ -79,6 +96,8 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     })();
     if (!accepted.content.includes("提问结果：accept"))
       throw new Error("accepted answer was reported as something other than accept");
+    if (!accepted.content.includes('"when":"2026-10-17T10:00:00+08:00"'))
+      throw new Error("date-time answer did not retain its timezone");
 
     // Closing the card sends cancel so the Harness is never left waiting.
     await input.fill("/ask");
@@ -87,6 +106,35 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     await dialog.getByRole("button", { name: "取消提问", exact: true }).click();
     await dialog.waitFor({ state: "detached" });
     await page.getByText("提问结果：cancel").waitFor();
+
+    // Leaving the view cancels its question; this must not be confused with releasing the Harness.
+    await input.fill("/ask");
+    await input.press("Enter");
+    await dialog.waitFor();
+    const leavingRun = (await history()).messages.filter((message) => message.senderKind === "human").at(-1)?.id;
+    await page.goto(`${base}/#/c/${other.id}`);
+    await page.getByRole("heading", { name: "离开提问回归", exact: true }).waitFor();
+    const leaveDeadline = Date.now() + 10_000;
+    for (;;) {
+      const snapshot = await history();
+      const cancelled = snapshot.messages.some(
+        (message) =>
+          message.runId === leavingRun && message.status === "done" && message.content.startsWith("提问结果：cancel"),
+      );
+      if (!snapshot.elicitations.length && cancelled) break;
+      if (Date.now() > leaveDeadline)
+        throw new Error(
+          `leaving the conversation left its question unanswered: ${JSON.stringify({
+            pending: snapshot.elicitations,
+            replies: snapshot.messages
+              .filter((message) => message.runId === leavingRun)
+              .map(({ status, content }) => ({ status, content })),
+          })}`,
+        );
+      await page.waitForTimeout(40);
+    }
+    await page.goto(`${base}/#/c/${room.id}`);
+    await page.getByRole("heading", { name: "提问与结论回归", exact: true }).waitFor();
 
     // A saved task note becomes the pinned conclusion card; clicking it flashes the source row.
     await input.fill(`/context ${JSON.stringify(context)}`);
@@ -110,6 +158,47 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
       throw new Error("conclusion card overflows a narrow viewport");
     await shot("room-conclusion-narrow");
     await page.setViewportSize({ width: 1440, height: 1000 });
+    await card.getByRole("button", { name: "查看来源消息" }).click();
+    await page.waitForFunction(
+      (id) => document.querySelector(`.message-row[data-message-id="${CSS.escape(id)}"]`)?.hasAttribute("data-flash"),
+      source.id,
+    );
+
+    // A source older than the loaded page can be reached, but a failed page must not retry forever.
+    for (let index = 0; index < 205; index++)
+      store.insertMessage({
+        roomId: room.id,
+        runId: "conclusion-history-fixture",
+        hop: 0,
+        senderKind: "human",
+        senderId: null,
+        senderName: "Andy",
+        content: `结论之后的记录 ${index}`,
+        status: "done",
+      });
+    await page.reload();
+    await card.waitFor();
+    if (await page.locator(`.message-row[data-message-id="${source.id}"]`).count())
+      throw new Error("history fixture did not put the conclusion source outside the loaded page");
+    let failedPages = 0;
+    const historyPattern = `**/api/rooms/${room.id}/messages?*`;
+    expectedUnavailable = true;
+    await page.route(historyPattern, async (route) => {
+      if (!new URL(route.request().url()).searchParams.has("beforeSeq")) return route.continue();
+      failedPages++;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "fixture unavailable" }),
+      });
+    });
+    await card.getByRole("button", { name: "查看来源消息" }).click();
+    await page.getByText(/加载失败：fixture unavailable/).waitFor();
+    await page.waitForTimeout(500);
+    if (failedPages !== 1)
+      throw new Error(`source navigation automatically retried a failed page ${failedPages} times`);
+    await page.unroute(historyPattern);
+    expectedUnavailable = false;
     await card.getByRole("button", { name: "查看来源消息" }).click();
     await page.waitForFunction(
       (id) => document.querySelector(`.message-row[data-message-id="${CSS.escape(id)}"]`)?.hasAttribute("data-flash"),

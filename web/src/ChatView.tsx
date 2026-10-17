@@ -104,6 +104,8 @@ export function ChatView(props: {
   const nextBeforeSeq = history.initialized ? historyCursor(messages, history.nextBeforeSeq) : null;
   const [answers, setAnswers] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingAnswers = useRef(new Set<string>());
+  const pendingQuestions = useRef(elicitations);
+  pendingQuestions.current = elicitations;
   const [retries, setRetries] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingRetries = useRef(new Set<string>());
   const [cancellations, setCancellations] = useState<Record<string, { pending: boolean; error: string | null }>>({});
@@ -171,6 +173,20 @@ export function ChatView(props: {
   // The agent the composer talks to by default: the DM partner, or the group's main agent.
   const primary = members.find((a) => a.id === room.mainAgentId) ?? members[0];
   const primaryView = primary ? sessions[primary.id] : undefined;
+
+  useEffect(() => {
+    return () => {
+      // Route changes unmount this room. A page reload does not run React cleanup, so its
+      // questions remain available in the next snapshot. Cancel only this room's known asks.
+      for (const question of pendingQuestions.current) {
+        if (question.roomId !== room.id) continue;
+        void api("POST", `/api/elicitations/${question.id}`, { action: "cancel" }).catch((error) => {
+          if (!(error instanceof ApiError && error.status === 404))
+            console.warn("Unable to cancel question when leaving the conversation", error);
+        });
+      }
+    };
+  }, [room.id]);
 
   useEffect(() => {
     let alive = true;
@@ -242,6 +258,7 @@ export function ChatView(props: {
   loadHistoryRef.current = loadHistory;
   const jumpToMessage = (messageId: string) => {
     pause();
+    jumpTarget.current = null;
     if (flashMessage(messageId)) return;
     jumpTarget.current = messageId;
     void loadHistoryRef.current();
@@ -253,9 +270,13 @@ export function ChatView(props: {
       jumpTarget.current = null;
       return;
     }
-    if (nextBeforeSeq === null || history.loading) return;
+    if (history.error || nextBeforeSeq === null) {
+      jumpTarget.current = null;
+      return;
+    }
+    if (history.loading) return;
     void loadHistoryRef.current();
-  }, [nextBeforeSeq, history.loading]);
+  }, [nextBeforeSeq, history.loading, history.error]);
 
   // Warm up every member's session so the model picker and slash commands are there before the first message.
   const warming = useRef(new Set<string>());

@@ -163,9 +163,13 @@ Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建�
 
 额度刷新、Harness 检测与登录请求在入口校验后关闭 HTTP 的默认空闲超时，实际等待仍受各 ACP 操作的超时限制。`process-tree.ts` 统一隔离进程清理错误：进程组信号失败保留日志，仅对尚未退出的原始子进程尝试回退；延迟强制终止同样不抛出未捕获异常，显式强制终止会撤销旧计时器。主进程先退出时仍回收其组内后代；清理失败不能覆盖查询结果或终止团团服务。
 
-群聊引用由 `POST messages` 的 `replyToId` 指定；`Store.insertMessage` 在写入事务中校验同房间及完成态，再生成最多 400 字符的快照。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
+人类消息的引用由 `POST messages` 的 `replyToId` 指定；`Store.insertMessage` 在写入事务中校验同房间及完成态，再生成最多 400 字符的快照。界面引用操作用于群聊，单聊中断重试也可生成引用。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
+
+ACP 表单提问仅声明 `elicitation.form`。`HarnessHost` 按 ask ID 与活动 slot 保存待办，`shared/elicitation.ts` 规范化字段并供前后端共同校验，`POST /api/elicitations/:id` 成功时先移除待办再应答。待办通过 `elicitation` 事件和消息快照同步，刷新恢复，任务取消、进程退出或 slot 释放时返回 cancel。`ChatView` 在切换会话或离开聊天页面时取消该视图持有的提问；刷新不走组件卸载清理。`ElicitationDialog` 使用共同校验而非 HTML 原生约束，避免正则匹配和字符长度规则不同；日期时间保留时区，未知字段阻止提交。
 
 消息分页沿用 `messages.seq` 和 `Store.recentMessages(roomId, limit, beforeSeq)`；`GET /api/rooms/:id/messages` 接受正整数 `limit`（默认 100，最多 500）与可选的排他游标 `beforeSeq`，返回按序排列的消息和 `nextBeforeSeq`（`null` 表示没有更早记录）。前端初始页为 200 条，历史页只合并消息与分页进度，不应用响应里的任务、会话或权限快照。消息按 id 去重、按 seq 排序，历史请求与最新快照分别标识和隔离；分页提交前记录当前可见消息的偏移，布局更新后恢复阅读位置。
+
+结论卡从成功根任务或 `reviewOf` 跟进消息的 `timeline.taskContext` 派生，服务端快照不受当前历史页限制，前端以 seq 合并快照与实时结果；无新笔记时保留上一份，不另存结论或生成摘要。来源跳转按需加载旧页，失败停止自动追读，保留错误和手动重试入口。`POST /api/rooms/:id/messages/:messageId/retry` 仅接受同房间的 interrupted Agent 消息，从 runId 找到原人类请求，将正文、图片与原请求引用交给普通消息路由，创建新 run；不恢复旧任务队列或 Harness 内部执行断点。
 
 1. 人类消息写库后立即路由成独立的根任务：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 群主负责统筹。只有最后一种 run 保存 coordinatorId 和 rootTaskId，其余是直接对话。更换群主只影响新 run。同一房间不同 Agent 并行，同一 Agent 按入队顺序执行；新消息不取消旧任务，不同房间互不阻塞。
 2. `RoomState.tasks` 提供 taskId、runId、parentTaskId、agentId、messageId、请求文本与 queued / running / cancelling / waiting 状态；协调任务另带 coordination（lead / work / review）。已完成但仍有活动后代的任务显示为 waiting，保留停止剩余工作的入口。`activeRunId` 仅保留为兼容的忙碌标志，`queued` 计数任务；界面不从单个 runId 推断全部运行状态。`idle(roomId)` 等到队列、衍生交接和自动跟进全部结束。
