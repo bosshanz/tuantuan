@@ -1,8 +1,30 @@
 # 安装与运行
 
-从源码运行（浏览器 + 本机服务）和构建桌面版。
+下载桌面安装包，或从源码运行（浏览器 + 本机服务）和构建桌面版。
 
-## 快速开始
+## 下载桌面版 v0.1.0
+
+前往 [GitHub Releases v0.1.0](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.0)，按操作系统和芯片选择安装包：
+
+| 平台 | 安装包 |
+| --- | --- |
+| macOS · Apple 芯片（arm64） | `Tuantuan-0.1.0-mac-arm64.dmg` |
+| macOS · Intel（x64） | `Tuantuan-0.1.0-mac-x64.dmg` |
+| Windows · x64 | `Tuantuan-0.1.0-win-x64.exe` |
+| Linux · x64 | `Tuantuan-0.1.0-linux-x64.AppImage` |
+
+macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.1.0 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。自动更新默认关闭，后续版本请从 Release 页面下载。
+
+- **macOS**：打开 `.dmg`，将「团团」拖入「应用程序」后启动。若首次启动被拦截，在确认下载来源后，可按 [Apple 的说明](https://support.apple.com/en-us/102445)在「系统设置 → 隐私与安全性」中允许打开该应用。
+- **Windows**：运行 `.exe`，按安装向导完成安装。
+- **Linux**：给 `.AppImage` 添加可执行权限后运行：
+
+  ```bash
+  chmod +x Tuantuan-0.1.0-linux-x64.AppImage
+  ./Tuantuan-0.1.0-linux-x64.AppImage
+  ```
+
+## 从源码运行
 
 使用 [Bun](https://bun.sh) 1.4.2 安装依赖，与 CI 保持一致。仓库使用 v2 锁文件，Bun 1.3.14 无法读取；已有依赖环境下的历史检查结果不能代替首次安装验证。Skill 解析依赖内置的 `Bun.YAML`，验证记录见 [ACP 计划](plan-harness-acp.md)。
 
@@ -28,7 +50,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-**暂未发布安装包，请从源码构建**（步骤见下方「打包」：`bun install && bun run desktop:install && bun run desktop:build`，产物在 `desktop/release/`，macOS `.dmg`、Windows `.exe`、Linux `.AppImage`）。装好后打开即用：不用装 Bun，也不用开终端。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包（AppImage 约 157 MB），第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置（约 +300 MB）。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+可直接使用 [v0.1.0 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.0)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](screenshots/desktop-linux.png)
 
@@ -48,7 +70,9 @@ bun run desktop:build -- --arch arm64,x64   # macOS 同时出 Apple 芯片和 In
 xvfb-run -a bun run desktop:smoke        # Linux：无界面端到端冒烟
 ```
 
-macOS 本机打 dmg：在 Mac 上执行上面前三行即可，得到 `desktop/release/Tuantuan-<版本>-mac-arm64.dmg`。没有证书时包是未签名的，第一次打开需要右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/团团.app`。要签名公证，打包前设置 `CSC_LINK`、`CSC_KEY_PASSWORD`（Developer ID 证书）和 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`；Windows 用 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`。自动更新默认关闭，打包时设 `TUANTUAN_PUBLISH=github` 和 `GH_TOKEN` 才会写入 GitHub Releases 更新源。GitHub Actions 的 Desktop 工作流（打 `v*` 标签或手动触发）会打出三个平台的包作为构建产物，不发布。
+macOS 本机构建：在 Mac 上执行上面的依赖安装和 `desktop:build` 命令，会生成当前架构的 `.dmg` 和 `.zip`；使用 `--arch arm64,x64` 可同时生成 Apple 芯片和 Intel 版本。未配置 Developer ID 证书时，构建配置使用 ad-hoc 签名；它不等同于 Developer ID 签名或 Apple 公证。要使用 Developer ID 签名并公证，打包前设置 `CSC_LINK`、`CSC_KEY_PASSWORD`（Developer ID 证书）和 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`；Windows 签名使用 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`。
+
+自动更新默认关闭，打包时设 `TUANTUAN_PUBLISH=github` 和 `GH_TOKEN` 才会写入 GitHub Releases 更新源。GitHub Actions 的 Desktop 工作流（打 `v*` 标签或手动触发）默认只上传三个平台的构建产物；v0.1.0 安装包由维护者上传到上述 Release。
 
 ---
 

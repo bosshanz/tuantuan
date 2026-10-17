@@ -1,60 +1,100 @@
-# 团团 Tuantuan
+# Tuantuan
 
-![团团 Tuantuan · 开源](docs/assets/poster.png)
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
-<!-- 宣传视频占位：把 GitHub user-attachments 视频链接（https://github.com/user-attachments/assets/...）单独粘贴在下一行，GitHub 会自动渲染成播放器。 -->
 https://github.com/user-attachments/assets/5238c2d1-7040-43f6-bc48-70aa0d9adae1
 
+**A local workspace for multi-agent collaboration.**
 
-**一群 Agent，团团协作。** 多 Agent 协作工作台。
+Bring Claude Code, Codex, OpenCode, Pi, Grok Build, MiniMax Code, and other coding agents into project-based conversations. Tuantuan connects their coding runtimes (harnesses) through the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
 
-团团不自带模型：每个 Agent 绑定一个编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode、Pi、MiniMax Code，以及 [ACP Registry](https://agentclientprotocol.com) 里的其他 Agent），团团通过 ACP（Agent Client Protocol）驱动它。按 **项目**（名称 + 目录）组织 **会话**（1 个或多个 Agent）；多个 Agent 时可 @、设主 Agent、交接。完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。
+Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser with the local server. Bring your own harness account or API provider; Tuantuan does not include a model service.
 
-![会话：主 Agent 用 handoff 把任务交给 Alice](docs/screenshots/conversation-handoff.png)
+![A lead agent hands a task to Alice](docs/screenshots/conversation-handoff.png)
 
-## 主要功能
+*The screenshot shows the Simplified Chinese interface. English, Traditional Chinese, and Japanese are also available.*
 
-- **多 Harness**：Claude Code、Codex、Grok Build、OpenCode 等通过 ACP 接入；优先用本机版本，没有时一键安装，升级后自动刷新能力并保留用户选择。
-- **多 Agent 会话**：按项目组织；@ 指定成员，群主分工、跟进、汇总；`handoff` 保留任务目标、关键决策和未完成事项，长原文可分页追读。
-- **完整过程**：流式回复、思考、工具卡片（diff / 终端）、计划、权限请求、Mermaid 图表。
-- **服务商与用量**：自定义 API 可接入 Claude Code、OpenCode、Pi、Codex；通过 models.dev 目录与 Pi AI 兼容规则适配已知模型的思考档位，保留会话选择；另有纯对话 BYOK、CC Switch 只读导入、Token 统计与额度。
-- **Skills 与插件**：自动发现本机 Skills / Claude 插件，按 Agent 勾选。
-- **界面语言**：在「设置 → 个人资料 → 界面语言」选择简体中文、繁体中文、英语或日语，默认简体中文；保存后即时切换，聊天内容与模型回复语言保持原样。
-- **桌面版**：macOS / Windows / Linux（Electron），也可浏览器 + 本机服务；团团从不改 `~/.claude` / `~/.codex`。
+## What you can do
 
-完整清单见 [功能一览](docs/features.md)。
+- **Choose your harness.** Use an existing local installation or install an agent from the ACP Registry. Setup guides you through the sign-in options provided by the harness.
+- **Work with a team.** Use one agent or several in a conversation. Mention members with `@`, or let a lead agent delegate, follow up, and bring the results together. Agents share the project's working directory.
+- **Hand off useful context.** Structured handoffs carry the task, goal, decisions, and pending work. Agents can read longer source messages and results in pages. Each agent keeps its own harness session; a handoff does not clone another agent's private session history.
+- **Keep native coding workflows.** Claude Code, OpenCode, Pi, and Codex use their native prompts and context management. Tuantuan exposes the model, permission, reasoning, and slash-command controls reported by each harness; available capabilities vary.
+- **See the work as it happens.** Follow streaming replies, thinking when provided, tool calls, diffs, terminal output, plans, and permission requests. Read Markdown and Mermaid diagrams, and stop individual tasks.
+- **Use your API providers.** Configure compatible providers for Claude Code, OpenCode, Pi, and Codex. Direct BYOK mode supports OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages for chat and handoffs, without file or terminal tools. Compatibility depends on the harness and provider protocol.
+- **Bring your setup.** Discover local Skills and Claude plugins, choose them per agent, and import CC Switch providers without modifying CC Switch. View token usage and quotas where the harness reports them. Tuantuan does not rewrite `~/.claude` or `~/.codex`.
+- **Choose your language.** The interface supports English, Simplified Chinese, Traditional Chinese, and Japanese. Changing it leaves conversation content and model response language unchanged.
 
-## 快速开始（从源码构建）
+See the [full feature list (Simplified Chinese)](docs/features.md).
 
-需要 [Bun](https://bun.sh) 1.4.2。暂未发布安装包。
+## Download v0.1.0
+
+Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.0):
+
+- **macOS**: Apple silicon (arm64) or Intel (x64), `.dmg` or `.zip`.
+- **Windows**: x64 `.exe` installer.
+- **Linux**: x64 `.AppImage`.
+
+The desktop app includes its runtime; you do not need to install Bun. The v0.1.0 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
+
+## Quick start from source
+
+Requires [Bun](https://bun.sh) **1.4.2**, the version used in CI.
 
 ```bash
 git clone https://github.com/bosshanz/tuantuan.git
 cd tuantuan
 bun install
-bun dev                                   # 浏览器打开 http://localhost:5173
-# 或打桌面包：
-bun run desktop:install && bun run desktop:build   # 产物在 desktop/release/
+bun run dev
 ```
 
-没装任何 CLI 也能体验：`TUANTUAN_MOCK_HARNESS=1 bun dev`。详细步骤见 [安装与运行](docs/install.md)。
+Open **http://localhost:5173**. The first-run guide helps you choose or install a harness, sign in when needed, and create your first agent. Create a project for your working folder, then start a conversation with one or more agents.
 
-## 文档
+The app starts in Simplified Chinese. To use English, open **设置 → 个人资料 → 界面语言** (Settings → Profile → Interface language) and select **English**.
 
-- [安装与运行](docs/install.md) · [Harness](docs/harness.md) · [会话与消息](docs/conversations.md) · [Skills 与插件](docs/skills.md)
-- [服务商、BYOK 与用量](docs/providers.md) · [配置与 mock](docs/configuration.md) · [界面](docs/ui.md) · [开发与测试](docs/development.md)
-- [常见问题与已知限制](docs/faq.md) · [产品规则](docs/product.md) · [架构](docs/architecture.md) · [ACP 计划](docs/plan-harness-acp.md)
+To explore with simulated replies and no harness login, select the Mock harness after starting with:
 
-全部文档索引：[docs/README.md](docs/README.md)。
+```bash
+TUANTUAN_MOCK_HARNESS=1 bun run dev
+```
 
-## 商标说明
+To serve the built frontend from the local API server:
 
-界面中出现的 Anthropic、OpenAI、Google、xAI、智谱、Moonshot、通义千问、DeepSeek、MiniMax 等模型厂商 Logo（来自 [@lobehub/icons](https://github.com/lobehub/lobe-icons)，MIT）仅用于标识对应厂商的模型。这些商标归各自所有者所有，本项目与这些公司没有关联，也未获其背书。
+```bash
+bun run build && bun start
+```
 
-## 参与贡献
+Open **http://localhost:8787**. The server listens on `127.0.0.1` by default and is designed for local, single-user use.
 
-见 [CONTRIBUTING.md](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)、[安全策略](SECURITY.md)；第三方许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，模型目录与适配参考见 [server/data/NOTICE.md](server/data/NOTICE.md)。
+### Build the desktop app
+
+After `bun install`, build an installer for your current operating system and architecture:
+
+```bash
+bun run desktop:install
+bun run desktop:build
+```
+
+Output is written to `desktop/release/`. See [installation and packaging (Simplified Chinese)](docs/install.md) for platform details and signing.
+
+## Documentation
+
+The detailed documentation is currently in **Simplified Chinese**.
+
+- [Installation](docs/install.md) · [Harnesses and ACP Registry](docs/harness.md) · [Conversations and handoffs](docs/conversations.md) · [Skills and plugins](docs/skills.md)
+- [Providers, BYOK, and usage](docs/providers.md) · [Configuration and mock mode](docs/configuration.md) · [Interface](docs/ui.md) · [Development and testing](docs/development.md)
+- [FAQ and known limitations](docs/faq.md) · [Product rules](docs/product.md) · [Architecture](docs/architecture.md) · [ACP implementation plan](docs/plan-harness-acp.md)
+
+[Browse the documentation index](docs/README.md).
+
+## Contributing
+
+Issues and pull requests are welcome. Start with the [contributing guide (Simplified Chinese)](CONTRIBUTING.md) and [code of conduct](CODE_OF_CONDUCT.md). Report vulnerabilities using the [security policy (Simplified Chinese)](SECURITY.md).
+
+## Trademarks and third-party notices
+
+Provider logos from [@lobehub/icons](https://github.com/lobehub/lobe-icons) identify the corresponding model providers. Trademarks belong to their respective owners; Tuantuan is not affiliated with or endorsed by them. See [third-party notices (Simplified Chinese)](THIRD_PARTY_NOTICES.md) and [model data sources and licenses](server/data/NOTICE.md).
 
 ## License
 
-MIT
+[MIT](LICENSE)
