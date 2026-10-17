@@ -32,7 +32,14 @@ export type Copy = {
   hero: { eyebrow: string; tagline: string; sub: string; meta: string };
   download: { mac: string; win: string; linux: string; any: string; notes: string };
   /** First launch of the unnotarized macOS build: Gatekeeper prompt and the way past it. */
-  macFirst: { summary: string; blocked: string; prompt: string; steps: [string, string, string]; fallback: string };
+  macFirst: {
+    summary: string;
+    brew: string;
+    blocked: string;
+    prompt: string;
+    steps: [string, string, string];
+    fallback: string;
+  };
   video: { label: string; full: string; play: string; pause: string; soundOn: string; soundOff: string };
   score: { title: string; sub: string; label: string };
   harness: { title: string; sub: string; registry: string; registryMore: string };
@@ -112,6 +119,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     macFirst: {
       summary: "First launch on macOS",
+      brew: "With Homebrew, the tap clears the quarantine flag for you, so there is no prompt:",
       blocked: "Tuantuan is not notarized by Apple yet, so the first launch shows:",
       prompt:
         "“Apple could not verify “tuantuan” is free of malware that may harm your Mac or compromise your privacy.”",
@@ -254,6 +262,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     macFirst: {
       summary: "macOS 首次打开",
+      brew: "用 Homebrew 安装时，tap 会自动清除隔离标记，不会出现拦截：",
       blocked: "团团暂未经过 Apple 公证，第一次打开会提示：",
       prompt: "“Apple无法验证“tuantuan”是否包含可能危害Mac安全或泄漏隐私的恶意软件。”",
       steps: [
@@ -379,6 +388,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     macFirst: {
       summary: "macOS 首次開啟",
+      brew: "用 Homebrew 安裝時，tap 會自動清除隔離標記，不會出現攔截：",
       blocked: "團團尚未經過 Apple 公證，第一次開啟會提示：",
       prompt: "「Apple 無法驗證“tuantuan”是否包含可能危害 Mac 安全或洩漏隱私的惡意軟體。」",
       steps: [
@@ -507,6 +517,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     macFirst: {
       summary: "macOS で初めて開くとき",
+      brew: "Homebrew でインストールすると、tap が隔離属性を自動で外すため警告は出ません：",
       blocked: "Tuantuan はまだ Apple の公証を受けていないため、初回起動時に次の警告が出ます：",
       prompt:
         "「Apple は、“tuantuan”に Mac に損害を与えたり、プライバシーを侵害したりする可能性のあるマルウェアが含まれていないことを検証できませんでした。」",

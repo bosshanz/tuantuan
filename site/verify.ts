@@ -182,8 +182,12 @@ for (const locale of LOCALES) {
   if (await hint.locator(".mac-first-body").isVisible()) fail(`${locale}: macOS hint should start collapsed`);
   await hint.locator("summary").click();
   if (!(await hint.locator(".mac-first-body").isVisible())) fail(`${locale}: macOS hint did not expand`);
-  const cmd = await hint.locator("button[data-copy]").getAttribute("data-copy");
-  if (cmd !== "xattr -dr com.apple.quarantine /Applications/tuantuan.app") fail(`${locale}: xattr command is ${cmd}`);
+  const cmds = await hint.locator("button[data-copy]").evaluateAll((bs) => bs.map((b) => b.getAttribute("data-copy")));
+  const want = [
+    "brew install --cask bosshanz/tap/tuantuan",
+    "xattr -dr com.apple.quarantine /Applications/tuantuan.app",
+  ];
+  if (JSON.stringify(cmds) !== JSON.stringify(want)) fail(`${locale}: hint commands are ${JSON.stringify(cmds)}`);
   if ((await hint.locator("ol li").count()) !== 3) fail(`${locale}: macOS hint should list 3 steps`);
   if (locale === "en" || locale === "zh-CN") {
     await page.waitForTimeout(300);
