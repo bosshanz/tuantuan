@@ -151,6 +151,46 @@ export const chatMessages = {
     en: "Handoff to {name}",
     ja: "{name} に引き継ぐ",
   },
+  交接任务: {
+    "zh-TW": "交接任務",
+    en: "Handoff task",
+    ja: "引き継ぎタスク",
+  },
+  交接笔记: {
+    "zh-TW": "交接筆記",
+    en: "Handoff notes",
+    ja: "引き継ぎメモ",
+  },
+  已保存任务笔记: {
+    "zh-TW": "已儲存任務筆記",
+    en: "Saved task notes",
+    ja: "保存済みのタスクメモ",
+  },
+  任务目标: {
+    "zh-TW": "任務目標",
+    en: "Task goal",
+    ja: "タスクの目標",
+  },
+  关键决策: {
+    "zh-TW": "關鍵決策",
+    en: "Key decisions",
+    ja: "重要な決定事項",
+  },
+  未完成事项: {
+    "zh-TW": "未完成事項",
+    en: "Pending items",
+    ja: "未完了の項目",
+  },
+  暂无记录: {
+    "zh-TW": "暫無記錄",
+    en: "No notes yet",
+    ja: "記録はまだありません",
+  },
+  无未完成事项: {
+    "zh-TW": "無未完成事項",
+    en: "No pending items",
+    ja: "未完了の項目はありません",
+  },
   正在思考: {
     "zh-TW": "正在思考",
     en: "Thinking",

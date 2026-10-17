@@ -736,6 +736,24 @@ export class Store {
     return rows.reverse().map(toMessage);
   }
 
+  /** Query this request before applying any relay budget, so unrelated runs cannot displace it. */
+  runMessages(roomId: string, runId: string): Message[] {
+    return (
+      this.db.query("SELECT * FROM messages WHERE room_id = ? AND run_id = ? ORDER BY seq").all(roomId, runId) as Row[]
+    ).map(toMessage);
+  }
+
+  /** Historical messages visible at this request, plus settled replies from its own run. */
+  contextMessages(roomId: string, runId: string, throughSeq: number, limit: number, beforeSeq?: number): Message[] {
+    const rows = this.db
+      .query(
+        `SELECT * FROM messages WHERE room_id = ? AND seq < ? AND (seq <= ? OR run_id = ?)
+         AND sender_kind != 'system' AND status != 'streaming' ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(roomId, beforeSeq ?? Number.MAX_SAFE_INTEGER, throughSeq, runId, limit) as Row[];
+    return rows.reverse().map(toMessage);
+  }
+
   // ---- Preferred model per (room, agent) ----
   getRoomModel(roomId: string, agentId: string): string | null {
     return this.getRoomConfig(roomId, agentId).model ?? null;

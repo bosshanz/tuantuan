@@ -911,12 +911,11 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 
 /* ---- M2: hand-off cards, replayed harness history ---- */
 .handoff-from {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: var(--text-3);
   margin-bottom: 4px;
+  min-width: 0;
+  max-width: 560px;
 }
 .handoff-card {
   margin-top: 8px;
@@ -926,16 +925,61 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
   background: var(--surface-2);
   max-width: 560px;
 }
-.handoff-card .handoff-title {
+.handoff-title {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 13px;
 }
-.handoff-card p {
+.handoff-title svg { flex-shrink: 0; }
+.handoff-task {
   margin: 4px 0 0;
   font-size: 13px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.task-context {
+  min-width: 0;
+  max-width: 560px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.task-context summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  cursor: pointer;
+  color: var(--text-3);
+  list-style: none;
+}
+.task-context summary::-webkit-details-marker { display: none; }
+.task-context summary svg { flex-shrink: 0; }
+.task-context[open] > summary svg { transform: rotate(90deg); }
+.task-context-content {
+  max-height: 24rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  padding: 2px 4px 4px 0;
+}
+.task-context dl { margin: 0; }
+.task-context dl > div + div { margin-top: 10px; }
+.task-context dt { font-weight: 600; font-size: 12px; color: var(--text-3); }
+.task-context dd { margin: 3px 0 0; white-space: pre-wrap; }
+.task-context ul { margin: 0; padding-left: 18px; }
+.task-context li + li { margin-top: 4px; }
+.handoff-task:focus-visible,
+.task-context summary:focus-visible,
+.task-context-content:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .replay {
   margin: 4px 0 16px;

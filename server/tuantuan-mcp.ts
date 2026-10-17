@@ -3,7 +3,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 
 /**
  * Tuantuan's own MCP server, injected into group sessions so agents can hand off work
- * (`handoff`, `list_members`).
+ * (`handoff`, `save_context`, `read_context`, `read_result`, `list_members`).
  *
  * One endpoint per (room, agent) at /mcp/<token>, speaking MCP JSON-RPC over plain HTTP POST
  * (Streamable HTTP with JSON responses). Harnesses that only take stdio MCP servers get

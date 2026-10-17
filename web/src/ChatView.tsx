@@ -22,7 +22,7 @@ import { intlLocale, translateError, useI18n } from "./i18n";
 import "./messageQuote.css";
 import "./chatTasks.css";
 import "./chatScroll.css";
-import type { ReplayTurn, Timeline } from "../../shared/timeline";
+import type { ReplayTurn, TaskContext, Timeline } from "../../shared/timeline";
 import {
   type Agent,
   ApiError,
@@ -752,10 +752,12 @@ function MessageItem(props: {
         {m.quote && <QuoteExcerpt quote={m.quote} />}
         {t?.handoffFrom && (
           <div className="handoff-from">
-            <ArrowRightLeft size={12} />
-            <span>
-              {tr("接 {name} 的交接：{task}", { name: `@${t.handoffFrom.agentName}`, task: t.handoffFrom.task })}
-            </span>
+            <div className="handoff-title">
+              <ArrowRightLeft size={12} />
+              <span>{tr("接 {name} 的交接：{task}", { name: `@${t.handoffFrom.agentName}`, task: "" })}</span>
+            </div>
+            <HandoffTask task={t.handoffFrom.task} />
+            {t.handoffFrom.context && <TaskContextNote context={t.handoffFrom.context} />}
           </div>
         )}
         {m.senderKind === "human" ? (
@@ -776,9 +778,13 @@ function MessageItem(props: {
               <ArrowRightLeft size={13} />
               {tr("交接给 {name}", { name: `@${h.agentName}` })}
             </div>
-            <p>{h.task}</p>
+            <HandoffTask task={h.task} />
+            {h.context && <TaskContextNote context={h.context} />}
           </div>
         ))}
+        {m.senderKind === "agent" && m.status === "done" && t?.taskContext && (
+          <TaskContextNote context={t.taskContext} saved />
+        )}
         {m.senderKind === "agent" && empty && !m.content && streaming && (
           <span className="typing">
             <i />
@@ -826,6 +832,68 @@ function MessageItem(props: {
         selected={props.selected}
       />
     </div>
+  );
+}
+
+function HandoffTask({ task }: { task: string }) {
+  const { t: tr } = useI18n();
+  return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded task region needs keyboard scrolling
+    <section className="handoff-task" tabIndex={0} aria-label={tr("交接任务")}>
+      {task}
+    </section>
+  );
+}
+
+function TaskContextNote({ context, saved = false }: { context: TaskContext; saved?: boolean }) {
+  const { t: tr } = useI18n();
+  const summaryId = useId();
+  return (
+    <details className="task-context" data-kind={saved ? "saved" : "handoff"}>
+      <summary id={summaryId}>
+        <ChevronRight size={13} aria-hidden="true" />
+        {tr(saved ? "已保存任务笔记" : "交接笔记")}
+      </summary>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded notes region needs keyboard scrolling */}
+      <section className="task-context-content" aria-labelledby={summaryId} tabIndex={0}>
+        <dl>
+          <div>
+            <dt>{tr("任务目标")}</dt>
+            <dd>{context.goal || tr("暂无记录")}</dd>
+          </div>
+          <div>
+            <dt>{tr("关键决策")}</dt>
+            <dd>
+              {context.decisions.length ? (
+                <ul>
+                  {context.decisions.map((decision, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: snapshot entries have no ids and are replaced wholesale
+                    <li key={index}>{decision}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="muted">{tr("暂无记录")}</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>{tr("未完成事项")}</dt>
+            <dd>
+              {context.pending.length ? (
+                <ul>
+                  {context.pending.map((pending, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: snapshot entries have no ids and are replaced wholesale
+                    <li key={index}>{pending}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="muted">{tr("无未完成事项")}</span>
+              )}
+            </dd>
+          </div>
+        </dl>
+      </section>
+    </details>
   );
 }
 

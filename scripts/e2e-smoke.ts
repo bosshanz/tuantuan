@@ -15,6 +15,7 @@ import { registryUsageSmoke } from "./e2e-registry-usage";
 import { repliesSmoke } from "./e2e-replies";
 import { richMediaSmoke } from "./e2e-rich-media";
 import { schedulingSmoke } from "./e2e-scheduling";
+import { taskContextSmoke } from "./e2e-task-context";
 import { terminalSmoke } from "./e2e-terminal";
 
 process.env.TUANTUAN_MOCK_HARNESS = "1";
@@ -507,6 +508,7 @@ try {
   await page.locator(".handoff-from", { hasText: "接 @Bob 的交接：写一份需求文档" }).waitFor();
   await page.locator(".messages").getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
   await shot("conversation-handoff");
+  await taskContextSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
   await terminalSmoke(browser, `http://localhost:${server.port}`, group.id, project.id, cwd, shotsDir);
   await registryUsageSmoke(browser, `http://localhost:${server.port}`, shotsDir);
   await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);

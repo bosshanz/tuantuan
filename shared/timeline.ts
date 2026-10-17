@@ -32,6 +32,14 @@ export interface Timeline {
   handoffFrom?: Handoff;
   /** Member names whose results prompted a group leader's follow-up reply. */
   reviewOf?: string[];
+  /** Explicit task checkpoint, committed only when this reply completes successfully. */
+  taskContext?: TaskContext;
+}
+
+export interface TaskContext {
+  goal: string;
+  decisions: string[];
+  pending: string[];
 }
 
 export interface Handoff {
@@ -39,6 +47,7 @@ export interface Handoff {
   agentId: string;
   agentName: string;
   task: string;
+  context?: TaskContext;
 }
 
 export const emptyTimeline = (): Timeline => ({ parts: [], tools: {}, plan: null });
@@ -136,6 +145,7 @@ export function replayTurns(updates: acp.SessionUpdate[]): ReplayTurn[] {
       .replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "")
       .replace(/<tuantuan-skills>[\s\S]*?<\/tuantuan-skills>\s*/g, "")
       .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
+      .replace(/<tuantuan-context>[\s\S]*?<\/tuantuan-context>\s*/g, "")
       .trim();
   return turns;
 }

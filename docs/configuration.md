@@ -26,7 +26,7 @@
 
 ## 用 mock 演示
 
-`TUANTUAN_MOCK_HARNESS=1 bun dev` 后可以选「Mock」Harness。它回复「收到：…」，并支持 `/plan`（计划）、`/edit`（权限请求 + diff）、`/run`（终端）、`/slow`（慢回复，用于测试停止）；多 Agent 会话里 `/handoff 名字 任务`、`/members`。
+`TUANTUAN_MOCK_HARNESS=1 bun dev` 后可以选「Mock」Harness。它回复「收到：…」，并支持 `/plan`（计划）、`/edit`（权限请求 + diff）、`/run`（终端）、`/slow`（慢回复，用于测试停止）；多 Agent 会话里 `/handoff 名字 任务`、`/members`。`/handoff_context {"agent":"接收者","task":"任务说明","context":{"goal":"目标","decisions":[],"pending":[]}}` 会通过实际团团工具保存笔记并交接，用于验证结构化上下文。
 
 ---
 

@@ -197,7 +197,7 @@ describe("group relay (会话转述)", () => {
     const t = thought(ms.at(-1));
     expect(t).toContain("你上次发言之后，会话里的新消息（更早的");
     expect(t).not.toContain("第一句");
-    expect(t).toContain("（已截断）");
+    expect(t).toContain("（中间已省略）");
     expect(t).toContain("[Talker（Agent）]");
     expect(t).toContain("[Andy]: @Reader 最后");
     expect(t.length).toBeLessThan(RELAY_MAX_CHARS + 1000);

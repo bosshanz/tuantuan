@@ -6,7 +6,7 @@
  *   /plan  — plan checklist        /edit — diff tool call behind a permission prompt, then writes mock-edit.txt
  *   /run   — terminal tool call    /slow — streams for ~6s (to test cancel)
  * Tuantuan MCP tools (group rooms), called through whatever server session/new passed in:
- *   /handoff Name task   /members   /coordinate NameA NameB
+ *   /handoff Name task   /handoff_context {agent,task,context}   /members   /coordinate NameA NameB
  * An identity doc containing [[handoff:Name task]] makes it hand off on every turn (loop tests).
  * Env: MOCK_AGENT_MCP_HTTP=1 advertises HTTP MCP support (default: stdio only, the ACP baseline);
  *      MOCK_AGENT_AUTH_FILE=path requires `authenticate` (method mock-login) before session/new works.
@@ -442,6 +442,12 @@ acp
       } else if (cmd === "handoff") {
         const [, who = "", task = ""] = arg.match(/^@?(\S+)\s*([\s\S]*)$/) ?? [];
         await tool("handoff", { agent: who, task: task || "请接手" });
+      } else if (cmd === "handoff_context") {
+        const args = JSON.parse(arg) as { agent: string; task: string; context: Record<string, unknown> };
+        const [saved, saveError] = await tool("save_context", args.context);
+        if (!saved) throw new Error(saveError);
+        const [accepted, handoffError] = await tool("handoff", args);
+        if (!accepted) throw new Error(handoffError);
       } else if (cmd === "members") {
         const [, out] = await tool("list_members", {});
         await chunk(`成员：${out.replaceAll("\n", "；")}。`);

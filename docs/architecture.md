@@ -37,6 +37,7 @@
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
 | `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
 | `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；直达 / 群主统筹路由、逐轮职责、成员结果收集与群主续轮、单个 Agent 回合、交接预算与定向取消 |
+| `server/task-context.ts` | 结构化任务笔记的共享 schema 与运行时校验、交接长度契约、带省略标记的正文首尾摘录 |
 | `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
 | `server/store.ts` | SQLite 迁移与读写 |
 | `server/profile.ts` | 个人资料校验与默认值，`language` 限定为 `zh-CN` / `zh-TW` / `en` / `ja`；生成给 Agent 的用户说明时不包含界面语言 |
@@ -77,7 +78,7 @@ CLI / ACP 升级与模型目录同步是两条独立来源。Host 进程签名�
 
 原生基础提示词属于实际启动的 Harness 引擎。`HarnessHost` 向 Claude 发送 `_meta.systemPrompt = { append: identity }`，由适配器保留 `claude_code` preset；OpenCode / Pi 通过新会话首条普通 prompt 的 `<tuantuan-identity>` 接收身份，不写系统字段。Codex 身份合并到 `CODEX_CONFIG.developer_instructions`；目录外模型所需的通用指令由 `provider-codex.ts` 从实际 CLI 的隔离空会话读取，不保存固定正文副本。用户原生配置与扩展的处理、恢复会话是否沿用旧指令，继续归各引擎所有。
 
-`Orchestrator.identityFor` 负责团团身份、协作工具约定和可选个人资料；每轮任务、转述与职责由 `promptFor` / `runAgentTurn` 生成，Skills 索引由 Host 追加。跨 Agent 交接使用这些显式文本与各自独立会话，不迁移来源 Agent 的完整工具历史。字符预算分别约束转述、交接说明和成员结果，具体边界见[会话文档](conversations.md#上下文交接与压缩)。这层仅裁剪与分页，没有统一语义摘要或持久化共享记忆。
+`Orchestrator.identityFor` 负责团团身份、协作工具约定和可选个人资料；每轮任务、转述与职责由 `promptFor` / `runAgentTurn` 生成，Skills 索引由 Host 追加。跨 Agent 交接传递完整任务说明与显式 `TaskContext`（goal / decisions / pending），接收方仍使用独立会话。普通正文只做首尾摘录，原文另可分页追读；笔记独立于转述预算完整注入，不迁移来源 Agent 的完整工具历史。字符契约见[会话文档](conversations.md#上下文交接与压缩)。笔记由执行 Agent 编写，没有额外模型摘要请求、统一压缩器或跨请求自动合并的共享记忆。
 
 ACP session 的历史与压缩归 Harness，包括通过原生 Harness 使用自定义服务商的场景。模型目录中的上下文窗口元数据可影响引擎决策，但团团不设置统一压缩阈值。当前 ACP client 仅声明文件和终端能力，未声明专用 `session.compaction` 展示；适配器降级成普通工具更新时可进入现有时间线。上下文占用来自 `usage_update`，不反推压缩是否成功。直接 BYOK 的 `custom_history` 淘汰规则另由团团实现，见下节。
 
@@ -92,6 +93,7 @@ ACP session 的历史与压缩归 Harness，包括通过原生 Harness 使用自
 | 个人资料（含 `profile.language`） | SQLite（`settings` 表的 `profile` 值） | 服务端权威配置；前端 `localStorage["tuantuan:language"]` 仅作启动缓存，保存后的 `profile.updated` 同步已连接窗口 |
 | Harness 进程、挂起的权限请求、终端输出 | `HarnessHost` 内存 | 进程退出即丢失；重启后用 `acp_sessions` 里的 sessionId resume / load |
 | 待执行 / 活动任务、交接父子关系、每条人类消息的负责人和交接预算 | `Orchestrator` 内存 | taskId 标识单个任务，runId 关联原始人类消息；协调 run 冻结 coordinatorId / rootTaskId，parentTaskId 表示取消依赖，reviewOf 关联待收集的分工批次；房间下每个 Agent 一个 FIFO。整轮无剩余任务后清理；服务重启不重放队列，无数据库迁移 |
+| 结构化任务笔记与交接快照 | 当前 `TurnCtx` 暂存；成功后 SQLite `messages.timeline` | `save_context` 完整替换当前回合快照；成功结束通过 `Store.updateReply` 与回复原子保存为 `taskContext`。`handoffs[].context` 接受时独立复制；`handoffFrom.context` 保留接收快照。失败 / 取消 / 中断不提交暂存；不增加数据表或迁移，不自动继承其他 run 的笔记 |
 | ACP session 自身的对话历史与压缩 | Harness；当前 slot 暂存 load 回放 | `/replay` 按用户消息文本去掉本房间已有轮次，前端只读显示其余回放；可见转写不等于模型实际上下文 |
 | 直接 BYOK 对话上下文 | SQLite（`custom_history`，按房间 / Agent） | 唯一上下文来源；按完整成功轮持久化工具调用与结果，最多 20 轮，按序列化字符预算淘汰旧轮，不生成摘要；重启不改变上下文 |
 | 团团配置的 API / 管理 Key | SQLite（`providers.api_key` / `mgmt_key`、`agents.custom`、`settings.harnessEnv`） | 当前明文存储；服务商、BYOK 与 Harness env_var 专用公开接口返回掩码，不是磁盘加密。普通 `agents.env` 是可读写配置，不具备这些专用接口的打码契约 |
@@ -167,11 +169,11 @@ Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建�
 
 1. 人类消息写库后立即路由成独立的根任务：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 群主负责统筹。只有最后一种 run 保存 coordinatorId 和 rootTaskId，其余是直接对话。更换群主只影响新 run。同一房间不同 Agent 并行，同一 Agent 按入队顺序执行；新消息不取消旧任务，不同房间互不阻塞。
 2. `RoomState.tasks` 提供 taskId、runId、parentTaskId、agentId、messageId、请求文本与 queued / running / cancelling / waiting 状态；协调任务另带 coordination（lead / work / review）。已完成但仍有活动后代的任务显示为 waiting，保留停止剩余工作的入口。`activeRunId` 仅保留为兼容的忙碌标志，`queued` 计数任务；界面不从单个 runId 推断全部运行状态。`idle(roomId)` 等到队列、衍生交接和自动跟进全部结束。
-3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session。群聊转述取原始请求及之前的最近 30 条记录作为候选；交接再从最新 30 条记录补入同一请求的已完成 Agent 回复。候选中取该 Agent 上次成功发言之后的内容，单条正文最多 2000 字符、转述整体约 8000 字符，优先保留较新消息。`<tuantuan-task>` 独立保留原始消息全文与引用快照，避免新消息或后续发言替换排队任务。每轮另附 `<tuantuan-coordination>` 指定 leader / member / direct 职责及 initial / review 阶段，不把群主职责写死在可能缓存的身份文档中。单 Agent 的新请求直接收到用户消息（含图片）；群聊缩为单人时，已有协调 run 保留职责与结果上下文直至收尾。身份文档按 Harness 传递（见 [Harness 文档](harness.md)）；不支持的 Harness 附加在新会话首条普通 prompt 前的 `<tuantuan-identity>` 中。
+3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session。群聊转述取原始请求及之前的最近 30 条记录作为候选；交接通过 `Store.runMessages` 单独查询同一请求已完成的 Agent 回复，不先对全房间取 30 条再过滤。候选中取该 Agent 上次成功发言之后的内容，长正文保留首尾与省略标记，附消息 ID 和原长；单条约 2000 字符、整体约 8000 字符，优先较新消息，目录与完整原文可经 `read_context` 追读。`<tuantuan-task>` 独立保留原始消息全文与引用快照，`<tuantuan-context>` 独立保留结构化笔记；排队期间的新消息不能替换它们。每轮另附 `<tuantuan-coordination>` 指定 leader / member / direct 职责及 initial / review 阶段，不把群主职责写死在可能缓存的身份文档中。单 Agent 的新请求直接收到用户消息（含图片）；群聊缩为单人时，已有协调 run 保留职责与结果上下文直至收尾。身份文档按 Harness 传递（见 [Harness 文档](harness.md)）；不支持的 Harness 附加在新会话首条普通 prompt 前的 `<tuantuan-identity>` 中。
 4. `session/update` 按 messageId 实时推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。取消或删除后的迟到更新不能继续写入回复。
 5. `POST /api/rooms/:id/cancel {taskId}` 只取消该任务及 parentTaskId 可追溯的后代，保留独立根任务和兄弟任务。排队任务直接移除；运行任务变为 cancelling，待 Harness 结束才放行同一 Agent 下一项。群聊缺 taskId 返回 400；DM 空请求兼容为停止当前任务，保留后续队列。删除房间、修改项目目录 / 归属或停机使用 `cancelAll`；移除 Agent 使用 `cancelAgent`，只传播到其交接后代。
 6. Host 取消：prompt 先检查 AbortSignal；初始化等待可被取消，取消后不发送 prompt，同一 slot 的预热可供后续请求复用。已发出的 prompt 先发 `session/cancel`、解决挂起权限；默认 4 秒仍未返回则销毁该「房间 + Agent」的 Harness 与 ACP 终端进程组，保留部分回复并标为 cancelled，其他房间和 Agent 继续执行。同一 room / Agent 的重入 prompt 与活动期间切换历史会话返回 409。
-7. 交接：运行中的 Agent 调用 `handoff`，校验其他成员，并同步预占该人类消息共享的最多 5 次交接预算；来源正常结束后才创建子任务。协调 run 仅允许冻结的群主分工，成员结果自动回流；直接对话仍可按需继续交接。相同轮次已有排队 / 运行任务或预占的目标去重，`@所有人` 每成员只触发一次；不跨独立人类消息去重。失败或取消释放未派发预算，不产生后代。交接说明在 trim 后以 `slice(0, 4000)` 保存；接手方按自己的 FIFO 排队，prompt 附 `<tuantuan-handoff from="…">task</tuantuan-handoff>`，不克隆来源 session；时间线保留 `handoffs` / `handoffFrom`。角色属于本次请求，不形成固定 Agent 上下级。
+7. 交接：运行中的 Agent 调用 `handoff`，校验成员、完整任务和可选笔记后，同步预占该人类消息共享的最多 5 次交接预算；来源正常结束后才创建子任务。协调 run 仅允许冻结的群主分工，成员结果自动回流；直接对话仍可按需继续交接。相同轮次已有排队 / 运行任务或预占的目标去重，`@所有人` 每成员只触发一次；不跨独立人类消息去重。失败或取消释放未派发预算，不保存成功交接、不产生后代。交接说明 trim 后最多 16,000 字符，超限拒绝，不截断。`context` 完整 JSON 最多 4000 字符，各字符串最多 2000 字符，数组各最多 20 项；缺少字段或超限不修改当前快照。省略 `context` 时复制当前收到 / 暂存的笔记，显式 `context` 只作用于该目标，接受后不受后续 `save_context` 影响。接手方按自己的 FIFO 排队，prompt 附完整 `<tuantuan-handoff>` 与独立 `<tuantuan-context>`，不克隆来源 session；时间线保留 `handoffs` / `handoffFrom`。角色属于本次请求，不形成固定 Agent 上下级。
 8. 初始化去重与失效：同一房间 / Agent 的 opening 按配置签名复用并记录代次；发布 session 前再次核对签名与代次。Agent 设置、项目目录或会话选择变更，以及停机时使旧 opening 失效，旧结果不能回写映射或 slot；相关旧请求返回 409，下一次请求按当前配置重试。失败或切换清理只移除该请求仍拥有的 slot，不删除其他房间相同 ACP sessionId 的映射。
 9. session/load 回放：`switchSession` 指定历史会话时优先 load，回放的 update 存在 slot 里，`/replay` 接口按用户消息文本去掉本房间已有的轮次后返回，前端只读显示。刷新读取当前任务快照并重放期间的 WS 事件；服务重启不重放未开始的任务，已开始但未完成的回复沿用 interrupted 恢复规则。
 
@@ -181,9 +183,15 @@ review 可继续 handoff，重复分给已结束的成员仍消耗共享的 5 �
 
 `read_result(messageId, offset)` 以 6000 字符分页读取本轮已结束的 Agent 消息，返回 nextOffset（null 表示结束）；服务端校验成员身份、活动任务归属、roomId / runId、消息类型和偏移。`list_members` 补充最多 600 字符身份说明。群聊工具列表不随 leader / member 角色变化，执行权限在 call 中校验；缩为单人后仍在运行的协调轮保留结果读取能力。
 
+`save_context(goal, decisions, pending)` 暂存完整快照，只有回合成功才提交 `Timeline.taskContext` 及内存 `Task.context`；输出上限、失败、取消、中断均不提交。接手任务从 `from.context` 继承；群主 review 从 `reviewOf` 所指的实际上一批任务继承，不使用仅表示取消关系的 `parentTaskId`。成功成员的笔记作为 report 附件，由群主复核后自行决定是否更新其快照，避免自动合并相互矛盾的决定。
+
+review 的任务说明使用最多 2000 字符首尾摘录，长任务标记 `taskTruncated`、`taskLength` 及 `taskSource { messageId, handoffIndex }`，从本批来源的成功交接记录追读全文。原始用户任务、群主笔记及成员成功笔记保留完整，避免 16,000 字符交接在每个 report 中重复占满 BYOK 请求；BYOK 自身 65,536 字符预算和原生 Harness 压缩机制不变。
+
+`read_context` 复用消息时间线，无额外索引表。无 messageId 时通过 `Store.contextMessages` 以 beforeSeq 排他游标返回每页 20 条目录；指定 messageId 时返回每页 6000 字符的正文、成功笔记与交接目录；指定 handoffIndex 可读取该条交接说明和快照。可见性在查询 / 读取时校验：同房间、非系统、非生成中，且 seq 不晚于原始请求，或属于本 run 的后续已结束消息。后来的独立 run 不可读取；成员已移除、任务取消或 taskId 过期也拒绝。`nextBeforeSeq` / `nextOffset` 为 null 时结束。`<tuantuan-context>` 与其他团团内部块在原生 session/load 回放中剥离，避免显示为用户输入。
+
 Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio MCP、团团工具入口）；增删绑定、删除服务器、插件配置变化或单聊加成员变群聊时，下一次空闲 attach 通过已有 resume / load 更新 mcpServers，按 Harness 能力保留会话历史，不支持恢复时新建会话。活动期间的界面查询复用现有 slot 或预热，不更换进程、回调或权限请求，下一任务再刷新。配置相同不重复重连，单纯换群主不会刷新工具接入。初始化签名同时包含用户服务器记录与插件配置指纹，发布前再次核对；初始化期间的配置变更使旧结果失效，不能覆盖新 slot。
 
-交接与结果读取请求的归属在 MCP HTTP 入口读取正文之前绑定到 taskId，整个 batch 使用同一上下文；BYOK 工具回调在 prompt 开始时捕获。真正执行时核对仍是同一个未取消任务，避免旧请求延迟解析后归到下一轮。MCP endpoint 仍按房间 / Agent 注入并供 session 复用；完全在旧 prompt 结束后才新发起、且不携带轮次标识的外部调用无法区分来源，依赖 Harness 遵守 prompt 生命周期。
+交接、笔记保存与原文 / 结果读取请求的归属在 MCP HTTP 入口读取正文之前绑定到 taskId，整个 batch 使用同一上下文；BYOK 工具回调在 prompt 开始时捕获。真正执行时核对仍是同一个未取消任务，避免旧请求延迟解析后归到下一轮。MCP endpoint 仍按房间 / Agent 注入并供 session 复用；完全在旧 prompt 结束后才新发起、且不携带轮次标识的外部调用无法区分来源，依赖 Harness 遵守 prompt 生命周期。
 
 资源随归属释放：删除会话 / 项目 / Agent、移除成员或变更项目目录 / 归属时，先取消对应任务，再由 `HarnessHost.releaseRoom` 清理对应 opening、slot、权限、BYOK 历史及进程；旧初始化结果不能重新挂回。普通任务停止保留可复用会话，进程仅在取消超时才强制回收。
 
