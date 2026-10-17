@@ -1,0 +1,60 @@
+/* Mirrored from web/src/styles.css (bot avatars + brand mark) so the site renders the app's own SVGs identically. */
+/* ================= bot avatars ================= */
+.bot-avatar { display: block; overflow: visible; --fill: var(--c); }
+.bot-avatar .ba-body > * { fill: var(--fill); stroke: var(--fill); }
+.bot-avatar .ba-body > *:not(.ba-stroke) { stroke-width: 0; }
+.bot-avatar .ba-body > .ba-cutout { fill: #fff; stroke: none; }
+.bot-avatar .ba-body > .ba-detail { fill: none; stroke: #fff; stroke-width: 4; }
+.bot-avatar .ba-eyes line { stroke: #fff; stroke-width: 7.5; stroke-linecap: round; }
+@media (prefers-color-scheme: dark) {
+  .bot-avatar { --fill: color-mix(in srgb, var(--c) 86%, #ffffff); }
+}
+/* ---------- bot avatar expressions & motion (transform/opacity only) ---------- */
+.bot-avatar .ba-face line, .bot-avatar .ba-face path { stroke: #fff; stroke-width: 7.5; stroke-linecap: round; fill: none; }
+.bot-avatar .ba-face .ba-dot { fill: #fff; stroke: none; }
+.bot-avatar[data-shape="panda"] .ba-eyes line, .bot-avatar[data-shape="panda"] .ba-eyes path { stroke-width: 6; }
+.bot-avatar[data-shape="panda"] .ba-mouth { stroke: var(--fill); }
+.bot-avatar[data-shape="panda"] .ba-dot.ba-mouth { fill: var(--fill); stroke: none; }
+.bot-avatar .ba-eyes line { stroke: #fff; }
+.bot-avatar .ba-root, .bot-avatar .ba-eyes, .bot-avatar .ba-look, .bot-avatar .ba-mouth, .bot-avatar .ba-body { transform-box: fill-box; transform-origin: 50% 50%; }
+.bot-avatar .ba-root { transform-origin: 50% 100%; }
+.bot-avatar[data-anim] .ba-eyes { animation: ba-blink 5.2s var(--blink-delay, 0s) infinite; }
+.bot-avatar[data-anim="full"] .ba-body { animation: ba-breathe 3.6s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="idle"] .ba-look { animation: ba-glance 9s calc(var(--blink-delay, 0s) * 2) ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-root { animation: ba-wobble 1.4s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-look { animation: ba-ponder 2.4s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="speaking"] .ba-talk { animation: ba-talk 0.28s ease-in-out infinite alternate; }
+.bot-avatar[data-anim="full"][data-expr="speaking"] .ba-body { animation: ba-pulse 0.56s ease-in-out infinite alternate; }
+.bot-avatar[data-anim="full"][data-expr="sad"] .ba-root { animation: ba-shake 0.42s ease-in-out 1; }
+.bot-avatar[data-anim="full"][data-expr="happy"] .ba-root { animation: ba-hop 0.5s var(--ease) 1; }
+.bot-avatar[data-anim="full"] .ba-root[data-hop] { animation: ba-hop 0.5s var(--ease) 1; }
+.bot-avatar[data-anim="full"][data-expr="sleepy"] .ba-body { animation: ba-breathe 6s ease-in-out infinite; }
+.bot-avatar[data-expr="sleepy"] .ba-eyes, .bot-avatar[data-expr="happy"] .ba-eyes { animation: none !important; }
+.bot-avatar[data-offscreen="true"] *, html[data-tab-hidden] .bot-avatar * { animation-play-state: paused !important; }
+@keyframes ba-blink { 0%, 93%, 100% { transform: scaleY(1); } 95.5% { transform: scaleY(0.1); } }
+@keyframes ba-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025, 0.985); } }
+@keyframes ba-glance { 0%, 40%, 100% { transform: translateX(0); } 46%, 58% { transform: translateX(4px); } 64%, 74% { transform: translateX(-3px); } }
+@keyframes ba-ponder { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(3px, -2px); } }
+@keyframes ba-wobble { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes ba-talk { from { transform: scaleY(0.45); } to { transform: scaleY(1.15); } }
+@keyframes ba-pulse { from { transform: scale(1); } to { transform: scale(1.03); } }
+@keyframes ba-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+@keyframes ba-hop { 0% { transform: scale(1, 1); } 25% { transform: scale(1.12, 0.86); } 55% { transform: translateY(-10%) scale(0.92, 1.1); } 80% { transform: translateY(0) scale(1.04, 0.96); } 100% { transform: scale(1, 1); } }
+@media (prefers-reduced-motion: reduce) { .bot-avatar * { animation: none !important; } }
+/* Avatar states: thinking glances side to side, working looks down and bobs, done hops once */
+.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-root { animation: none; }
+.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-look { animation: ba-glance-lr 2.6s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="working"] .ba-root { animation: ba-bob 1.3s ease-in-out infinite; }
+.bot-avatar[data-anim="full"][data-expr="working"] .ba-eyes { animation: none; }
+@keyframes ba-glance-lr { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 60% { transform: translateX(4px); } }
+@keyframes ba-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3%); } }
+.brand-mark { display: block; overflow: visible; }
+.brand-mark .bm-ink { fill: var(--ink); }
+.brand-mark .bm-red { fill: var(--brand); }
+.brand-mark .bm-eyes { stroke: var(--on-ink); stroke-width: 9; stroke-linecap: round; transform-box: fill-box; transform-origin: center; transition: transform 0.35s ease; animation: bm-blink 6s infinite; }
+.brand-mark .bm-eyes-red { stroke: #fff; animation-delay: 0.18s; }
+.brand:hover .bm-eyes-ink { transform: translateX(3px); }
+.brand:hover .bm-eyes-red { transform: translateX(-4px) translateY(3px); }
+html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
+@keyframes bm-blink { 0%, 93%, 100% { scale: 1 1; } 95% { scale: 1 0.12; } }
+@media (prefers-reduced-motion: reduce) { .brand-mark .bm-eyes { animation: none; transition: none; } }

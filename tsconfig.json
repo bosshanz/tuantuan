@@ -14,5 +14,5 @@
     "verbatimModuleSyntax": false,
     "types": ["bun"]
   },
-  "include": ["shared", "server", "web/src", "tests", "scripts", "vite.config.ts"]
+  "include": ["shared", "server", "web/src", "tests", "scripts", "site", "vite.config.ts"]
 }
