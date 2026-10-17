@@ -21,6 +21,18 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 
 图文回归已纳入 `bun run e2e`：覆盖流程图、时序图、源码回退与流式修正、明暗主题、图表与各类图片预览、键盘焦点及窄屏布局。`SHOTS_DIR` 同时保存 `mermaid-preview-light.png`、`mermaid-preview-dark.png` 和 `image-preview-narrow-dark.png` 等截图。场景使用持久化测试消息与确定性 ACP 数据，不调用付费模型。
 
+## 宣传落地页（site/）
+
+`site/` 是静态落地页，四种语言各生成一个页面（英语在根路径，`zh-CN/`、`zh-TW/`、`ja/` 为子目录），复用 `web/src` 的 Bot 头像、团团 Logo 与厂商 Logo 组件，不引入新框架。
+
+```bash
+bun run site:dev     # 构建到 site/dist 并在 http://localhost:4173 预览
+bun run site:verify  # 4 语言 × 明暗 × 4 种宽度：截图、溢出、链接、语言自动识别（需要本机 Chrome）
+bun run site:og      # 文案或品牌变化后重新生成 site/public/assets/og/*.png 分享图
+```
+
+推送到 main 且改动涉及 `site/` 时，`.github/workflows/pages.yml` 自动部署到 GitHub Pages；首次需在仓库 **Settings → Pages → Source** 选 **GitHub Actions**。`SITE_URL` 决定 canonical、hreflang 与 og:image 的绝对地址，工作流会自动传入 Pages 地址。首屏视频为 `site/public/assets/session-score-social.mp4`（15 秒，封面 `session-score-poster.jpg`），并链接完整版 `session-score.mp4`；替换同名文件即可。
+
 ---
 
 [← 返回 README](../README.md) · [文档索引](README.md)

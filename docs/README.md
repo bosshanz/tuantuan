@@ -10,7 +10,7 @@
 | [服务商、BYOK 与用量](providers.md) | 自定义 API、服务商、CC Switch 导入、Token 统计、额度与余额 |
 | [配置与 mock 演示](configuration.md) | 环境变量、内置 mock Harness |
 | [界面与视觉](ui.md) | 截图、视觉风格、Agent 头像 |
-| [开发与测试](development.md) | 开发命令、e2e 与截图回归 |
+| [开发与测试](development.md) | 开发命令、e2e 与截图回归、宣传落地页 |
 | [常见问题与已知限制](faq.md) | 排障表、已知限制 |
 | [产品规则](product.md) | 产品规则与验收条件 |
 | [架构](architecture.md) | 模块、状态归属、路由机制与取舍 |

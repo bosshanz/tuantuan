@@ -9,6 +9,8 @@
 | [@lobehub/icons](https://github.com/lobehub/lobe-icons)（`icons-static-svg`） | 模型厂商 Logo 的 SVG 路径，内嵌于 `web/src/brandIcons.ts` | MIT |
 | [Plus Jakarta Sans](https://github.com/tokotype/PlusJakartaSans)（`@fontsource-variable/plus-jakarta-sans`） | 界面字体 | SIL Open Font License 1.1 |
 | [Lucide](https://lucide.dev)（`lucide-react`） | 界面图标 | ISC |
+| [ACP Registry](https://agentclientprotocol.com) 图标（`pi-acp.svg`） | 落地页 `site/` 中的 Pi 标识 | 归 Pi 项目所有，仅用于标识 |
+| [Octicons](https://github.com/primer/octicons)（`mark-github`） | 落地页 `site/` 中的 GitHub 标识 | MIT |
 
 厂商 Logo 是各公司的商标，仅用于标识对应模型；MIT 许可只覆盖 SVG 文件本身，不授予商标权。
 

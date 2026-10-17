@@ -21,7 +21,11 @@
     "desktop:install": "cd desktop && bun install && node node_modules/electron/install.js",
     "desktop:dev": "bun run build && cd desktop && bun run dev",
     "desktop:build": "bun run build && bun desktop/scripts/dist.ts",
-    "desktop:smoke": "bun desktop/scripts/smoke.ts"
+    "desktop:smoke": "bun desktop/scripts/smoke.ts",
+    "site:build": "bun site/build.tsx",
+    "site:dev": "bun site/build.tsx --serve",
+    "site:og": "bun site/build.tsx && bun site/og.tsx",
+    "site:verify": "bun site/build.tsx && bun site/verify.ts"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.90.0",
