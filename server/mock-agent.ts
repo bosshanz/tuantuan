@@ -5,8 +5,10 @@
  * It replies 「收到：「<text>」」 and exercises every client feature on request:
  *   /plan  — plan checklist        /edit — diff tool call behind a permission prompt, then writes mock-edit.txt
  *   /run   — terminal tool call    /slow — streams for ~6s (to test cancel)
+ *   /ask   — form elicitation      /ask_unknown — elicitation with a future field type
  * Tuantuan MCP tools (group rooms), called through whatever server session/new passed in:
- *   /handoff Name task   /handoff_context {agent,task,context}   /members   /coordinate NameA NameB
+ *   /handoff Name task   /handoff_context {agent,task,context}   /context {goal,decisions,pending}
+ *   /members   /coordinate NameA NameB
  * An identity doc containing [[handoff:Name task]] makes it hand off on every turn (loop tests).
  * Env: MOCK_AGENT_MCP_HTTP=1 advertises HTTP MCP support (default: stdio only, the ACP baseline);
  *      MOCK_AGENT_AUTH_FILE=path requires `authenticate` (method mock-login) before session/new works.
@@ -67,6 +69,9 @@ const COMMANDS: acp.AvailableCommand[] = [
   { name: "edit", description: "演示改文件（需要授权）" },
   { name: "run", description: "演示运行命令" },
   { name: "slow", description: "慢速回复，用来测试取消" },
+  { name: "ask", description: "演示提问卡片" },
+  { name: "ask_unknown", description: "演示不支持的问题类型" },
+  { name: "context", description: "演示保存任务笔记（群聊）" },
 ];
 
 function configOptions(s: Sess): acp.SessionConfigOption[] {
@@ -448,6 +453,54 @@ acp
         if (!saved) throw new Error(saveError);
         const [accepted, handoffError] = await tool("handoff", args);
         if (!accepted) throw new Error(handoffError);
+      } else if (cmd === "context") {
+        const args = JSON.parse(arg) as Record<string, unknown>;
+        const [saved, saveError] = await tool("save_context", args);
+        if (!saved) throw new Error(saveError);
+        await chunk("任务笔记已保存。");
+      } else if (cmd === "ask" || cmd === "ask_unknown") {
+        const form = await ctx.client.request(acp.methods.client.elicitation.create, {
+          sessionId,
+          message: cmd === "ask" ? "请确认本次发布的方式" : "这个字段来自更新版本的协议",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            properties:
+              cmd === "ask"
+                ? {
+                    target: { type: "string", title: "发布范围", enum: ["all", "canary"] },
+                    channel: {
+                      type: "string",
+                      title: "发布频道",
+                      oneOf: [
+                        { const: "stable", title: "稳定版", description: "面向所有用户" },
+                        { const: "beta", title: "测试版" },
+                      ],
+                    },
+                    note: { type: "string", title: "补充说明", minLength: 2, maxLength: 20, pattern: "确认" },
+                    batches: { type: "integer", title: "批次数量", minimum: 1, maximum: 5, default: 2 },
+                    ratio: { type: "number", title: "灰度比例", minimum: 0, maximum: 1 },
+                    confirm: { type: "boolean", title: "确认发布", default: true },
+                    tags: {
+                      type: "array",
+                      title: "标签",
+                      minItems: 1,
+                      maxItems: 2,
+                      items: { type: "string", enum: ["移动端", "桌面端", "服务端"] },
+                    },
+                    when: {
+                      type: "string",
+                      title: "执行时间",
+                      format: "date-time",
+                      default: "2026-10-17T10:00:00+08:00",
+                    },
+                  }
+                : { future: { type: "mystery", title: "未来字段" } },
+            required: cmd === "ask" ? ["target", "note"] : [],
+          },
+        });
+        const answer = form.action === "accept" ? ` ${JSON.stringify(form.content ?? {})}` : "";
+        await chunk(`提问结果：${form.action}${answer}`);
       } else if (cmd === "members") {
         const [, out] = await tool("list_members", {});
         await chunk(`成员：${out.replaceAll("\n", "；")}。`);

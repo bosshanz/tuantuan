@@ -124,5 +124,5 @@ export function useChatScroll() {
     },
     [pause, followLatest],
   );
-  return { listRef, following, followLatest, preserveReadingPosition, onScroll, onWheel, onTouchMove: pause };
+  return { listRef, following, followLatest, preserveReadingPosition, onScroll, onWheel, onTouchMove: pause, pause };
 }

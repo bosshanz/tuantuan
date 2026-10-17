@@ -1,5 +1,20 @@
-import { applyUpdate, emptyTimeline, timelineText } from "../../shared/timeline";
-import type { Message, PermissionAsk, RoomEvent, RoomState, SessionView, TerminalSnapshot } from "./api";
+import {
+  applyUpdate,
+  conclusionFromMessage,
+  emptyTimeline,
+  latestConclusionOf,
+  type RoomConclusion,
+  timelineText,
+} from "../../shared/timeline";
+import type {
+  ElicitationAsk,
+  Message,
+  PermissionAsk,
+  RoomEvent,
+  RoomState,
+  SessionView,
+  TerminalSnapshot,
+} from "./api";
 import { mergeMessages, upsertMessage } from "./messageMerge";
 
 export interface MessagePage {
@@ -11,6 +26,8 @@ export interface ChatSnapshot extends MessagePage {
   state: RoomState;
   sessions: Record<string, SessionView>;
   asks: PermissionAsk[];
+  elicitations: ElicitationAsk[];
+  conclusion: RoomConclusion | null;
 }
 
 export interface ChatState extends Omit<ChatSnapshot, "nextBeforeSeq"> {
@@ -32,6 +49,8 @@ export function emptyChat(roomId: string): ChatState {
     state: { activeRunId: null, queued: 0, tasks: [] },
     sessions: {},
     asks: [],
+    elicitations: [],
+    conclusion: null,
     terminals: {},
     loading: null,
     history: { initialized: false, nextBeforeSeq: null, loading: null, error: null },
@@ -59,8 +78,18 @@ export function historyCursor(messages: Message[], oldestBeforeSeq: number | nul
 
 function applyEvent(current: ChatState, e: RoomEvent): ChatState {
   switch (e.type) {
-    case "message":
-      return { ...current, messages: upsertMessage(current.messages, e.message) };
+    case "message": {
+      const conclusion = conclusionFromMessage(e.message);
+      return {
+        ...current,
+        messages: upsertMessage(current.messages, e.message),
+        // A round without a new accepted note keeps the previous conclusion visible.
+        conclusion:
+          conclusion && (!current.conclusion || conclusion.seq > current.conclusion.seq)
+            ? conclusion
+            : current.conclusion,
+      };
+    }
     case "update":
       return {
         ...current,
@@ -80,6 +109,13 @@ function applyEvent(current: ChatState, e: RoomEvent): ChatState {
         asks: e.ask
           ? [...current.asks.filter((a) => a.id !== e.ask?.id), e.ask]
           : current.asks.filter((a) => a.id !== e.resolvedId),
+      };
+    case "elicitation":
+      return {
+        ...current,
+        elicitations: e.ask
+          ? [...current.elicitations.filter((a) => a.id !== e.ask?.id), e.ask]
+          : current.elicitations.filter((a) => a.id !== e.resolvedId),
       };
     case "terminal":
       return { ...current, terminals: { ...current.terminals, [e.terminal.terminalId]: e.terminal } };
@@ -135,12 +171,25 @@ export function chatReducer(current: ChatState, action: Action): ChatState {
   if (action.id !== current.loading?.id) return current;
   if (action.type === "load.failed") return { ...current, loading: null };
   // Replaying only stateful events avoids applying streamed text deltas twice. Messages use their existing merge rule.
+  const merged = mergeMessages(action.data.messages, current.messages, roomId);
+  // Live messages during loading are not replayed (to avoid duplicating streamed text), so derive
+  // the conclusion from the merged transcript and keep whichever accepted note is newest.
+  const derived = latestConclusionOf(merged);
+  const conclusions = [action.data.conclusion, current.conclusion, derived].filter(
+    (value): value is RoomConclusion => !!value,
+  );
+  const conclusion = conclusions.reduce<RoomConclusion | null>(
+    (latest, value) => (!latest || value.seq > latest.seq ? value : latest),
+    null,
+  );
   let next: ChatState = {
     ...current,
     state: action.data.state,
     sessions: action.data.sessions,
     asks: action.data.asks,
-    messages: mergeMessages(action.data.messages, current.messages, roomId),
+    elicitations: action.data.elicitations,
+    conclusion,
+    messages: merged,
     loading: null,
     // Reconnect refreshes the tail; it must not move a reader's older-history boundary forward.
     history: current.history.initialized

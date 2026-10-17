@@ -3,13 +3,16 @@ import {
   ArrowDown,
   ArrowRightLeft,
   ArrowUp,
+  ArrowUpRight,
   ChevronLeft,
   ChevronRight,
   CircleSlash,
   Clock3,
   History,
   PanelRight,
+  Pin,
   Plus,
+  RotateCcw,
   Square,
   SquareTerminal,
   Trash2,
@@ -22,7 +25,8 @@ import { intlLocale, translateError, useI18n } from "./i18n";
 import "./messageQuote.css";
 import "./chatTasks.css";
 import "./chatScroll.css";
-import type { ReplayTurn, TaskContext, Timeline } from "../../shared/timeline";
+import type { ElicitationValue } from "../../shared/elicitation";
+import type { ReplayTurn, RoomConclusion, TaskContext, Timeline } from "../../shared/timeline";
 import {
   type Agent,
   ApiError,
@@ -39,6 +43,7 @@ import { agentActivity, messageExpression } from "./avatarState";
 import { SessionChips } from "./ConfigChips";
 import { type ChatSnapshot, chatReducer, emptyChat, historyCursor, type MessagePage } from "./chatState";
 import type { Opt } from "./config";
+import { ElicitationDialog } from "./ElicitationDialog";
 import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
 import { MissingKey } from "./HarnessAuth";
 import { MessageActions } from "./MessageActions";
@@ -89,7 +94,7 @@ export function ChatView(props: {
 }) {
   const { t: tr, locale } = useI18n();
   const { room, agents } = props;
-  const [{ messages, state, sessions, asks, terminals, history }, dispatch] = useReducer(
+  const [{ messages, state, sessions, asks, elicitations, conclusion, terminals, history }, dispatch] = useReducer(
     chatReducer,
     room.id,
     emptyChat,
@@ -99,6 +104,10 @@ export function ChatView(props: {
   const nextBeforeSeq = history.initialized ? historyCursor(messages, history.nextBeforeSeq) : null;
   const [answers, setAnswers] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingAnswers = useRef(new Set<string>());
+  const pendingQuestions = useRef(elicitations);
+  pendingQuestions.current = elicitations;
+  const [retries, setRetries] = useState<Record<string, { pending: boolean; error: string | null }>>({});
+  const pendingRetries = useRef(new Set<string>());
   const [cancellations, setCancellations] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingCancellations = useRef(new Set<string>());
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -121,7 +130,8 @@ export function ChatView(props: {
   const terminalSlot = useRef<HTMLDivElement>(null);
   const terminalButton = useRef<HTMLButtonElement>(null);
   const taskDisclosure = useRef<HTMLDivElement>(null);
-  const { listRef, following, followLatest, preserveReadingPosition, onScroll, onWheel, onTouchMove } = useChatScroll();
+  const { listRef, following, followLatest, preserveReadingPosition, onScroll, onWheel, onTouchMove, pause } =
+    useChatScroll();
   const showTerminal = useCallback(
     (open: boolean) => {
       setTerminalOpen(open);
@@ -165,6 +175,20 @@ export function ChatView(props: {
   const primaryView = primary ? sessions[primary.id] : undefined;
 
   useEffect(() => {
+    return () => {
+      // Route changes unmount this room. A page reload does not run React cleanup, so its
+      // questions remain available in the next snapshot. Cancel only this room's known asks.
+      for (const question of pendingQuestions.current) {
+        if (question.roomId !== room.id) continue;
+        void api("POST", `/api/elicitations/${question.id}`, { action: "cancel" }).catch((error) => {
+          if (!(error instanceof ApiError && error.status === 404))
+            console.warn("Unable to cancel question when leaving the conversation", error);
+        });
+      }
+    };
+  }, [room.id]);
+
+  useEffect(() => {
     let alive = true;
     let requestId = 0;
     const load = async () => {
@@ -191,6 +215,7 @@ export function ChatView(props: {
         e.type === "update" ||
         e.type === "session" ||
         e.type === "permission" ||
+        e.type === "elicitation" ||
         e.type === "terminal" ||
         e.type === "room.state"
       ) {
@@ -226,6 +251,32 @@ export function ChatView(props: {
       if (id === historyRequest.current) historyPending.current = false;
     }
   };
+
+  // Clicking the conclusion card pauses following, then pages back until it can reveal the source.
+  const jumpTarget = useRef<string | null>(null);
+  const loadHistoryRef = useRef(loadHistory);
+  loadHistoryRef.current = loadHistory;
+  const jumpToMessage = (messageId: string) => {
+    pause();
+    jumpTarget.current = null;
+    if (flashMessage(messageId)) return;
+    jumpTarget.current = messageId;
+    void loadHistoryRef.current();
+  };
+  useEffect(() => {
+    const target = jumpTarget.current;
+    if (!target) return;
+    if (flashMessage(target)) {
+      jumpTarget.current = null;
+      return;
+    }
+    if (history.error || nextBeforeSeq === null) {
+      jumpTarget.current = null;
+      return;
+    }
+    if (history.loading) return;
+    void loadHistoryRef.current();
+  }, [nextBeforeSeq, history.loading, history.error]);
 
   // Warm up every member's session so the model picker and slash commands are there before the first message.
   const warming = useRef(new Set<string>());
@@ -327,6 +378,55 @@ export function ChatView(props: {
     [room.id],
   );
 
+  const answerElicitation = useCallback(
+    async (askId: string, action: "accept" | "cancel", content?: Record<string, ElicitationValue>) => {
+      if (pendingAnswers.current.has(askId)) return;
+      pendingAnswers.current.add(askId);
+      setAnswers((a) => ({ ...a, [askId]: { pending: true, error: null } }));
+      try {
+        await api("POST", `/api/elicitations/${askId}`, { action, content });
+        dispatch({ type: "event", event: { type: "elicitation", roomId: room.id, ask: null, resolvedId: askId } });
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) {
+          // Another client, cancellation or a duplicate submit already resolved this question.
+          dispatch({ type: "event", event: { type: "elicitation", roomId: room.id, ask: null, resolvedId: askId } });
+        } else {
+          setAnswers((a) => ({ ...a, [askId]: { pending: false, error: (e as Error).message } }));
+        }
+      } finally {
+        pendingAnswers.current.delete(askId);
+        setAnswers((a) => ({ ...a, [askId]: { pending: false, error: a[askId]?.error ?? null } }));
+      }
+    },
+    [room.id],
+  );
+
+  const retryRequest = useCallback(
+    async (messageId: string) => {
+      if (pendingRetries.current.has(messageId)) return;
+      pendingRetries.current.add(messageId);
+      setRetries((current) => ({ ...current, [messageId]: { pending: true, error: null } }));
+      try {
+        followLatest();
+        const sent = await api<Message>("POST", `/api/rooms/${room.id}/messages/${messageId}/retry`);
+        dispatch({ type: "event", event: { type: "message", message: sent } });
+        setRetries((current) => {
+          const next = { ...current };
+          delete next[messageId];
+          return next;
+        });
+      } catch (e) {
+        setRetries((current) => ({
+          ...current,
+          [messageId]: { pending: false, error: (e as Error).message },
+        }));
+      } finally {
+        pendingRetries.current.delete(messageId);
+      }
+    },
+    [room.id, followLatest],
+  );
+
   const pickOption = async (agentId: string, opt: Opt, value: string) => {
     try {
       const v =
@@ -352,6 +452,7 @@ export function ChatView(props: {
   const stopTask = tasks.length === 1 ? tasks[0] : undefined;
   const selectedMsg = messages.find((m) => m.id === selected);
   const ask = asks[0];
+  const elicitation = ask ? undefined : elicitations[0];
 
   return (
     <div className="conversation-workspace">
@@ -416,6 +517,9 @@ export function ChatView(props: {
 
           <div className="messages-wrap">
             <div className="messages" ref={listRef} onWheel={onWheel} onTouchMove={onTouchMove} onScroll={onScroll}>
+              {conclusion && (
+                <RoomConclusionCard conclusion={conclusion} onJump={() => jumpToMessage(conclusion.messageId)} />
+              )}
               {nextBeforeSeq !== null && (
                 <div className="chat-history">
                   <button
@@ -505,6 +609,12 @@ export function ChatView(props: {
                         selected={selected === m.id && panel}
                         onDetails={() => openDetails(m.id)}
                         harnessId={agentById.get(m.senderId ?? "")?.harness}
+                        retry={m.senderKind === "agent" && m.status === "interrupted" ? retries[m.id] : undefined}
+                        onRetry={
+                          m.senderKind === "agent" && m.status === "interrupted"
+                            ? () => void retryRequest(m.id)
+                            : undefined
+                        }
                       />
                     ))}
                   </div>
@@ -582,6 +692,18 @@ export function ChatView(props: {
                 : null
             }
             onAnswer={(optionId) => void answer(ask.id, optionId)}
+          />
+        )}
+
+        {elicitation && (
+          <ElicitationDialog
+            key={elicitation.id}
+            ask={elicitation}
+            agentName={agentById.get(elicitation.agentId)?.name ?? "Agent"}
+            pending={answers[elicitation.id]?.pending ?? false}
+            error={answers[elicitation.id]?.error ?? null}
+            onAccept={(content) => void answerElicitation(elicitation.id, "accept", content)}
+            onCancel={() => void answerElicitation(elicitation.id, "cancel")}
           />
         )}
 
@@ -726,6 +848,18 @@ function groupMessages(messages: Message[]): Group[] {
   return out;
 }
 
+/** Reveal a rendered message and flash it; false means it is not in the loaded transcript yet. */
+function flashMessage(messageId: string): boolean {
+  const element = document.querySelector<HTMLElement>(`.message-row[data-message-id="${CSS.escape(messageId)}"]`);
+  if (!element) return false;
+  element.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+  element.dataset.flash = "";
+  window.setTimeout(() => {
+    delete element.dataset.flash;
+  }, 1400);
+  return true;
+}
+
 function MessageItem(props: {
   m: Message;
   terminals: Record<string, TerminalSnapshot>;
@@ -735,6 +869,8 @@ function MessageItem(props: {
   harnessId?: string;
   onQuote?: () => void;
   quoteDisabled?: boolean;
+  retry?: { pending: boolean; error: string | null };
+  onRetry?: () => void;
 }) {
   const { t: tr } = useI18n();
   const { m } = props;
@@ -805,9 +941,28 @@ function MessageItem(props: {
         )}
         {m.status === "error" && m.error && <MissingKey harnessId={props.harnessId} error={m.error} />}
         {m.status === "interrupted" && (
-          <div className="msg-error">
-            <AlertTriangle size={14} />
-            <span>{m.error ? translateError(m.error) : tr("回复被中断")}</span>
+          <div className="msg-interrupted">
+            <div className="msg-error">
+              <AlertTriangle size={14} />
+              <span>{m.error ? translateError(m.error) : tr("回复被中断")}</span>
+            </div>
+            {props.onRetry && (
+              <button
+                type="button"
+                className="btn sm"
+                disabled={props.retry?.pending}
+                aria-busy={props.retry?.pending}
+                onClick={props.onRetry}
+              >
+                <RotateCcw size={13} />
+                {props.retry?.pending ? tr("正在重试…") : tr("重试此请求")}
+              </button>
+            )}
+            {props.retry?.error && (
+              <div className="error-text" role="alert">
+                {tr("重试失败：{reason}。请重试。", { reason: translateError(props.retry.error) })}
+              </div>
+            )}
           </div>
         )}
         {m.senderKind === "agent" && !streaming && (t?.reviewOf || m.status === "cancelled") && (
@@ -841,6 +996,57 @@ function HandoffTask({ task }: { task: string }) {
     // biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded task region needs keyboard scrolling
     <section className="handoff-task" tabIndex={0} aria-label={tr("交接任务")}>
       {task}
+    </section>
+  );
+}
+
+/** Read-only latest accepted note, pinned above the transcript; older notes stay on their messages. */
+function RoomConclusionCard({ conclusion, onJump }: { conclusion: RoomConclusion; onJump: () => void }) {
+  const { t: tr } = useI18n();
+  const id = useId();
+  const { context } = conclusion;
+  return (
+    <section className="room-conclusion" aria-labelledby={id}>
+      <div className="room-conclusion-head">
+        <Pin size={14} aria-hidden />
+        <h3 id={id}>{tr("当前结论")}</h3>
+        <button type="button" className="btn ghost sm" onClick={onJump}>
+          <ArrowUpRight size={13} aria-hidden />
+          {tr("查看来源消息")}
+        </button>
+      </div>
+      <div className="room-conclusion-grid">
+        <div className="room-conclusion-goal">
+          <span className="room-conclusion-label">{tr("任务目标")}</span>
+          <p>{context.goal || tr("暂无记录")}</p>
+        </div>
+        <div>
+          <span className="room-conclusion-label">{tr("关键决策")}</span>
+          {context.decisions.length ? (
+            <ul>
+              {context.decisions.map((decision, index) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: snapshot entries have no ids and are replaced wholesale
+                <li key={index}>{decision}</li>
+              ))}
+            </ul>
+          ) : (
+            <span className="muted">{tr("暂无记录")}</span>
+          )}
+        </div>
+        <div>
+          <span className="room-conclusion-label">{tr("未完成事项")}</span>
+          {context.pending.length ? (
+            <ul>
+              {context.pending.map((pending, index) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: snapshot entries have no ids and are replaced wholesale
+                <li key={index}>{pending}</li>
+              ))}
+            </ul>
+          ) : (
+            <span className="muted">{tr("无未完成事项")}</span>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

@@ -21,6 +21,8 @@ export interface AcpLaunch {
 export interface AcpHandlers {
   onUpdate(n: acp.SessionNotification): void;
   requestPermission(p: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse>;
+  /** Omitted by protocol-focused tests; those clients cancel form questions. */
+  requestElicitation?(p: acp.CreateElicitationRequest): Promise<acp.CreateElicitationResponse>;
   onTerminal?(t: TerminalSnapshot): void;
 }
 
@@ -82,6 +84,10 @@ export class AcpProcess {
       .client({ name: "tuantuan" })
       .onNotification(acp.methods.client.session.update, (ctx) => this.h.onUpdate(ctx.params))
       .onRequest(acp.methods.client.session.requestPermission, (ctx) => this.h.requestPermission(ctx.params))
+      .onRequest(
+        acp.methods.client.elicitation.create,
+        (ctx) => this.h.requestElicitation?.(ctx.params) ?? { action: "cancel" as const },
+      )
       .onRequest(acp.methods.client.fs.readTextFile, (ctx) => this.readTextFile(ctx.params))
       .onRequest(acp.methods.client.fs.writeTextFile, (ctx) => this.writeTextFile(ctx.params))
       .onRequest(acp.methods.client.terminal.create, (ctx) => this.createTerminal(ctx.params))
@@ -106,7 +112,12 @@ export class AcpProcess {
       Promise.race([
         this.agent.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
-          clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+          clientCapabilities: {
+            fs: { readTextFile: true, writeTextFile: true },
+            terminal: true,
+            // Form only: URL elicitation would hand the user a browser flow Tuantuan cannot track.
+            elicitation: { form: {} },
+          },
           clientInfo: { name: "tuantuan", title: "团团", version: "0.1.1" },
         }),
         this.exited.then((code) => {

@@ -12,12 +12,16 @@ export function harnessProcessEnv(
   loginEnv: Record<string, string>,
   skillEnv: Record<string, string>,
   agentEnv: Record<string, string>,
-  spec: Pick<HarnessSpec, "identity">,
+  spec: Pick<HarnessSpec, "identity"> & { id?: string },
   identity: string,
 ): Record<string, string> {
   const safeSkill = { ...skillEnv };
   for (const k of ISOLATION) delete safeSkill[k];
   const env: Record<string, string> = { ...loginEnv, ...safeSkill, ...agentEnv };
+  // Tuantuan renders ACP form elicitation, so OpenCode's question tool should be available by
+  // default. An explicit value from the login shell, a skill or the agent still wins.
+  if (spec.id === "opencode" && env.OPENCODE_ENABLE_QUESTION_TOOL === undefined)
+    env.OPENCODE_ENABLE_QUESTION_TOOL = "1";
   if (spec.identity === "codex-env" && identity.trim()) {
     // Merge into whatever CODEX_CONFIG the login shell already had (provider stays).
     env.CODEX_CONFIG = mergeCodexConfig(env.CODEX_CONFIG, identity);
