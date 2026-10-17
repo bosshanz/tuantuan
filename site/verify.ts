@@ -109,6 +109,10 @@ for (const locale of LOCALES) {
       await page.goto(`${origin}/${LOCALE_PATH[locale]}`, { waitUntil: "load" });
       await page.evaluate(() => document.fonts.ready);
       await revealAll(page);
+      // Lay out the macOS first-launch hint expanded too, so its steps and command are checked.
+      await page.evaluate(() => {
+        for (const d of document.querySelectorAll("details")) d.open = true;
+      });
       const tag = `${locale}-${scheme}-${vpName}`;
       for (const e of errors) fail(`${tag}: ${e}`);
       for (const issue of await layoutIssues(page)) fail(`${tag}: ${issue}`);
@@ -165,6 +169,25 @@ for (const scheme of ["light", "dark"] as const) {
     await page.hover(".harness >> nth=0");
     await page.waitForTimeout(250);
     await page.locator("#harnesses").screenshot({ path: join(shots, "hover-harness.png") });
+  }
+  await ctx.close();
+}
+
+console.log("macOS first-launch hint");
+for (const locale of LOCALES) {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: BROWSER_LOCALE[locale] });
+  const page = await ctx.newPage();
+  await page.goto(`${origin}/${LOCALE_PATH[locale]}`);
+  const hint = page.locator("#mac-first");
+  if (await hint.locator(".mac-first-body").isVisible()) fail(`${locale}: macOS hint should start collapsed`);
+  await hint.locator("summary").click();
+  if (!(await hint.locator(".mac-first-body").isVisible())) fail(`${locale}: macOS hint did not expand`);
+  const cmd = await hint.locator("button[data-copy]").getAttribute("data-copy");
+  if (cmd !== "xattr -dr com.apple.quarantine /Applications/tuantuan.app") fail(`${locale}: xattr command is ${cmd}`);
+  if ((await hint.locator("ol li").count()) !== 3) fail(`${locale}: macOS hint should list 3 steps`);
+  if (locale === "en" || locale === "zh-CN") {
+    await page.waitForTimeout(300);
+    await hint.screenshot({ path: join(shots, `mac-first-${locale}.png`) });
   }
   await ctx.close();
 }

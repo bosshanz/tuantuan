@@ -9,6 +9,10 @@
  */
 const env = process.env;
 const notarize = !!(env.APPLE_ID && env.APPLE_APP_SPECIFIC_PASSWORD && env.APPLE_TEAM_ID) || !!env.APPLE_API_KEY;
+// Without a Developer ID the bundle is ad-hoc signed. The hardened runtime only matters for notarization;
+// combined with an ad-hoc identity it adds library-validation / JIT restrictions to the app, its helpers,
+// the bundled Bun and everything Bun loads, with no security benefit, so it stays off in that case.
+const adhoc = !(env.CSC_LINK || env.CSC_NAME);
 const publish =
   env.TUANTUAN_PUBLISH === "github"
     ? [{ provider: "github", owner: env.TUANTUAN_GH_OWNER || "bosshanz", repo: env.TUANTUAN_GH_REPO || "tuantuan" }]
@@ -37,7 +41,7 @@ module.exports = {
     icon: "build/icon.icns",
     // Arch comes from the CLI (scripts/dist.ts builds arm64 and x64 separately, each with its own Bun).
     target: ["dmg", "zip"],
-    hardenedRuntime: true,
+    hardenedRuntime: !adhoc,
     gatekeeperAssess: false,
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
@@ -47,7 +51,7 @@ module.exports = {
     // No Developer ID: ad-hoc sign the whole bundle ("-") instead of leaving it unsigned. An unsigned
     // (or partially signed) app gets no entry in System Settings › Notifications and macOS drops its
     // notifications silently; ad-hoc keeps the bundle id app.tuantuan.desktop valid for Notification Center.
-    identity: env.CSC_LINK || env.CSC_NAME ? undefined : "-",
+    identity: adhoc ? "-" : undefined,
   },
   dmg: { title: "团团 ${version}" },
   win: { icon: "build/icon.ico", target: ["nsis"] },

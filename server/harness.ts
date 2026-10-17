@@ -272,10 +272,17 @@ export function loginShellEnv(): Promise<Record<string, string>> {
     const base = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] != null));
     const shell = process.env.SHELL || "/bin/bash";
     try {
-      const p = Bun.spawn([shell, "-ilc", "env -0"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      // Markers keep banners / prompts printed by rc files out of the parsed environment.
+      const marker = "__TUANTUAN_ENV__";
+      const p = Bun.spawn([shell, "-ilc", `printf ${marker}; env -0; printf ${marker}`], {
+        stdout: "pipe",
+        stderr: "ignore",
+        stdin: "ignore",
+      });
       const timer = setTimeout(() => p.kill(), 5000);
-      const out = await new Response(p.stdout).text();
+      const raw = await new Response(p.stdout).text();
       clearTimeout(timer);
+      const out = raw.includes(marker) ? (raw.split(marker)[1] ?? "") : raw;
       const env = { ...base };
       for (const kv of out.split("\0")) {
         const i = kv.indexOf("=");
@@ -458,7 +465,8 @@ export async function detectHarness(spec: HarnessSpec, override: string | null):
     experimental: !!spec.experimental,
     id: spec.id,
     name: spec.name,
-    install: spec.install,
+    // The desktop package does not ship Claude Code / Codex adapters by default: say so instead of "built in".
+    install: spec.bundled && !bundled ? "桌面版未内置，可在 Harness 页从 ACP Registry 一键安装" : spec.install,
     auth: spec.auth,
     login: loginCommand(spec, env),
     docs: spec.docs,

@@ -15,7 +15,12 @@
 
 macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.1.0 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。自动更新默认关闭，后续版本请从 Release 页面下载。
 
-- **macOS**：打开 `.dmg`，将「团团」拖入「应用程序」后启动。若首次启动被拦截，在确认下载来源后，可按 [Apple 的说明](https://support.apple.com/en-us/102445)在「系统设置 → 隐私与安全性」中允许打开该应用。
+- **macOS**：打开 `.dmg`，把 **tuantuan.app** 拖进「应用程序」后启动（用 `.zip` 时在访达里双击解压，再移到「应用程序」）。不要直接在磁盘映像里运行。因为没有 Developer ID 和公证，第一次打开会被拦截：
+  1. 提示无法验证时点「完成」（不要点「移到废纸篓」）。
+  2. 打开「系统设置 → 隐私与安全性」，滚动到「安全性」，在「已阻止“tuantuan”」旁点「仍要打开」，输入密码后点「打开」（参见 [Apple 的说明](https://support.apple.com/en-us/102445)）。macOS 14 及更早版本也可以按住 Control 点按 App →「打开」。macOS 15 起这个右键方式不再绕过拦截，只能用「仍要打开」。
+  3. 提示「已损坏，无法打开」或仍然打不开时，在「终端」执行 `xattr -dr com.apple.quarantine /Applications/tuantuan.app` 后再打开。
+  4. 窗口提示服务无法启动时，日志在 `~/Library/Application Support/团团/logs/server.log`；数据在同一目录。图形界面启动的 App 拿不到终端的 PATH，团团会从登录 shell 读取并补上 Homebrew、`~/.local/bin`、`~/.bun/bin` 等常见目录；仍找不到 Harness 时，在「Harness」页填绝对路径。
+  5. 桌面版默认不内置 Claude Code / Codex 适配器，第一次使用时在「Harness」页从 ACP Registry 一键安装。
 - **Windows**：运行 `.exe`，按安装向导完成安装。
 - **Linux**：给 `.AppImage` 添加可执行权限后运行：
 

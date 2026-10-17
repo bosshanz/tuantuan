@@ -170,6 +170,25 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; }
 .meta a, .start-links a, .video-full a { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-weight: 600; transition: color 0.15s; }
 .meta a:hover, .video-full a:hover { color: var(--accent-text); }
 
+/* macOS first-launch hint: quiet disclosure under the download button */
+.mac-first { margin: 14px auto 0; max-width: 560px; text-align: left; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--border); transition: box-shadow 0.2s; }
+.mac-first[open] { box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-1); }
+.mac-first summary { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 0 14px; list-style: none; cursor: pointer; border-radius: 14px; font-size: 13.5px; font-weight: 600; color: var(--text-2); transition: color 0.15s; }
+.mac-first summary::-webkit-details-marker { display: none; }
+.mac-first summary:hover, .mac-first[open] summary { color: var(--text); }
+.mac-first summary:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent); }
+.mac-first-chev { transition: transform 0.2s var(--ease); }
+.mac-first[open] .mac-first-chev { transform: rotate(180deg); }
+.mac-first-body { padding: 2px 18px 18px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+.mac-first[open] .mac-first-body { animation: mac-first-in 0.22s var(--ease); }
+@keyframes mac-first-in { from { opacity: 0; transform: translateY(-4px); } }
+.mac-first-body p { margin: 10px 0 0; }
+.mac-first-body blockquote { margin: 8px 0 0; padding: 8px 12px; border-left: 3px solid var(--border-strong); border-radius: 0 8px 8px 0; background: var(--surface-2); color: var(--text); font-size: 13.5px; }
+.mac-first-body ol { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+.mac-first-body .code { margin-top: 10px; }
+.mac-first-body .code pre { font-size: 12.5px; }
+@media (prefers-reduced-motion: reduce) { .mac-first[open] .mac-first-body, .mac-first-chev { animation: none; transition: none; } }
+
 .video { position: relative; margin: clamp(44px, 6vw, 64px) auto 0; max-width: 1040px; aspect-ratio: 16 / 9; border-radius: 18px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-3); isolation: isolate; }
 .video video { display: block; width: 100%; height: 100%; object-fit: cover; cursor: pointer; }
 .video-play { position: absolute; left: 50%; top: 50%; width: 68px; height: 68px; margin: -34px 0 0 -34px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #fff; background: rgb(17 17 19 / 0.62); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: 0 10px 30px -10px rgb(0 0 0 / 0.5); transition: transform 0.2s var(--ease), opacity 0.2s, background 0.2s; }
