@@ -30,7 +30,7 @@ import { BRAND_SVG } from "../../web/src/brandIcons";
 import { COPY, LANG_NAME, LOCALE_PATH, LOCALES, type Locale, README_FILE } from "./i18n";
 
 export const REPO = "https://github.com/bosshanz/tuantuan";
-export const RELEASE = `${REPO}/releases/tag/v0.1.0`;
+export const RELEASE = `${REPO}/releases/tag/v0.1.1`;
 const ACP = "https://agentclientprotocol.com";
 /** The bundle is tuantuan.app (CFBundleName 团团); the xattr path must use the file name. */
 const XATTR = "xattr -dr com.apple.quarantine /Applications/tuantuan.app";
@@ -623,7 +623,7 @@ export function Page({ locale, siteUrl }: { locale: Locale; siteUrl: string }) {
                     <ArrowUpRight size={14} strokeWidth={2} aria-hidden="true" />
                   </a>
                   <a href={RELEASE}>
-                    v0.1.0
+                    v0.1.1
                     <ArrowUpRight size={14} strokeWidth={2} aria-hidden="true" />
                   </a>
                 </p>

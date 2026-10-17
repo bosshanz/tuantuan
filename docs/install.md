@@ -2,9 +2,9 @@
 
 下载桌面安装包，或从源码运行（浏览器 + 本机服务）和构建桌面版。
 
-## 下载桌面版 v0.1.0
+## 下载桌面版 v0.1.1
 
-前往 [GitHub Releases v0.1.0](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.0)，按操作系统和芯片选择安装包：
+前往 [GitHub Releases v0.1.1](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.1)，按操作系统和芯片选择安装包：
 
 | 平台 | 安装包 |
 | --- | --- |
@@ -13,7 +13,7 @@
 | Windows · x64 | `Tuantuan-0.1.0-win-x64.exe` |
 | Linux · x64 | `Tuantuan-0.1.0-linux-x64.AppImage` |
 
-macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.1.0 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。自动更新默认关闭，后续版本请从 Release 页面下载。
+macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.1.1 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。自动更新默认关闭，后续版本请从 Release 页面下载。
 
 - **macOS**：打开 `.dmg`，把 **tuantuan.app** 拖进「应用程序」后启动（用 `.zip` 时在访达里双击解压，再移到「应用程序」）。不要直接在磁盘映像里运行。因为没有 Developer ID 和公证，第一次打开会被拦截：
   1. 提示无法验证时点「完成」（不要点「移到废纸篓」）。
@@ -55,7 +55,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-可直接使用 [v0.1.0 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.0)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+可直接使用 [v0.1.1 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.1)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](screenshots/desktop-linux.png)
 
@@ -77,7 +77,7 @@ xvfb-run -a bun run desktop:smoke        # Linux：无界面端到端冒烟
 
 macOS 本机构建：在 Mac 上执行上面的依赖安装和 `desktop:build` 命令，会生成当前架构的 `.dmg` 和 `.zip`；使用 `--arch arm64,x64` 可同时生成 Apple 芯片和 Intel 版本。未配置 Developer ID 证书时，构建配置使用 ad-hoc 签名；它不等同于 Developer ID 签名或 Apple 公证。要使用 Developer ID 签名并公证，打包前设置 `CSC_LINK`、`CSC_KEY_PASSWORD`（Developer ID 证书）和 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`；Windows 签名使用 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`。
 
-自动更新默认关闭，打包时设 `TUANTUAN_PUBLISH=github` 和 `GH_TOKEN` 才会写入 GitHub Releases 更新源。GitHub Actions 的 Desktop 工作流（打 `v*` 标签或手动触发）默认只上传三个平台的构建产物；v0.1.0 安装包由维护者上传到上述 Release。
+自动更新默认关闭，打包时设 `TUANTUAN_PUBLISH=github` 和 `GH_TOKEN` 才会写入 GitHub Releases 更新源。GitHub Actions 的 Desktop 工作流（打 `v*` 标签或手动触发）默认只上传三个平台的构建产物；安装包由维护者上传到对应的 Release。
 
 ---
 

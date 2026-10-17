@@ -107,7 +107,7 @@ export class AcpProcess {
         this.agent.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
           clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
-          clientInfo: { name: "tuantuan", title: "团团", version: "0.1.0" },
+          clientInfo: { name: "tuantuan", title: "团团", version: "0.1.1" },
         }),
         this.exited.then((code) => {
           throw new Error(`Harness 进程退出（code ${code}）${this.stderr ? `：${this.stderr.slice(-400)}` : ""}`);

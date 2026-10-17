@@ -253,7 +253,7 @@ if (!process.env.SKIP_EXTERNAL) {
       console.log(`  ? ${u}: ${e}`);
     }
     if (status === 200) console.log(`  ✓ ${status} ${u}`);
-    else if (u.endsWith("/releases/tag/v0.1.0")) {
+    else if (u.endsWith("/releases/tag/v0.1.1")) {
       knownPending.push(`${u} → ${status} (release not published yet)`);
       console.log(`  ! ${status} ${u} (release draft)`);
     } else fail(`external ${u} → ${status}`);
