@@ -142,7 +142,13 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     const card = page.locator(".room-conclusion");
     await card.waitFor();
     await card.getByText("当前结论").waitFor();
-    for (const value of [context.goal, ...context.decisions, ...context.pending])
+    // Collapsed by default: the goal line plus counts; the three columns open on click.
+    const summary = card.locator(".room-conclusion-body > summary");
+    await summary.getByText(context.goal, { exact: false }).waitFor();
+    await card.getByText("2 项决策 · 1 项未完成").waitFor();
+    if (await card.locator(".room-conclusion-grid").isVisible()) throw new Error("conclusion card expanded by default");
+    await summary.click();
+    for (const value of [...context.decisions, ...context.pending])
       await card.getByText(value, { exact: false }).waitFor();
     const end = Date.now() + 20_000;
     let source: Message | undefined;

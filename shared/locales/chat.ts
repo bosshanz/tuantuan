@@ -196,6 +196,26 @@ export const chatMessages = {
     en: "Thinking",
     ja: "思考中",
   },
+  精简视图: { "zh-TW": "精簡檢視", en: "Compact view", ja: "コンパクト表示" },
+  开启精简视图: { "zh-TW": "開啟精簡檢視", en: "Enable compact view", ja: "コンパクト表示をオン" },
+  关闭精简视图: { "zh-TW": "關閉精簡檢視", en: "Disable compact view", ja: "コンパクト表示をオフ" },
+  正在处理: { "zh-TW": "正在處理", en: "Working", ja: "処理中" },
+  "已运行 {count} 秒": {
+    "zh-TW": "已執行 {count} 秒",
+    en: "running for {count}s",
+    ja: "{count} 秒経過",
+  },
+  "{count} 个工具": { "zh-TW": "{count} 個工具", en: "{count} tools", ja: "ツール {count} 件" },
+  "{count} 段思考": { "zh-TW": "{count} 段思考", en: "{count} thoughts", ja: "思考 {count} 回" },
+  "计划 {done}/{total}": {
+    "zh-TW": "計畫 {done}/{total}",
+    en: "Plan {done}/{total}",
+    ja: "プラン {done}/{total}",
+  },
+  "{count} 个失败": { "zh-TW": "{count} 個失敗", en: "{count} failed", ja: "{count} 件失敗" },
+  展开全文: { "zh-TW": "展開全文", en: "Show more", ja: "全文を表示" },
+  收起正文: { "zh-TW": "收起正文", en: "Show less", ja: "本文を折りたたむ" },
+  完整时间线: { "zh-TW": "完整時間線", en: "Full timeline", ja: "完全なタイムライン" },
   "（空回复）": {
     "zh-TW": "（空回覆）",
     en: "(Empty reply)",
@@ -1367,6 +1387,11 @@ export const chatMessages = {
     ja: "{max} 件以内で選択してください",
   },
   当前结论: { "zh-TW": "目前結論", en: "Current conclusion", ja: "現在の結論" },
+  "{decisions} 项决策 · {pending} 项未完成": {
+    "zh-TW": "{decisions} 項決策 · {pending} 項未完成",
+    en: "{decisions} decisions · {pending} pending",
+    ja: "決定 {decisions} 件 · 未完了 {pending} 件",
+  },
   查看来源消息: {
     "zh-TW": "查看來源訊息",
     en: "View source message",

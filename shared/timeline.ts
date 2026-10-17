@@ -111,6 +111,47 @@ export function timelineText(t: Timeline): string {
     .join("");
 }
 
+export interface TimelineProcess {
+  tools: number;
+  thoughts: number;
+  planDone: number;
+  planTotal: number;
+  failed: number;
+}
+
+/** What the compact view folds into one summary line: every tool, thought and plan step. */
+export function timelineProcess(t: Timeline | null | undefined): TimelineProcess {
+  const ids = new Set(
+    (t?.parts ?? [])
+      .filter((p): p is { kind: "tool"; toolCallId: string } => p.kind === "tool")
+      .map((p) => p.toolCallId),
+  );
+  let failed = 0;
+  for (const id of ids) if (t?.tools[id]?.status === "failed") failed++;
+  const plan = t?.plan ?? [];
+  return {
+    tools: ids.size,
+    thoughts: (t?.parts ?? []).filter((p) => p.kind === "thought").length,
+    planDone: plan.filter((entry) => entry.status === "completed").length,
+    planTotal: plan.length,
+    failed,
+  };
+}
+
+/** The tool the compact view names while the reply is still running, if any. */
+export function currentToolOf(t: Timeline | null | undefined): string | null {
+  const parts = t?.parts ?? [];
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i];
+    if (!part) continue;
+    if (part.kind !== "tool") continue;
+    const tool = t?.tools[part.toolCallId];
+    if (tool && (tool.status === "pending" || tool.status === "in_progress")) return tool.title;
+    return null;
+  }
+  return null;
+}
+
 /** Returns a new timeline (never mutates), or the same object when the update is not reply content. */
 export function applyUpdate(t: Timeline, u: acp.SessionUpdate): Timeline {
   switch (u.sessionUpdate) {

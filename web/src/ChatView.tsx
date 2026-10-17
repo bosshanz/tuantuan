@@ -1,4 +1,5 @@
 import {
+  Activity,
   AlertTriangle,
   ArrowDown,
   ArrowRightLeft,
@@ -9,6 +10,8 @@ import {
   CircleSlash,
   Clock3,
   History,
+  ListCollapse,
+  Loader2,
   PanelRight,
   Pin,
   Plus,
@@ -19,6 +22,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import type { CSSProperties } from "react";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import { canQuoteMessage, type MessageQuote, messageQuote } from "../../shared/messageQuote";
 import { intlLocale, translateError, useI18n } from "./i18n";
@@ -27,6 +31,7 @@ import "./chatTasks.css";
 import "./chatScroll.css";
 import type { ElicitationValue } from "../../shared/elicitation";
 import type { ReplayTurn, RoomConclusion, TaskContext, Timeline } from "../../shared/timeline";
+import { currentToolOf, timelineProcess, timelineText } from "../../shared/timeline";
 import {
   type Agent,
   ApiError,
@@ -119,6 +124,11 @@ export function ChatView(props: {
   const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<{ source: string; reason: string } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // Compact timeline: agent words stay, thoughts/tools/plan fold into one line. Local, default on.
+  const [compact, setCompact] = useState(() => localStorage.getItem("tuantuan:compact") !== "0");
+  useEffect(() => {
+    localStorage.setItem("tuantuan:compact", compact ? "1" : "0");
+  }, [compact]);
   const wide = useMediaQuery("(min-width: 1181px)");
   const [panel, setPanel] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(() => terminalWasOpen(room.projectId));
@@ -443,6 +453,7 @@ export function ChatView(props: {
   };
 
   const openDetails = (id: string) => {
+    preserveReadingPosition();
     setSelected((cur) => (cur === id && panel ? null : id));
     setPanel(true);
   };
@@ -472,7 +483,10 @@ export function ChatView(props: {
               type="button"
               className="title-pill"
               title={roomSubtitle(room, agents)}
-              onClick={() => setPanel(true)}
+              onClick={() => {
+                preserveReadingPosition();
+                setPanel(true);
+              }}
             >
               <RoomIcon room={room} agents={agents} size={22} />
               <h2>{room.name}</h2>
@@ -491,6 +505,16 @@ export function ChatView(props: {
                   <SquareTerminal size={18} />
                 </button>
               )}
+              <button
+                type="button"
+                className="btn ghost icon"
+                aria-pressed={compact}
+                aria-label={compact ? tr("关闭精简视图") : tr("开启精简视图")}
+                title={tr("精简视图")}
+                onClick={() => setCompact((v) => !v)}
+              >
+                <ListCollapse size={18} />
+              </button>
               {!(panel && wide) && (
                 <button
                   type="button"
@@ -499,6 +523,7 @@ export function ChatView(props: {
                   aria-label={panel ? tr("收起详情面板") : tr("展开详情面板")}
                   title={tr("详情面板")}
                   onClick={() => {
+                    preserveReadingPosition();
                     setPanel((v) => !v);
                     setSelected(null);
                   }}
@@ -606,6 +631,7 @@ export function ChatView(props: {
                         quoteDisabled={sending}
                         terminals={terminals}
                         mentionNames={mentionNames}
+                        compact={compact}
                         selected={selected === m.id && panel}
                         onDetails={() => openDetails(m.id)}
                         harnessId={agentById.get(m.senderId ?? "")?.harness}
@@ -712,7 +738,14 @@ export function ChatView(props: {
             {!wide && (
               // biome-ignore lint/a11y/noStaticElementInteractions: scrim closes the overlay panel; the close button is the keyboard path
               // biome-ignore lint/a11y/useKeyWithClickEvents: see above
-              <div className="scrim" data-state={panelPresence.state} onClick={() => setPanel(false)} />
+              <div
+                className="scrim"
+                data-state={panelPresence.state}
+                onClick={() => {
+                  preserveReadingPosition();
+                  setPanel(false);
+                }}
+              />
             )}
             {/* The slot reserves the panel's column and resizes in step with the slide, so the chat never jumps. */}
             <div className="details-slot" data-state={panelPresence.state}>
@@ -735,7 +768,10 @@ export function ChatView(props: {
                       type="button"
                       className="btn ghost icon"
                       aria-label={tr("关闭详情面板")}
-                      onClick={() => setPanel(false)}
+                      onClick={() => {
+                        preserveReadingPosition();
+                        setPanel(false);
+                      }}
                     >
                       <X size={16} />
                     </button>
@@ -747,6 +783,8 @@ export function ChatView(props: {
                       m={selectedMsg}
                       agent={agentById.get(selectedMsg.senderId ?? "")}
                       harnessName={props.harnessName}
+                      terminals={terminals}
+                      mentionNames={mentionNames}
                     />
                   ) : (
                     <RoomInfo
@@ -864,6 +902,7 @@ function MessageItem(props: {
   m: Message;
   terminals: Record<string, TerminalSnapshot>;
   mentionNames: string[];
+  compact: boolean;
   selected: boolean;
   onDetails: () => void;
   harnessId?: string;
@@ -903,6 +942,8 @@ function MessageItem(props: {
               <TimelineView t={t} streaming={false} terminals={props.terminals} mentionNames={props.mentionNames} />
             )}
           </>
+        ) : t && props.compact ? (
+          <CompactReply m={m} t={t} terminals={props.terminals} mentionNames={props.mentionNames} />
         ) : t ? (
           <TimelineView t={t} streaming={streaming} terminals={props.terminals} mentionNames={props.mentionNames} />
         ) : (
@@ -990,6 +1031,103 @@ function MessageItem(props: {
   );
 }
 
+/** A finished body longer than this folds behind「展开全文」; the fold is independent of the process line. */
+const COMPACT_BODY_CLAMP = 800;
+
+/**
+ * Compact reply: the agent's own words (text/images) stay, while thoughts, tools and the plan fold
+ * into one summary line that expands in place. While streaming it is one live status line instead.
+ */
+function CompactReply(props: {
+  m: Message;
+  t: Timeline;
+  terminals: Record<string, TerminalSnapshot>;
+  mentionNames: string[];
+}) {
+  const { t: tr } = useI18n();
+  const { m, t } = props;
+  const streaming = m.status === "streaming";
+  const process = timelineProcess(t);
+  const hasProcess = process.tools + process.thoughts + process.planTotal > 0;
+  const [bodyOpen, setBodyOpen] = useState(false);
+  const long = !streaming && timelineText(t).length > COMPACT_BODY_CLAMP;
+  const summary = [
+    process.tools > 0 ? tr("{count} 个工具", { count: process.tools }) : null,
+    process.thoughts > 0 ? tr("{count} 段思考", { count: process.thoughts }) : null,
+    process.planTotal > 0 ? tr("计划 {done}/{total}", { done: process.planDone, total: process.planTotal }) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="compact-reply">
+      {streaming && t.parts.length > 0 && (
+        // Above the growing text: the stream stays the last element of the scroll content, exactly
+        // like the full timeline, so a paused reader is never dragged along while it grows.
+        <div className="compact-live" role="status">
+          <Loader2 size={13} className="spin" />
+          <span>{currentToolOf(t) ?? tr("正在处理")}</span>
+          <Elapsed since={m.createdAt} />
+        </div>
+      )}
+      <div className="compact-body" data-clamped={long && !bodyOpen ? "" : undefined}>
+        <TimelineView
+          t={t}
+          view="body"
+          streaming={streaming}
+          terminals={props.terminals}
+          mentionNames={props.mentionNames}
+        />
+      </div>
+      {long && (
+        <button
+          type="button"
+          className="btn ghost sm compact-more"
+          aria-expanded={bodyOpen}
+          onClick={() => setBodyOpen((v) => !v)}
+        >
+          {bodyOpen ? tr("收起正文") : tr("展开全文")}
+        </button>
+      )}
+      {!streaming && hasProcess && (
+        // A failed tool keeps the process open so the error is never one click away.
+        <details className="compact-process" open={process.failed > 0 || undefined}>
+          <summary>
+            <ChevronRight size={13} className="chev" />
+            <Activity size={13} />
+            <span>{summary}</span>
+            {process.failed > 0 && (
+              <span className="compact-failed">{tr("{count} 个失败", { count: process.failed })}</span>
+            )}
+          </summary>
+          <TimelineView
+            t={t}
+            view="process"
+            streaming={false}
+            terminals={props.terminals}
+            mentionNames={props.mentionNames}
+          />
+        </details>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Ticks by writing a CSS variable, not text: a characterData mutation here fires the chat's
+ * MutationObserver mid-wheel-gesture and follows to the bottom, dragging a paused reader down.
+ */
+function Elapsed({ since }: { since: number }) {
+  const { t: tr } = useI18n();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.floor((now - since) / 1000));
+  const text = tr("已运行 {count} 秒", { count: seconds });
+  return <span className="elapsed" role="timer" aria-label={text} style={{ "--elapsed": text } as CSSProperties} />;
+}
+
 function HandoffTask({ task }: { task: string }) {
   const { t: tr } = useI18n();
   return (
@@ -1015,38 +1153,50 @@ function RoomConclusionCard({ conclusion, onJump }: { conclusion: RoomConclusion
           {tr("查看来源消息")}
         </button>
       </div>
-      <div className="room-conclusion-grid">
-        <div className="room-conclusion-goal">
-          <span className="room-conclusion-label">{tr("任务目标")}</span>
-          <p>{context.goal || tr("暂无记录")}</p>
+      <details className="room-conclusion-body">
+        <summary>
+          <ChevronRight size={13} className="chev" aria-hidden />
+          <span className="room-conclusion-goal-line">{context.goal || tr("暂无记录")}</span>
+          <span className="room-conclusion-counts">
+            {tr("{decisions} 项决策 · {pending} 项未完成", {
+              decisions: context.decisions.length,
+              pending: context.pending.length,
+            })}
+          </span>
+        </summary>
+        <div className="room-conclusion-grid">
+          <div className="room-conclusion-goal">
+            <span className="room-conclusion-label">{tr("任务目标")}</span>
+            <p>{context.goal || tr("暂无记录")}</p>
+          </div>
+          <div>
+            <span className="room-conclusion-label">{tr("关键决策")}</span>
+            {context.decisions.length ? (
+              <ul>
+                {context.decisions.map((decision, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: snapshot entries have no ids and are replaced wholesale
+                  <li key={index}>{decision}</li>
+                ))}
+              </ul>
+            ) : (
+              <span className="muted">{tr("暂无记录")}</span>
+            )}
+          </div>
+          <div>
+            <span className="room-conclusion-label">{tr("未完成事项")}</span>
+            {context.pending.length ? (
+              <ul>
+                {context.pending.map((pending, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: snapshot entries have no ids and are replaced wholesale
+                  <li key={index}>{pending}</li>
+                ))}
+              </ul>
+            ) : (
+              <span className="muted">{tr("无未完成事项")}</span>
+            )}
+          </div>
         </div>
-        <div>
-          <span className="room-conclusion-label">{tr("关键决策")}</span>
-          {context.decisions.length ? (
-            <ul>
-              {context.decisions.map((decision, index) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: snapshot entries have no ids and are replaced wholesale
-                <li key={index}>{decision}</li>
-              ))}
-            </ul>
-          ) : (
-            <span className="muted">{tr("暂无记录")}</span>
-          )}
-        </div>
-        <div>
-          <span className="room-conclusion-label">{tr("未完成事项")}</span>
-          {context.pending.length ? (
-            <ul>
-              {context.pending.map((pending, index) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: snapshot entries have no ids and are replaced wholesale
-                <li key={index}>{pending}</li>
-              ))}
-            </ul>
-          ) : (
-            <span className="muted">{tr("无未完成事项")}</span>
-          )}
-        </div>
-      </div>
+      </details>
     </section>
   );
 }
@@ -1370,7 +1520,13 @@ const STOP_LABEL: Record<string, string> = {
   max_turn_requests: "达到轮次上限",
 };
 
-function MessageDetails(props: { m: Message; agent?: Agent; harnessName: (id: string) => string }) {
+function MessageDetails(props: {
+  m: Message;
+  agent?: Agent;
+  harnessName: (id: string) => string;
+  terminals: Record<string, TerminalSnapshot>;
+  mentionNames: string[];
+}) {
   const { t: tr, locale } = useI18n();
   const { m, agent } = props;
   const tools = Object.values(m.timeline?.tools ?? {});
@@ -1382,25 +1538,38 @@ function MessageDetails(props: { m: Message; agent?: Agent; harnessName: (id: st
     interrupted: "回复被中断",
   };
   return (
-    <section className="d-section">
-      <dl className="kv">
-        <dt>Agent</dt>
-        <dd>{m.senderName}</dd>
-        <dt>Harness</dt>
-        <dd>{agent?.harness ? props.harnessName(agent.harness) : "—"}</dd>
-        <dt>{tr("状态")}</dt>
-        <dd>
-          {m.timeline?.stopReason
-            ? tr(STOP_LABEL[m.timeline.stopReason] ?? m.timeline.stopReason)
-            : tr(status[m.status])}
-          {m.error && <div className="error-text">{translateError(m.error)}</div>}
-        </dd>
-        <dt>{tr("工具")}</dt>
-        <dd>{tools.length === 0 ? tr("无") : tools.map((t) => t.title).join(locale === "en" ? ", " : "、")}</dd>
-        <dt>{tr("时间")}</dt>
-        <dd>{new Date(m.createdAt).toLocaleString(intlLocale(locale))}</dd>
-      </dl>
-    </section>
+    <>
+      <section className="d-section">
+        <dl className="kv">
+          <dt>Agent</dt>
+          <dd>{m.senderName}</dd>
+          <dt>Harness</dt>
+          <dd>{agent?.harness ? props.harnessName(agent.harness) : "—"}</dd>
+          <dt>{tr("状态")}</dt>
+          <dd>
+            {m.timeline?.stopReason
+              ? tr(STOP_LABEL[m.timeline.stopReason] ?? m.timeline.stopReason)
+              : tr(status[m.status])}
+            {m.error && <div className="error-text">{translateError(m.error)}</div>}
+          </dd>
+          <dt>{tr("工具")}</dt>
+          <dd>{tools.length === 0 ? tr("无") : tools.map((t) => t.title).join(locale === "en" ? ", " : "、")}</dd>
+          <dt>{tr("时间")}</dt>
+          <dd>{new Date(m.createdAt).toLocaleString(intlLocale(locale))}</dd>
+        </dl>
+      </section>
+      {m.timeline && m.timeline.parts.length > 0 && (
+        <section className="d-section">
+          <h4>{tr("完整时间线")}</h4>
+          <TimelineView
+            t={m.timeline}
+            streaming={false}
+            terminals={props.terminals}
+            mentionNames={props.mentionNames}
+          />
+        </section>
+      )}
+    </>
   );
 }
 

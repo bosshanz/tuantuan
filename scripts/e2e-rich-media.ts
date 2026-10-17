@@ -233,6 +233,8 @@ export async function richMediaSmoke(
     await row(attachment.id).getByRole("button", { name: "放大预览：图片", exact: true }).click();
     await dialog.waitFor();
     await close.click();
+    // Compact view folds the tool behind the process line; open it before the tool card itself.
+    await row(attachment.id).locator(".compact-process > summary").click();
     await row(attachment.id).locator(".tool > summary").click();
     await row(attachment.id).getByRole("button", { name: "放大预览：工具图片", exact: true }).click();
     await dialog.waitFor();

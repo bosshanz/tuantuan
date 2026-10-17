@@ -29,16 +29,26 @@ export function TimelineView(props: {
   streaming: boolean;
   terminals: Record<string, TerminalSnapshot>;
   mentionNames: string[];
+  /** "body" shows only what the agent said (text/images); "process" only thoughts, tools and plan. */
+  view?: "full" | "body" | "process";
 }) {
   const { t: tr } = useI18n();
   const { t } = props;
+  const view = props.view ?? "full";
   const lastText = t.parts.findLastIndex((p) => p.kind === "text");
+  const hidden =
+    view === "body"
+      ? (p: (typeof t.parts)[number]) => p.kind === "thought" || p.kind === "tool"
+      : view === "process"
+        ? (p: (typeof t.parts)[number]) => p.kind === "text" || p.kind === "image"
+        : () => false;
   return (
     <div className="timeline">
-      {t.plan && t.plan.length > 0 && <PlanList entries={t.plan} />}
+      {view !== "body" && t.plan && t.plan.length > 0 && <PlanList entries={t.plan} />}
       {t.parts.map((p, i) => {
         // biome-ignore lint/suspicious/noArrayIndexKey: parts are append-only
         const key = i;
+        if (hidden(p)) return null;
         if (p.kind === "thought")
           return (
             <details key={key} className="thought" open={props.streaming && i === t.parts.length - 1}>

@@ -693,6 +693,8 @@ try {
   await page.locator(".slash-pop").getByText("/plan").waitFor();
   await input.press("Tab");
   await input.press("Enter");
+  // Compact view: plan/thoughts fold behind one summary line; expanding reveals them in place.
+  await page.locator(".compact-process > summary", { hasText: "计划" }).last().click();
   await page.locator(".plan-item[data-status=completed]", { hasText: "跑测试" }).waitFor();
   await page.locator(".thought").first().waitFor();
 
@@ -744,7 +746,9 @@ try {
   await input.press("Enter");
   await page.locator(".messages").getByText("命令跑完了。").waitFor();
   {
-    // Tool calls are one collapsed row; the output opens on click.
+    // Tool calls live behind the compact process line; the tool row itself still starts collapsed.
+    const process = page.locator(".compact-process", { hasText: "个工具" }).last();
+    await process.locator("> summary").click();
     const card = page.locator("details.tool", { hasText: "echo hello" }).last();
     if (await card.evaluate((d) => (d as HTMLDetailsElement).open)) throw new Error("tool card should start collapsed");
     if (await page.locator("pre.term:not(.term-wrap pre)", { hasText: "终端输出不可用" }).count())
@@ -752,6 +756,59 @@ try {
     await card.locator("summary").click();
     await card.locator(".term", { hasText: "hello from terminal" }).waitFor();
     await card.locator("summary").click();
+  }
+
+  // Turning compact view off restores the always-visible timeline; turning it on folds again.
+  await page.getByRole("button", { name: "关闭精简视图" }).click();
+  await page.locator(".plan-item[data-status=completed]", { hasText: "跑测试" }).waitFor();
+  await page.locator(".thought").first().waitFor();
+  if (await page.locator(".compact-process").count()) throw new Error("compact summary rendered while compact is off");
+  await page.getByRole("button", { name: "开启精简视图" }).click();
+  await page.locator(".compact-process > summary", { hasText: "计划" }).last().waitFor();
+
+  {
+    // The details panel carries the full timeline, so nothing is only-visible-in-chat.
+    const runRow = page.locator(".message-row", { hasText: "命令跑完了。" }).last();
+    await runRow.hover();
+    await runRow.getByRole("button", { name: "更多消息操作", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "消息操作", exact: true })
+      .getByRole("button", { name: "查看详情", exact: true })
+      .click();
+    await page.getByRole("heading", { name: "回复详情" }).waitFor();
+    await page.locator(".details .timeline details.tool", { hasText: "echo hello" }).waitFor();
+    await page.getByRole("button", { name: "关闭详情面板" }).click();
+  }
+  // Narrow screens keep the summary, its expansion and the details entry clickable.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".compact-process > summary", { hasText: "个工具" }).last().click();
+  await page.locator("details.tool", { hasText: "echo hello" }).last().waitFor();
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  {
+    // Opening and closing the details panel keeps the reader's message anchored.
+    const list = page.locator(".messages");
+    await list.evaluate((el) => (el.scrollTop = el.scrollHeight * 0.4));
+    await page.waitForTimeout(150);
+    const firstVisible = () =>
+      page.evaluate(() => {
+        const box = document.querySelector(".messages") as HTMLElement | null;
+        if (!box) return null;
+        const top = box.getBoundingClientRect().top;
+        const row = [...box.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+          (m) => m.getBoundingClientRect().bottom > top,
+        );
+        return row?.dataset.messageId ?? null;
+      });
+    const before = await firstVisible();
+    await page.getByRole("button", { name: "展开详情面板" }).click();
+    await page.waitForTimeout(450);
+    const during = await firstVisible();
+    await page.getByRole("button", { name: "关闭详情面板" }).click();
+    await page.waitForTimeout(450);
+    const after = await firstVisible();
+    if (!before || before !== during || before !== after)
+      throw new Error(`reading anchor moved across the details panel: ${before} → ${during} → ${after}`);
   }
 
   // Already switched to Mock Smart via the composer picker above; sending confirms the preference stuck.
@@ -807,8 +864,6 @@ try {
     .getByRole("button", { name: "查看详情", exact: true })
     .click();
   await page.getByRole("heading", { name: "回复详情" }).waitFor();
-
-  // Let enter/exit animations finish so geometry is measured at rest.
   const settle = () =>
     page.evaluate(() =>
       Promise.all(
