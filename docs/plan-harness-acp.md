@@ -354,3 +354,15 @@ Codex 0.160.1 / codex-acp 2.2.2 的离线 model/list 与真实 ACP、本地 Resp
 验证：`bun run check` 通过（77 个文件，632 pass / 39 skip / 0 fail，9,864 个断言），lint 保持既有 22 warning / 3 info；构建与完整 Chrome 冒烟通过。新增诊断的四语言字典另通过 6 项 / 5,830 断言检查，末次类型检查、lint 与构建通过。Chrome 冒烟使用本机 `CHROME_PATH`，默认 Linux 路径在 macOS 不存在。
 
 实际进程对本机模拟端点复核：Codex 0.160.1 / ACP 2.2.2 为 2 项 / 67 断言，确认生成目录中的全部原生描述与 CLI 导出逐字段一致；OpenCode 2.0.29 为 13 项 / 234 断言，含未知版本配置探测及服务清理；Pi 1.0.4 / pi-acp 0.0.34 为 7 项 / 151 断言；Claude ACP 0.90.0 / SDK 0.3.296 / CLI 2.1.296 为 1 项 / 8 断言。未来等级与同路径替换通过确定性 CLI / ACP fixture 验证，不代表已验证尚未发布的 CLI。未调用真实付费模型、重跑 Registry 安装或替换现用桌面应用。用户已授权维护文档、提交推送，原有两个 lockfile 改动继续保留。
+
+## 2026-10-17 原生提示词与上下文机制复核
+
+核对 Claude Code、OpenCode、Pi 的服务商配置、ACP 启动与实际引擎源码，未发现团团保存或替换原生基础提示词的副本。Claude 保留 `claude_code` preset，仅 append 身份；OpenCode / Pi 的身份通过首条普通用户消息传入，临时 provider 配置与 Pi 扩展不设置原生系统提示词。连同上一节的 Codex 动态指令读取，规则已补入 [Harness](harness.md#原生提示词与团团身份)、[产品规则](product.md)与[架构](architecture.md#原生提示词与上下文边界)。
+
+真实进程请求检查使用临时 HOME / cwd、假 Key 和仅允许回环网络的本地模拟端点：Claude ACP 0.90.0 / SDK 0.3.296 / CLI 2.1.296 在移除追加标记后，原生正文与未追加时逐字相同（引擎动态生成的头部与身份开场未纳入正文比较）；OpenCode 2.0.29 与 Pi 1.0.4 / pi-acp 0.0.34 的 Chat、Responses、Anthropic 六场景均包含原生系统内容，团团身份标记只在 user 内容中。这六场景的模拟端点记录请求后返回 400；上述证据仅覆盖提示词传递，不代表真实模型效果、所有模型专属提示词或用户正在运行的桌面会话。没有真实付费模型调用，也没有触发长上下文压缩。
+
+上下文机制按现有代码澄清：原生 Harness 独立持有各房间 / Agent 的历史和压缩；团团群聊转述约 8000 字符、单条正文 2000 字符，交接说明前 4000 字符，成员结果 6000 字符分页。转述仅裁剪，不生成统一摘要或共享长期记忆。20 轮 / 65,536 字符只适用于团团直接 BYOK；恢复失败 / 45 秒超时会新建原生会话，不自动重放全部可见聊天记录。详见[会话与消息](conversations.md#上下文交接与压缩)；文档中的「最多 30 条」改为候选查询范围，避免忽略交接时补入的本轮回复。
+
+定向验证：`bun test tests/collab.test.ts tests/group-scheduling.test.ts tests/custom-history.test.ts tests/host-skills.test.ts` 为 49 pass / 0 fail、267 断言，覆盖转述、交接、恢复与直接 BYOK 历史。提示词检查另以独立临时探针完成，未新增持久化测试或修改运行代码。
+
+本次文档提交前 `bun run check` 通过：632 pass / 39 skip / 0 fail、9,912 断言，类型检查和 lint 通过；36 个本地 Markdown 链接与章节锚点检查通过。仅更新文档，未重跑构建、浏览器或桌面冒烟。

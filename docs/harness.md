@@ -44,9 +44,22 @@ Registry 中的登录选项来自各 Harness 自己的认证方式。第三方�
 
 > Claude Code 的适配器没有声明登录方式，而且未登录时也能建会话，所以「已登录」只代表握手和建会话成功；真正发消息时没登录会提示去终端运行 `claude` 登录。
 
-**身份文档**：每个 Agent 的身份文档保存在团团里，不写进你的仓库。Claude Code 通过 `_meta.systemPrompt.append`、Grok 通过 `_meta.rules`、Codex 通过进程环境 `CODEX_CONFIG` 的 `developer_instructions` 传递；其他 Harness 在会话第一条消息前附加。
+## 原生提示词与团团身份
 
-### ACP 能力对照（各 Harness）
+Claude Code、OpenCode、Pi、Codex 的基础提示词由实际启动的 CLI / SDK 提供，团团不维护固定版本的正文副本。每个 Agent 的身份文档保存在团团里，不写进你的仓库；它与会话身份、可选个人资料一起按下表传递。
+
+| Harness | 原生提示词来源 | 团团身份如何传入 |
+| --- | --- | --- |
+| Claude Code | 当前 SDK / CLI 的 `claude_code` preset | `_meta.systemPrompt.append`，保留原生 preset |
+| OpenCode | 当前 CLI 及其原生 Agent 配置 | 新会话首条普通消息中的 `<tuantuan-identity>` |
+| Pi | 当前 Pi 引擎及其原生资源、配置 | 新会话首条普通消息中的 `<tuantuan-identity>`；服务商扩展只配置模型与思考参数 |
+| Codex | 当前 CLI 的模型目录及原生指令 | 合并 `CODEX_CONFIG.developer_instructions`；需要补充目录外自定义模型时，通用指令从当前 CLI 的隔离临时会话读取 |
+
+Grok 通过 `_meta.rules` 传递身份；其他 Harness 使用首条普通消息。每轮额外选择的 Skills 索引、群聊转述、原始任务与本轮协作职责通过普通消息传递。首条是原生命令时，采用首条消息方式的身份注入会延后到普通对话，避免改变命令路由。
+
+这里的「当前版本」指团团实际使用的引擎；升级另一份全局 CLI 不会改变它。已有原生会话可能保留此前保存的提示词，恢复、压缩或新建会话时如何重建由 Harness 自己决定。用户的原生提示词配置与扩展继续按各 Harness 的规则生效。上下文的所有者及恢复边界见[会话与消息](conversations.md#上下文交接与压缩)。
+
+## ACP 能力对照（各 Harness）
 
 输入框：`/` 弹出 `available_commands_update` 里的命令；`$` 弹出 Skills（Codex 会把 skill 以 `$name` 形式放进同一列表，团团会拆开）。
 
@@ -59,7 +72,7 @@ Registry 中的登录选项来自各 Harness 自己的认证方式。第三方�
 | configOptions | mode/model/effort… | mode/collaboration_mode/model | model/mode | — | 无 |
 | 未接进 UI | providers、additionalDirectories、subagents、elicitation 表单、session.compaction | 同上；`/review-branch` 等已在命令列表可选 | MCP sse、自定义 skill tool 的单独面板 | 登录后能力未探 | 文件/终端 |
 
-**用户本地配置（CC Switch / Codex provider）**：团团**从不**设置 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`。额外选择的 Skill 通过当前 Agent 的按需路径索引提供，不写共享项目链接；进程继承登录 shell 的 `ANTHROPIC_*` / `OPENAI_*`；`CODEX_CONFIG` 只合并 `developer_instructions`，不覆盖 `model_provider`。
+**用户本地配置（CC Switch / Codex provider）**：正式对话进程沿用原生配置目录与登录态，团团不为它们覆盖 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`。额外选择的 Skill 通过当前 Agent 的按需路径索引提供，不写共享项目链接。「本机配置」继承登录 shell 的环境；身份注入合并 `CODEX_CONFIG.developer_instructions` 并保留其他键。显式选择团团服务商时按[服务商接入规则](providers.md#服务商与用量)配置对应进程。Codex 元数据与未知版本 OpenCode 配置探测使用隔离临时目录，不修改正式会话的配置。
 
 ---
 
