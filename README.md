@@ -3,12 +3,10 @@
 ![团团 Tuantuan · 开源](docs/assets/poster.png)
 
 <!-- 宣传视频占位：把 GitHub user-attachments 视频链接（https://github.com/user-attachments/assets/...）单独粘贴在下一行，GitHub 会自动渲染成播放器。 -->
-https://github.com/user-attachments/assets/d6d0b112-2b6f-4f10-ba21-a4bdf45a910b
+https://github.com/user-attachments/assets/5238c2d1-7040-43f6-bc48-70aa0d9adae1
 
 
 **一群 Agent，团团协作。** 多 Agent 协作工作台。
-
-> 仓库已从 `bosshanz/agent-hub` 更名为 `bosshanz/tuantuan`（旧地址自动跳转）。为兼容，环境变量继续使用 `AGENT_HUB_*` 前缀，默认数据库路径仍是 `data/agent-hub.db`。
 
 团团不自带模型：每个 Agent 绑定一个编码 **Harness**（Claude Code、Codex、Grok Build、OpenCode、Pi、MiniMax Code，以及 [ACP Registry](https://agentclientprotocol.com) 里的其他 Agent），团团通过 ACP（Agent Client Protocol）驱动它。按 **项目**（名称 + 目录）组织 **会话**（1 个或多个 Agent）；多个 Agent 时可 @、设主 Agent、交接。完整显示流式回复、思考、工具调用（diff / 终端输出）、计划、权限请求和用量。
 
