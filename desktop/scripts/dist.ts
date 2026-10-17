@@ -39,3 +39,5 @@ for (const arch of archs) {
     ...extra,
   ]);
 }
+// Fail the build if any Mach-O is unsigned / inconsistently signed, or packaging broke the seal.
+if (process.platform === "darwin") run(process.execPath, ["scripts/verify-mac.ts"]);
