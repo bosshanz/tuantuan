@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Message, PermissionAsk, RoomEvent, RoomState, SessionView } from "../web/src/api";
+import type { ElicitationAsk, Message, PermissionAsk, RoomEvent, RoomState, SessionView } from "../web/src/api";
 import { type ChatSnapshot, chatReducer, emptyChat, historyCursor } from "../web/src/chatState";
 
 const ask = (id: string): PermissionAsk => ({
@@ -15,6 +15,8 @@ const snapshot = (asks: PermissionAsk[] = []): ChatSnapshot => ({
   state: { activeRunId: null, queued: 0, tasks: [] },
   sessions: {},
   asks,
+  elicitations: [],
+  conclusion: null,
 });
 const event = (value: RoomEvent) => ({ type: "event", event: value }) as const;
 
@@ -319,5 +321,129 @@ describe("older message pages", () => {
     });
     expect(current.messages.map((m) => m.seq)).toEqual(range(1, 951).map((m) => m.seq));
     expect(historyCursor(current.messages, current.history.nextBeforeSeq)).toBeNull();
+  });
+});
+
+describe("elicitation and conclusion state", () => {
+  const load = () => chatReducer(emptyChat("r"), { type: "load", roomId: "r", id: 1 });
+  const elicitation = (id: string): ElicitationAsk => ({
+    id,
+    roomId: "r",
+    agentId: "a",
+    message: "请确认",
+    fields: [],
+  });
+  const message = (seq: number, extra: Partial<Message> = {}): Message =>
+    ({
+      id: `m${seq}`,
+      roomId: "r",
+      seq,
+      createdAt: 100,
+      content: `${seq}`,
+      status: "done",
+      runId: "run",
+      hop: 1,
+      senderKind: "agent",
+      senderId: "a",
+      senderName: "A",
+      timeline: { parts: [], tools: {}, plan: null },
+      ...extra,
+    }) as Message;
+  const note = (seq: number, goal: string, extra: Partial<Message> = {}, reviewOf?: string[]): Message =>
+    message(seq, {
+      ...extra,
+      timeline: {
+        parts: [],
+        tools: {},
+        plan: null,
+        ...(reviewOf ? { reviewOf } : {}),
+        taskContext: { goal, decisions: [], pending: [] },
+      },
+    });
+
+  test("a slow snapshot keeps a live question; a resolved question cannot come back", () => {
+    let current = load();
+    current = chatReducer(current, event({ type: "elicitation", roomId: "r", ask: elicitation("live") }));
+    current = chatReducer(current, {
+      type: "snapshot",
+      roomId: "r",
+      id: 1,
+      data: { ...snapshot(), elicitations: [elicitation("older")] },
+    });
+    expect(current.elicitations.map((e) => e.id)).toEqual(["older", "live"]);
+
+    let resolved = load();
+    resolved = chatReducer(resolved, event({ type: "elicitation", roomId: "r", ask: null, resolvedId: "older" }));
+    resolved = chatReducer(resolved, event({ type: "elicitation", roomId: "r", ask: elicitation("live") }));
+    resolved = chatReducer(resolved, event({ type: "elicitation", roomId: "r", ask: null, resolvedId: "live" }));
+    resolved = chatReducer(resolved, {
+      type: "snapshot",
+      roomId: "r",
+      id: 1,
+      data: { ...snapshot(), elicitations: [elicitation("older")] },
+    });
+    expect(resolved.elicitations).toEqual([]);
+  });
+
+  test("the card follows the newest accepted root note and keeps a quiet round's previous note", () => {
+    let current = load();
+    current = chatReducer(current, event({ type: "message", message: note(2, "第一轮") }));
+    expect(current.conclusion).toEqual({
+      messageId: "m2",
+      seq: 2,
+      context: { goal: "第一轮", decisions: [], pending: [] },
+    });
+    // Member hand-off notes stay on their own messages.
+    current = chatReducer(current, event({ type: "message", message: note(3, "成员", { hop: 2 }) }));
+    expect(current.conclusion?.messageId).toBe("m2");
+    // A round without a new accepted note leaves the previous conclusion pinned.
+    current = chatReducer(current, event({ type: "message", message: message(4) }));
+    expect(current.conclusion?.messageId).toBe("m2");
+    // The coordinator's follow-up after member results is a valid new conclusion.
+    current = chatReducer(current, event({ type: "message", message: note(5, "汇总", { hop: 2 }, ["成员"]) }));
+    expect(current.conclusion?.context.goal).toBe("汇总");
+    // A late older event cannot replace a newer conclusion.
+    current = chatReducer(current, event({ type: "message", message: note(1, "旧笔记") }));
+    expect(current.conclusion?.messageId).toBe("m5");
+  });
+
+  test("a malformed legacy note neither becomes nor hides the conclusion", () => {
+    let current = load();
+    current = chatReducer(current, event({ type: "message", message: note(2, "有效") }));
+    const malformed = message(3, {
+      timeline: {
+        parts: [],
+        tools: {},
+        plan: null,
+        taskContext: { goal: 1, decisions: "x" },
+      } as unknown as Message["timeline"],
+    });
+    current = chatReducer(current, event({ type: "message", message: malformed }));
+    expect(current.conclusion?.messageId).toBe("m2");
+  });
+
+  test("a snapshot derives the conclusion from messages and keeps the newest of server, live and derived", () => {
+    let current = load();
+    current = chatReducer(current, event({ type: "message", message: note(5, "live 新") }));
+    current = chatReducer(current, {
+      type: "snapshot",
+      roomId: "r",
+      id: 1,
+      data: {
+        ...snapshot(),
+        messages: [note(3, "server 旧")],
+        conclusion: { messageId: "m3", seq: 3, context: { goal: "server 旧", decisions: [], pending: [] } },
+      },
+    });
+    expect(current.conclusion).toMatchObject({ messageId: "m5", context: { goal: "live 新" } });
+
+    let derived = load();
+    derived = chatReducer(derived, {
+      type: "snapshot",
+      roomId: "r",
+      id: 1,
+      data: { ...snapshot(), messages: [note(2, "来自消息")], conclusion: null },
+    });
+    expect(derived.conclusion).toMatchObject({ messageId: "m2", context: { goal: "来自消息" } });
   });
 });

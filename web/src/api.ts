@@ -1,7 +1,7 @@
 import type { TerminalSnapshot } from "../../server/acp";
 import type { CustomFormat } from "../../server/custom";
 import type { HarnessStatus } from "../../server/harness";
-import type { PermissionAsk, SessionView } from "../../server/host";
+import type { ElicitationAsk, PermissionAsk, SessionView } from "../../server/host";
 import type { RoomEvent, RoomState } from "../../server/orchestrator";
 import type {
   Agent,
@@ -14,6 +14,7 @@ import type {
   Room,
 } from "../../server/store";
 import type { GlobalEvent } from "../../shared/notify";
+import type { RoomConclusion } from "../../shared/timeline";
 
 export type {
   Agent,
@@ -21,12 +22,14 @@ export type {
   CustomFormat,
   CustomInput,
   CustomPublic,
+  ElicitationAsk,
   HarnessStatus,
   McpServer,
   Message,
   PermissionAsk,
   Project,
   Room,
+  RoomConclusion,
   RoomEvent,
   RoomState,
   SessionView,

@@ -1,6 +1,13 @@
 import { homedir } from "node:os";
 import type * as acp from "@agentclientprotocol/sdk";
 import { methods } from "@agentclientprotocol/sdk";
+import {
+  type ElicitationField,
+  type ElicitationIssues,
+  type ElicitationValues,
+  elicitationFields,
+  validateElicitation,
+} from "../shared/elicitation";
 import { AcpProcess, type TerminalSnapshot, withTimeout } from "./acp";
 import { harnessSecretEnv } from "./harness-secrets";
 import { providerReasoningDefaults } from "./provider-reasoning";
@@ -69,9 +76,19 @@ export interface PermissionAsk {
   options: acp.PermissionOption[];
 }
 
+/** A pending ACP form elicitation, normalized for the browser. */
+export interface ElicitationAsk {
+  id: string;
+  roomId: string;
+  agentId: string;
+  message: string;
+  fields: ElicitationField[];
+}
+
 export interface HostEvents {
   session(roomId: string, agentId: string, view: SessionView): void;
   permission(ask: PermissionAsk | { id: string; roomId: string; resolved: true }): void;
+  elicitation?(ask: ElicitationAsk | { id: string; roomId: string; resolved: true }): void;
   terminal(roomId: string, t: TerminalSnapshot): void;
 }
 
@@ -129,6 +146,10 @@ export class HarnessHost {
     string,
     { ask: PermissionAsk; slot: SessionSlot; resolve: (r: acp.RequestPermissionResponse) => void }
   >();
+  private elicitations = new Map<
+    string,
+    { ask: ElicitationAsk; slot: SessionSlot; resolve: (r: acp.CreateElicitationResponse) => void }
+  >();
 
   /** Slots whose next attach should session/load (to get the harness's history) rather than resume. */
   private wantLoad = new Set<string>();
@@ -171,6 +192,45 @@ export class HarnessHost {
     );
     this.events.permission({ id: askId, roomId: a.ask.roomId, resolved: true });
     return true;
+  }
+
+  pendingElicitations(roomId: string): ElicitationAsk[] {
+    return [...this.elicitations.values()].filter((e) => e.ask.roomId === roomId).map((e) => e.ask);
+  }
+
+  /**
+   * Resolve one form elicitation. Accept validates against the same schema the browser renders;
+   * an invalid or unsupported answer leaves the request pending so the user can retry. Removing the
+   * entry before resolving makes a duplicate submission fail instead of answering twice.
+   */
+  answerElicitation(
+    id: string,
+    action: "accept" | "decline" | "cancel",
+    values: ElicitationValues = {},
+  ):
+    | { ok: true; action: "accept" | "decline" | "cancel" }
+    | { ok: false; error: string; issues?: ElicitationIssues }
+    | null {
+    const pending = this.elicitations.get(id);
+    if (!pending) return null;
+    if (action === "accept") {
+      const result = validateElicitation(pending.ask.fields, values);
+      if (result.blocked || Object.keys(result.issues).length)
+        return { ok: false, error: "请检查提问回答", issues: result.issues };
+      this.elicitations.delete(id);
+      pending.resolve({ action: "accept", content: result.content });
+    } else {
+      this.elicitations.delete(id);
+      pending.resolve({ action });
+    }
+    this.events.elicitation?.({ id, roomId: pending.ask.roomId, resolved: true });
+    return { ok: true, action };
+  }
+
+  /** Cancel every pending question owned by a slot/agent that is going away. */
+  private cancelElicitations(match: (slot: SessionSlot, ask: ElicitationAsk) => boolean) {
+    for (const [id, pending] of [...this.elicitations])
+      if (match(pending.slot, pending.ask)) this.answerElicitation(id, "cancel");
   }
 
   /** A cancellation escalation can only terminate the process owned by this room and agent. */
@@ -276,6 +336,7 @@ export class HarnessHost {
         {
           onUpdate: (n) => this.onUpdate(proc, n),
           requestPermission: (p) => this.requestPermission(proc, agent.id, p),
+          requestElicitation: (p) => this.requestElicitation(proc, agent.id, p),
           onTerminal: (t) => {
             const slot = proc.sessions.get(t.sessionId);
             if (slot) this.events.terminal(slot.roomId, t);
@@ -309,6 +370,7 @@ export class HarnessHost {
     if (this.procs.get(p.key) === p) this.procs.delete(p.key);
     const slots = new Set(p.sessions.values());
     for (const [id, a] of this.asks) if (slots.has(a.slot)) this.answer(id, null);
+    this.cancelElicitations((slot) => slots.has(slot));
     for (const slot of p.sessions.values()) {
       const key = `${slot.roomId}|${slot.agentId}`;
       if (this.slots.get(key) === slot) this.slots.delete(key);
@@ -380,6 +442,34 @@ export class HarnessHost {
     return new Promise<acp.RequestPermissionResponse>((res) => {
       this.asks.set(ask.id, { ask, slot, resolve: res });
       this.events.permission(ask);
+    });
+  }
+
+  /**
+   * ACP form elicitation. Tuantuan advertises form mode only, and a question outside a live turn
+   * has no room to render in, so both answer cancel instead of leaving the agent waiting.
+   */
+  private requestElicitation(
+    p: Proc,
+    agentId: string,
+    req: acp.CreateElicitationRequest,
+  ): Promise<acp.CreateElicitationResponse> {
+    if (req.mode !== "form") return Promise.resolve<acp.CreateElicitationResponse>({ action: "cancel" });
+    const form = req as acp.ElicitationFormMode & { message: string };
+    if (!("sessionId" in form)) return Promise.resolve<acp.CreateElicitationResponse>({ action: "cancel" });
+    const slot = p.sessions.get(form.sessionId);
+    if (!slot?.turnSignal || slot.turnSignal.aborted)
+      return Promise.resolve<acp.CreateElicitationResponse>({ action: "cancel" });
+    const ask: ElicitationAsk = {
+      id: crypto.randomUUID(),
+      roomId: slot.roomId,
+      agentId,
+      message: form.message,
+      fields: elicitationFields(form.requestedSchema),
+    };
+    return new Promise<acp.CreateElicitationResponse>((res) => {
+      this.elicitations.set(ask.id, { ask, slot, resolve: res });
+      this.events.elicitation?.(ask);
     });
   }
 
@@ -813,6 +903,7 @@ export class HarnessHost {
       void proc.acp.agent.notify(methods.agent.session.cancel, { sessionId }).catch(() => {});
       for (const [id, a] of this.asks)
         if (a.ask.roomId === room.id && a.ask.agentId === agent.id) this.answer(id, null);
+      this.cancelElicitations((_slot, ask) => ask.roomId === room.id && ask.agentId === agent.id);
       // An unresponsive harness must not keep executing or send old updates into the next turn.
       // The process belongs to this room and agent, so other conversations keep running.
       graceTimer = setTimeout(() => {
@@ -863,6 +954,8 @@ export class HarnessHost {
     } finally {
       clearTimeout(graceTimer);
       signal.removeEventListener("abort", onAbort);
+      // A harness that ends its turn without answering must not leave a modal in the room.
+      this.cancelElicitations((owner) => owner === slot);
       slot.turn = null;
       slot.turnSignal = null;
     }
@@ -1152,6 +1245,7 @@ export class HarnessHost {
     } else this.store.setCustomHistory(roomId, agentId, []);
     for (const [key, slot] of this.slots) if (matches(slot)) this.slots.delete(key);
     for (const [id, pending] of this.asks) if (matches(pending.ask)) this.answer(id, null);
+    this.cancelElicitations((_slot, ask) => matches(ask));
     for (const proc of [...this.procs.values()]) if (matches(proc)) this.dropProc(proc);
     // Active prompt guards are released by their own finally blocks after cancellation settles.
   }

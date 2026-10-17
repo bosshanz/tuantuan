@@ -11,7 +11,7 @@ import {
 import type { TerminalSnapshot } from "./acp";
 import { CUSTOM_HARNESS } from "./custom";
 import { harnessSpec } from "./harness";
-import type { HarnessHost, PermissionAsk, SessionView } from "./host";
+import type { ElicitationAsk, HarnessHost, PermissionAsk, SessionView } from "./host";
 import { mentionsEveryone, parseMentions } from "./mentions";
 import { profileInstructions, readProfile } from "./profile";
 import type { Agent, Message, Room, Store } from "./store";
@@ -26,6 +26,7 @@ export type RoomEvent =
   | { type: "room.state"; roomId: string; state: RoomState }
   | { type: "session"; roomId: string; agentId: string; view: SessionView }
   | { type: "permission"; roomId: string; ask: PermissionAsk | null; resolvedId?: string }
+  | { type: "elicitation"; roomId: string; ask: ElicitationAsk | null; resolvedId?: string }
   | { type: "terminal"; roomId: string; terminal: TerminalSnapshot };
 
 export interface RoomTask {

@@ -226,6 +226,10 @@ export function createApp(deps: AppDeps) {
         "resolved" in a
           ? publish(a.roomId, { type: "permission", roomId: a.roomId, ask: null, resolvedId: a.id })
           : publish(a.roomId, { type: "permission", roomId: a.roomId, ask: a }),
+      elicitation: (a) =>
+        "resolved" in a
+          ? publish(a.roomId, { type: "elicitation", roomId: a.roomId, ask: null, resolvedId: a.id })
+          : publish(a.roomId, { type: "elicitation", roomId: a.roomId, ask: a }),
       terminal: (roomId, terminal) => publish(roomId, { type: "terminal", roomId, terminal }),
     },
     mcp,
@@ -1278,6 +1282,20 @@ export function createApp(deps: AppDeps) {
       return host.answer(id, optionId) ? json({ ok: true }) : json({ error: "授权请求已失效" }, 404);
     }
 
+    // Closing the card submits cancel, so a departed user can never leave the agent waiting.
+    if (resource === "elicitations" && id && method === "POST") {
+      const input = z
+        .object({
+          action: z.enum(["accept", "decline", "cancel"]),
+          content: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])).optional(),
+        })
+        .parse(await body());
+      const result = host.answerElicitation(id, input.action, input.content ?? {});
+      if (!result) return json({ error: "提问已失效" }, 404);
+      if (!result.ok) return json({ error: result.error, issues: result.issues }, 400);
+      return json(result);
+    }
+
     // 「Skills 与插件」 library: read-only discovery + managed imports (update / delete).
     if (resource === "library") {
       const projects = store.listProjects().filter((p) => p.id !== "drafts" && p.cwd);
@@ -1554,7 +1572,7 @@ export function createApp(deps: AppDeps) {
           return json(await host.setMode(t.room, t.agent, t.identity, modeId));
         }
       }
-      if (room && sub === "messages" && method === "GET") {
+      if (room && sub === "messages" && !subId && method === "GET") {
         const limit = Math.min(
           z.coerce
             .number()
@@ -1581,9 +1599,11 @@ export function createApp(deps: AppDeps) {
             room.agentIds.map((a) => [a, host.view(room.id, a)]).filter((e) => e[1] !== null),
           ),
           asks: host.pendingAsks(room.id),
+          elicitations: host.pendingElicitations(room.id),
+          conclusion: store.latestConclusion(room.id),
         });
       }
-      if (room && sub === "messages" && method === "POST") {
+      if (room && sub === "messages" && !subId && method === "POST") {
         const m = z
           .object({
             senderName: z.string().max(32).default("我"),
@@ -1593,6 +1613,23 @@ export function createApp(deps: AppDeps) {
           })
           .parse(await body());
         return json(orchestrator.postHumanMessage(room.id, m.senderName, m.content, m.images, m.replyToId), 201);
+      }
+      // Retry is a new request that quotes the original human message; it never resumes the old turn.
+      if (room && sub === "messages" && subId && action === "retry" && method === "POST") {
+        const interrupted = store.getMessage(subId);
+        if (!interrupted || interrupted.roomId !== room.id || interrupted.senderKind !== "agent")
+          throw new ValidationError("消息不存在", 404);
+        if (interrupted.status !== "interrupted") throw new ValidationError("只有被中断的请求可以重试");
+        const original = store.getMessage(interrupted.runId);
+        if (!original || original.roomId !== room.id || original.senderKind !== "human")
+          throw new ValidationError("找不到原请求", 409);
+        const images = (original.timeline?.parts ?? []).flatMap((part) =>
+          part.kind === "image" ? [{ mimeType: part.mimeType, data: part.data }] : [],
+        );
+        return json(
+          orchestrator.postHumanMessage(room.id, original.senderName, original.content, images, original.id),
+          201,
+        );
       }
       if (room && sub === "cancel" && method === "POST") {
         const text = await req.text();

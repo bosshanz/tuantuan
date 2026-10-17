@@ -42,6 +42,57 @@ export interface TaskContext {
   pending: string[];
 }
 
+/** Latest accepted task note shown as the room's read-only conclusion card. Derived, not stored. */
+export interface RoomConclusion {
+  messageId: string;
+  seq: number;
+  context: TaskContext;
+}
+
+/** Timeline JSON is not revalidated on read, so a malformed legacy note must not reach the card. */
+function validTaskContext(timeline: Timeline | null): TaskContext | null {
+  const context = timeline?.taskContext as unknown;
+  if (!context || typeof context !== "object" || Array.isArray(context)) return null;
+  const record = context as Record<string, unknown>;
+  const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === "string");
+  if (typeof record.goal !== "string" || !strings(record.decisions) || !strings(record.pending)) return null;
+  return context as TaskContext;
+}
+
+/** Root-task or coordinator-follow-up replies carry the room's conclusion; hand-off replies do not. */
+export function conclusionFromMessage(message: {
+  id: string;
+  seq: number;
+  hop: number;
+  senderKind: string;
+  status: string;
+  timeline: Timeline | null;
+}): RoomConclusion | null {
+  if (message.senderKind !== "agent" || message.status !== "done") return null;
+  const context = validTaskContext(message.timeline);
+  if (!context) return null;
+  if (message.hop !== 1 && !message.timeline?.reviewOf?.length) return null;
+  return { messageId: message.id, seq: message.seq, context };
+}
+
+export function latestConclusionOf(
+  messages: {
+    id: string;
+    seq: number;
+    hop: number;
+    senderKind: string;
+    status: string;
+    timeline: Timeline | null;
+  }[],
+): RoomConclusion | null {
+  let latest: RoomConclusion | null = null;
+  for (const message of messages) {
+    const conclusion = conclusionFromMessage(message);
+    if (conclusion && (!latest || conclusion.seq > latest.seq)) latest = conclusion;
+  }
+  return latest;
+}
+
 export interface Handoff {
   /** The other agent: the target on `handoffs`, the sender on `handoffFrom`. */
   agentId: string;

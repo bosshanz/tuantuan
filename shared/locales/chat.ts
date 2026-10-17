@@ -1262,4 +1262,125 @@ export const chatMessages = {
     en: "Too much output to announce. Navigate to rows manually to read.",
     ja: "出力が多すぎるため読み上げを一時停止しました。各行を手動で確認してください。",
   },
+  "{name} 想请你回答": {
+    "zh-TW": "{name} 想請你回答",
+    en: "{name} needs your answer",
+    ja: "{name} が回答を求めています",
+  },
+  关闭并取消提问: {
+    "zh-TW": "關閉並取消提問",
+    en: "Close and cancel question",
+    ja: "閉じて質問をキャンセル",
+  },
+  取消提问: {
+    "zh-TW": "取消提問",
+    en: "Cancel question",
+    ja: "質問をキャンセル",
+  },
+  提交回答: {
+    "zh-TW": "送出回答",
+    en: "Submit answer",
+    ja: "回答を送信",
+  },
+  "提交中…": {
+    "zh-TW": "送出中…",
+    en: "Submitting…",
+    ja: "送信中…",
+  },
+  "回答提交失败：{reason}。请重试。": {
+    "zh-TW": "回答送出失敗：{reason}。請重試。",
+    en: "Failed to submit the answer: {reason}. Please try again.",
+    ja: "回答を送信できませんでした：{reason}。再試行してください。",
+  },
+  请检查提问回答: {
+    "zh-TW": "請檢查提問回答",
+    en: "Please check the answers",
+    ja: "回答を確認してください",
+  },
+  提问已失效: {
+    "zh-TW": "提問已失效",
+    en: "This question is no longer active",
+    ja: "この質問は無効になりました",
+  },
+  "这个提问包含当前版本不支持的问题类型，无法提交。请取消本次提问。": {
+    "zh-TW": "這個提問包含目前版本不支援的問題類型，無法送出。請取消本次提問。",
+    en: "This question uses a field type this version cannot render, so it cannot be submitted. Cancel the question instead.",
+    ja: "この質問には現在のバージョンが対応していない項目が含まれるため送信できません。質問をキャンセルしてください。",
+  },
+  "当前版本不支持的问题类型「{type}」，无法提交。请取消本次提问。": {
+    "zh-TW": "目前版本不支援的問題類型「{type}」，無法送出。請取消本次提問。",
+    en: "Field type “{type}” is not supported in this version, so the form cannot be submitted. Cancel the question instead.",
+    ja: "項目タイプ「{type}」はこのバージョンでは対応していないため送信できません。質問をキャンセルしてください。",
+  },
+  不支持的问题类型: {
+    "zh-TW": "不支援的問題類型",
+    en: "Unsupported field type",
+    ja: "未対応の項目タイプ",
+  },
+  请选择: { "zh-TW": "請選擇", en: "Select…", ja: "選択してください" },
+  不填写: { "zh-TW": "不填寫", en: "Leave blank", ja: "入力しない" },
+  此项为必填: { "zh-TW": "此項為必填", en: "This field is required", ja: "この項目は必須です" },
+  请输入有效的值: {
+    "zh-TW": "請輸入有效的值",
+    en: "Enter a valid value",
+    ja: "有効な値を入力してください",
+  },
+  "至少输入 {min} 个字符": {
+    "zh-TW": "至少輸入 {min} 個字元",
+    en: "Enter at least {min} characters",
+    ja: "{min} 文字以上入力してください",
+  },
+  "最多输入 {max} 个字符": {
+    "zh-TW": "最多輸入 {max} 個字元",
+    en: "Enter at most {max} characters",
+    ja: "{max} 文字以内で入力してください",
+  },
+  格式不匹配: { "zh-TW": "格式不符", en: "The format does not match", ja: "形式が一致しません" },
+  "请输入有效的 {format}": {
+    "zh-TW": "請輸入有效的 {format}",
+    en: "Enter a valid {format}",
+    ja: "有効な {format} を入力してください",
+  },
+  "不能小于 {min}": {
+    "zh-TW": "不能小於 {min}",
+    en: "Must be at least {min}",
+    ja: "{min} 以上にしてください",
+  },
+  "不能大于 {max}": {
+    "zh-TW": "不能大於 {max}",
+    en: "Must be at most {max}",
+    ja: "{max} 以下にしてください",
+  },
+  请选择有效选项: {
+    "zh-TW": "請選擇有效選項",
+    en: "Choose a valid option",
+    ja: "有効な選択肢を選んでください",
+  },
+  "至少选择 {min} 项": {
+    "zh-TW": "至少選擇 {min} 項",
+    en: "Select at least {min}",
+    ja: "{min} 件以上選択してください",
+  },
+  "最多选择 {max} 项": {
+    "zh-TW": "最多選擇 {max} 項",
+    en: "Select at most {max}",
+    ja: "{max} 件以内で選択してください",
+  },
+  当前结论: { "zh-TW": "目前結論", en: "Current conclusion", ja: "現在の結論" },
+  查看来源消息: {
+    "zh-TW": "查看來源訊息",
+    en: "View source message",
+    ja: "元のメッセージを表示",
+  },
+  "正在重试…": { "zh-TW": "正在重試…", en: "Retrying…", ja: "再試行中…" },
+  重试此请求: {
+    "zh-TW": "重試此請求",
+    en: "Retry this request",
+    ja: "このリクエストを再試行",
+  },
+  "重试失败：{reason}。请重试。": {
+    "zh-TW": "重試失敗：{reason}。請重試。",
+    en: "Retry failed: {reason}. Please try again.",
+    ja: "再試行に失敗しました：{reason}。もう一度お試しください。",
+  },
 } satisfies MessageCatalog;

@@ -3,11 +3,12 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { type MessageQuote, messageQuote } from "../shared/messageQuote";
 import { messagePreview, type RoomPreview } from "../shared/roomPreview";
-import { emptyTimeline, type Timeline } from "../shared/timeline";
+import { emptyTimeline, type RoomConclusion, type Timeline } from "../shared/timeline";
 import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
 import { type CustomFormat, type CustomSecret, type Item, maskKey } from "./custom";
 import { ModelCatalog } from "./model-catalog";
 import type { ProviderSecret } from "./providers";
+import { parseTaskContext } from "./task-context";
 
 /** SQLite is the source of truth for agents, rooms, messages and ACP session bindings. */
 
@@ -678,8 +679,8 @@ export class Store {
     this.db.transaction(() => {
       let quote: MessageQuote | null = null;
       if (m.replyToId) {
-        if (m.senderKind !== "human" || this.getRoom(m.roomId)?.kind !== "group")
-          throw new ValidationError("引用回复仅用于群聊消息");
+        // Human quotes are also created by retry, which must reference the original request in a DM too.
+        if (m.senderKind !== "human") throw new ValidationError("只有用户消息可以引用回复");
         const original = this.getMessage(m.replyToId);
         if (!original || original.roomId !== m.roomId) throw new ValidationError("引用消息不存在或不在当前会话");
         quote = messageQuote(original);
@@ -734,6 +735,33 @@ export class Store {
       .query("SELECT * FROM messages WHERE room_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?")
       .all(roomId, beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as Row[];
     return rows.reverse().map(toMessage);
+  }
+
+  /**
+   * The newest accepted task note from a root task or a coordinator follow-up. Member hand-off
+   * replies are deliberately skipped: their notes stay on their own messages.
+   */
+  latestConclusion(roomId: string): RoomConclusion | null {
+    const rows = this.db
+      .query(
+        `SELECT * FROM messages
+         WHERE room_id = ? AND sender_kind = 'agent' AND status = 'done'
+           AND timeline LIKE '%"taskContext"%'
+           AND (hop = 1 OR timeline LIKE '%"reviewOf"%')
+         ORDER BY seq DESC`,
+      )
+      .all(roomId) as Row[];
+    for (const row of rows) {
+      const message = toMessage(row);
+      if (message.hop !== 1 && !message.timeline?.reviewOf?.length) continue;
+      try {
+        const context = parseTaskContext(message.timeline?.taskContext);
+        return { messageId: message.id, seq: message.seq, context };
+      } catch {
+        // A malformed legacy note must not hide an older valid conclusion.
+      }
+    }
+    return null;
   }
 
   /** Query this request before applying any relay budget, so unrelated runs cannot displace it. */

@@ -10,6 +10,7 @@ import { setSkillLinked } from "../server/skills";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
 import { chatHistorySmoke } from "./e2e-chat-history";
 import { chatScrollSmoke } from "./e2e-chat-scroll";
+import { chatToolsSmoke } from "./e2e-chat-tools";
 import { registryAuthSmoke } from "./e2e-registry-auth";
 import { registryUsageSmoke } from "./e2e-registry-usage";
 import { repliesSmoke } from "./e2e-replies";
@@ -509,6 +510,7 @@ try {
   await page.locator(".messages").getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
   await shot("conversation-handoff");
   await taskContextSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
+  await chatToolsSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
   await terminalSmoke(browser, `http://localhost:${server.port}`, group.id, project.id, cwd, shotsDir);
   await registryUsageSmoke(browser, `http://localhost:${server.port}`, shotsDir);
   await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);

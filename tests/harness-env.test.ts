@@ -67,6 +67,21 @@ describe("harness env inherits user config", () => {
     });
   });
 
+  test("OpenCode's question tool is enabled by default but an explicit value wins", () => {
+    const defaults = harnessProcessEnv({}, {}, {}, { id: "opencode", identity: "first-prompt" }, "");
+    expect(defaults.OPENCODE_ENABLE_QUESTION_TOOL).toBe("1");
+    const explicit = harnessProcessEnv(
+      { OPENCODE_ENABLE_QUESTION_TOOL: "0" },
+      {},
+      {},
+      { id: "opencode", identity: "first-prompt" },
+      "",
+    );
+    expect(explicit.OPENCODE_ENABLE_QUESTION_TOOL).toBe("0");
+    const other = harnessProcessEnv({}, {}, {}, { id: "claude-code", identity: "first-prompt" }, "");
+    expect(other.OPENCODE_ENABLE_QUESTION_TOOL).toBeUndefined();
+  });
+
   test("materializeSkills never returns isolation env or writes shared project links", () => {
     const data = mkdtempSync(join(tmpdir(), "he-"));
     const cwd = mkdtempSync(join(tmpdir(), "he-cwd-"));

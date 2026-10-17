@@ -974,6 +974,70 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .task-context dd { margin: 3px 0 0; white-space: pre-wrap; }
 .task-context ul { margin: 0; padding-left: 18px; }
 .task-context li + li { margin-top: 4px; }
+/* Pinned, read-only conclusion derived from the latest accepted task note. */
+.room-conclusion {
+  position: sticky;
+  top: calc(var(--head-h) + 8px);
+  z-index: 4;
+  box-sizing: border-box;
+  width: min(960px, calc(100% - 28px));
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 auto 10px;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r3);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-1);
+  font-size: var(--fs-sm);
+}
+.room-conclusion-head { display: flex; align-items: center; gap: 8px; }
+.room-conclusion-head > svg { flex: none; color: var(--accent); }
+.room-conclusion-head h3 { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-sm); }
+.room-conclusion-head .btn { flex: none; margin-left: auto; }
+.room-conclusion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 20px;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.room-conclusion-goal { grid-column: 1 / -1; }
+.room-conclusion-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-3); }
+.room-conclusion p { margin: 3px 0 0; white-space: pre-wrap; }
+.room-conclusion ul { margin: 3px 0 0; padding-left: 18px; }
+.room-conclusion li + li { margin-top: 2px; }
+.message-row[data-flash] .msg { animation: message-flash 1.4s ease-out; }
+@keyframes message-flash {
+  0%, 30% { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: none; }
+}
+.msg-interrupted { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.msg-interrupted .error-text { margin: 0; }
+
+/* form elicitation (permission dialog skeleton) */
+.elicit { width: min(640px, calc(100vw - 32px)); }
+.elicit .perm-head { align-items: flex-start; }
+.elicit .perm-head > div { flex: 1; min-width: 0; }
+.elicit .perm-head strong { font-weight: 600; }
+.elicit-message { margin: 4px 0 0; color: var(--text-2); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.elicit-close { flex: none; }
+.elicit-fields { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
+.elicit-required { color: var(--danger); margin-left: 3px; }
+.elicit-error { margin: 4px 0 0; color: var(--danger); font-size: var(--fs-sm); }
+.elicit-check { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.elicit-check input { margin-top: 3px; }
+.elicit-check small { display: block; color: var(--text-3); }
+.elicit-multi { border: 0; padding: 0; margin: 0; min-width: 0; }
+.elicit-multi legend { padding: 0; margin-bottom: 4px; }
+.elicit-unsupported .input { opacity: 0.7; }
+@media (max-width: 700px) {
+  .room-conclusion { max-height: 42vh; }
+  .room-conclusion-grid { grid-template-columns: 1fr; }
+}
+
 .handoff-task:focus-visible,
 .task-context summary:focus-visible,
 .task-context-content:focus-visible {

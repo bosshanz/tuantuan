@@ -49,6 +49,8 @@ test("quote projection is bounded, Unicode-safe and contains only the referenced
 });
 
 test("server validates references atomically and rejects cross-room, unfinished and system sources", () => {
+  // Humans may quote in a DM too: retrying an interrupted request references the original there.
+
   const { store, a, room, insert } = fixture();
   try {
     const other = store.createRoom("other", [a.id]);
@@ -65,7 +67,8 @@ test("server validates references atomically and rejects cross-room, unfinished 
     for (const replyToId of invalid) expect(() => insert({ replyToId })).toThrow();
     expect(store.recentMessages(room.id, 100)).toHaveLength(before);
     const valid = insert();
-    expect(() => insert({ roomId: other.id, replyToId: foreign.id })).toThrow("仅用于群聊");
+    // `other` is a DM; a human quote there is the retry path and must stay valid.
+    expect(insert({ roomId: other.id, replyToId: foreign.id }).quote?.text).toBe(foreign.content);
     expect(() => insert({ senderKind: "agent", replyToId: valid.id })).toThrow();
     expect(insert({ replyToId: valid.id }).seq).toBe(valid.seq + 1);
   } finally {
