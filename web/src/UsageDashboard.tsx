@@ -6,6 +6,7 @@ import { harnessBrand } from "./brands";
 import { translateError, useI18n } from "./i18n";
 import { BrandLogo, brandFor } from "./ModelPicker";
 import { AgentAvatar } from "./ui";
+import { cacheHitRate, formatCacheHitRate } from "./usage";
 
 /** Per-turn token usage as reported by the harnesses (never estimated). */
 export interface UsageTally {
@@ -166,6 +167,7 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
   const max = Math.max(1, ...rows.map((r) => r.t?.total ?? 0));
   const totals = stats?.totals;
   const cache = totals ? totals.cacheRead + totals.cacheWrite : 0;
+  const hitRate = totals ? formatCacheHitRate(cacheHitRate(totals.input, totals.cacheRead, totals.cacheWrite)) : null;
 
   return (
     <section className="card ud" aria-label={t("Token 统计")}>
@@ -203,14 +205,11 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
               <Stat
                 label={t("缓存")}
                 value={fmtTokens(cache)}
-                sub={
-                  cache
-                    ? t("读 {read} · 写 {write}", {
-                        read: fmtTokens(totals.cacheRead),
-                        write: fmtTokens(totals.cacheWrite),
-                      })
-                    : undefined
-                }
+                sub={t("读 {read} · 写 {write}", {
+                  read: fmtTokens(totals.cacheRead),
+                  write: fmtTokens(totals.cacheWrite),
+                })}
+                note={t("命中率 {rate}", { rate: hitRate ?? t("无数据") })}
               />
               <Stat
                 label={t("费用")}
@@ -256,10 +255,12 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
                     <>
                       <span
                         className="ud-bar"
-                        title={t("输入 {input} · 输出 {output} · 缓存 {cache}", {
+                        title={t("输入 {input} · 输出 {output} · 缓存 {cache} · 命中率 {rate}", {
                           input: r.t.input,
                           output: r.t.output,
                           cache: r.t.cacheRead + r.t.cacheWrite,
+                          rate:
+                            formatCacheHitRate(cacheHitRate(r.t.input, r.t.cacheRead, r.t.cacheWrite)) ?? t("无数据"),
                         })}
                       >
                         <span style={{ width: `${(r.t.total / max) * 100}%` }}>
@@ -288,12 +289,13 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
   );
 }
 
-function Stat(p: { label: string; value: string; sub?: string; strong?: boolean; muted?: boolean }) {
+function Stat(p: { label: string; value: string; sub?: string; note?: string; strong?: boolean; muted?: boolean }) {
   return (
     <div className="ud-stat" data-strong={p.strong || undefined}>
       <span className="ud-stat-label">{p.label}</span>
       <span className={`ud-stat-value ${p.muted ? "muted" : ""}`}>{p.value}</span>
       <span className="ud-stat-sub">{p.sub ?? "\u00a0"}</span>
+      {p.note && <span className="ud-stat-sub">{p.note}</span>}
     </div>
   );
 }

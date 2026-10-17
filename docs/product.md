@@ -96,7 +96,7 @@
 ## 验收条件
 
 - 四种界面语言可保存、刷新后恢复，并同步到同一本机服务的其他窗口；服务端值覆盖启动缓存。快速连续修改最终保存最新草稿，保存失败有明确提示且可重试，失败的语言选择不冒充已生效。切换时输入草稿、名称、路径、模型 ID 和聊天正文保持原值；桌面菜单与通知的应用文案同步。窄屏下较长的翻译不截断主要操作，服务商表单可滚动且保存按钮可达。浏览器验证与真实桌面原生菜单验证分别记录。
-- `TUANTUAN_MOCK_HARNESS=1` 下不装任何 CLI 可完成（`bun run e2e` 覆盖）：首次引导选 mock → 一键登录 → 起名后进入草稿会话 → 之后不再出现 → Harness 页一键安装（本地脚本 + mock Registry 的二进制包）与握手 → 建 Agent（Skills 列表）→ 建项目 → 多 Agent 会话：不 @ 时主 Agent 回复、@ 时被 @ 者回复、handoff → 单 Agent 会话中看到斜杠命令、计划、思考、权限 + diff、终端、配置项、用量、取消 → 服务商与用量（Token 统计：mock 每轮报告 usage、模型和累计费用，按 Agent / 模型分组；没报告的 Harness 显示「无数据」）。
+- `TUANTUAN_MOCK_HARNESS=1` 下不装任何 CLI 可完成（`bun run e2e` 覆盖）：首次引导选 mock → 一键登录 → 起名后进入草稿会话 → 之后不再出现 → Harness 页一键安装（本地脚本 + mock Registry 的二进制包）与握手 → 建 Agent（Skills 列表）→ 建项目 → 多 Agent 会话：不 @ 时主 Agent 回复、@ 时被 @ 者回复、handoff → 单 Agent 会话中看到斜杠命令、计划、思考、权限 + diff、终端、配置项、用量、取消 → 服务商与用量（Token 统计：mock 每轮报告 usage、模型和累计费用，按 Agent / 模型分组；缓存卡片显示读 / 写与一位小数的缓存命中率，分母为 0 时显示「无数据」；没报告的 Harness 显示「无数据」）。
 - 桌面版（Linux AppImage，`bun run desktop:smoke`）：随包 Bun 服务端启动、preload 桥、Codex 从 Registry 安装后握手、Skills 从用户目录发现并在 Agent 页显示、mock 对话、退出时进程全部结束。
 - 真实 Harness 在登录后能完成对话；未登录时显示明确的登录提示。
 - 经团团 ACP 文件接口访问的工作目录外路径和符号链接逃逸被拒绝；ACP 终端的目录检查只覆盖启动 cwd，不据此声称命令或 Harness 被操作系统沙箱隔离。

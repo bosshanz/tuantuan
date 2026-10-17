@@ -1485,6 +1485,11 @@ export const harnessMessages = {
     en: "Read {read} · Write {write}",
     ja: "読み取り {read} · 書き込み {write}",
   },
+  "命中率 {rate}": {
+    "zh-TW": "命中率 {rate}",
+    en: "Hit rate {rate}",
+    ja: "ヒット率 {rate}",
+  },
   费用: {
     "zh-TW": "費用",
     en: "Cost",
@@ -1505,10 +1510,10 @@ export const harnessMessages = {
     en: "No records for this period",
     ja: "この期間の記録がありません",
   },
-  "输入 {input} · 输出 {output} · 缓存 {cache}": {
-    "zh-TW": "輸入 {input} · 輸出 {output} · 快取 {cache}",
-    en: "Input {input} · Output {output} · Cache {cache}",
-    ja: "入力 {input} · 出力 {output} · キャッシュ {cache}",
+  "输入 {input} · 输出 {output} · 缓存 {cache} · 命中率 {rate}": {
+    "zh-TW": "輸入 {input} · 輸出 {output} · 快取 {cache} · 命中率 {rate}",
+    en: "Input {input} · Output {output} · Cache {cache} · Hit rate {rate}",
+    ja: "入力 {input} · 出力 {output} · キャッシュ {cache} · ヒット率 {rate}",
   },
   "每日 Token 趋势": {
     "zh-TW": "每日 Token 趨勢",

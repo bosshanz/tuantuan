@@ -396,3 +396,11 @@ Browser 插件不可用，本次沿用项目 Playwright 流程。测试使用隔
 验证：新增 `tests/elicitation.test.ts`（5 项）、`tests/conclusion.test.ts`（5 项）、`tests/message-retry-api.test.ts`（4 项），并扩充聊天状态与 OpenCode 环境回归。`bun run check` 达到 671 pass / 39 skip / 7 fail、10,448 断言；7 项失败均为本机环境相关的既有失败（Claude Code 思考等级返回 `max`、真实服务商缺少 `glm-local`），已在干净 `main` 上复现同样结果，类型检查与 lint 通过。`bun run build` 与完整 Chrome 冒烟通过，新增场景覆盖表单填写与必填校验、提交、关闭取消、结论卡与 390px、来源跳转、DM 中断重试的新请求与完成回复。
 
 边界：未运行真实 Claude Code `AskUserQuestion` 手测，也未用真实 OpenCode 会话验证提问工具默认值；现有证据来自 mock ACP、HTTP / WS 集成测试与浏览器冒烟。未调用真实付费模型，未提交 lockfile，未推送或创建 PR。
+
+## 2026-10-17 用量缓存命中率
+
+- 缓存命中率 = `cacheRead / (input + cacheRead + cacheWrite)`，直接使用 `usage_log` 已有的三列；输出、思考与费用不进入分母，不估算费用，不回写历史，也不按 Harness 修正口径。分母 ≤ 0 返回 null，界面显示「无数据」而不是 0%；只有输入而没有缓存读取时是 0%。
+- 纯函数 `web/src/usage.ts` 的 `cacheHitRate` / `formatCacheHitRate` 负责比例与一位小数百分比。Token 统计的缓存卡片在「读 · 写」下新增命中率一行；Agent / 模型 / Harness 分组行的提示用同一函数显示该行命中率。每日趋势和额度卡片不变，四种界面语言补齐文案。
+- 已知限制：若某个 Harness 报告的 input 本身已包含缓存读取，比例会偏低；本版不探测、不修正。
+
+验证：新增 `tests/usage-dashboard.test.ts` 覆盖 800 / 400 / 100 → 400 / 1300、三者全 0 → null、仅输入 → 0、仅缓存读取 → 1，以及一位小数和超过 100% 的格式化；浏览器冒烟新增缓存卡片命中率与分组行提示断言。`bun run check` 为 672 pass / 39 skip / 7 fail、10,463 断言、83 个文件，7 项均为既有本机环境失败（已在干净 `main` 复现），类型检查与 lint 通过；`bun run build` 与完整 Chrome 冒烟通过。
