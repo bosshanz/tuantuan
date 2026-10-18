@@ -5,20 +5,27 @@ import {
   app,
   BrowserWindow,
   dialog,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
   ipcMain,
   Menu,
   type MenuItemConstructorOptions,
   nativeImage,
+  autoUpdater as nativeUpdater,
   powerSaveBlocker,
   shell,
   Tray,
 } from "electron";
 import { isLocale, type Locale, translate } from "../../shared/i18n";
+import { completeAppImageUpdate } from "./appimage-update";
 import { registerNotifications, registerOnFirstLaunch } from "./notify";
 import { serverLayout } from "./paths";
 import { TaskPowerManager } from "./power";
 import { type RunningServer, startServer } from "./server";
 import { loginShellEnv } from "./shell-env";
+import { DesktopCheckpoint, UpdateCheckpointFile } from "./update-checkpoint";
+import { hasMacUpdateIdentity, isHomebrewApp, updatePolicy } from "./update-policy";
+import { DesktopUpdates, type UpdateActivity } from "./updates";
 
 const isMac = process.platform === "darwin";
 app.setName("团团");
@@ -29,6 +36,13 @@ let srv: RunningServer | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 let taskPower: TaskPowerManager | null = null;
+let desktopUpdates: DesktopUpdates | null = null;
+let checkpointFile: UpdateCheckpointFile | null = null;
+let checkpoint: DesktopCheckpoint | null = null;
+let quitInFlight: Promise<void> | null = null;
+let updateQuitRequested = false;
+let windowReady = false;
+let rendererReady = false;
 let locale: Locale = "zh-CN";
 const t = (source: string, params?: Record<string, string | number>) => translate(locale, source, params);
 
@@ -72,8 +86,23 @@ function icon() {
   return existsSync(p) ? nativeImage.createFromPath(p) : undefined;
 }
 
+function acknowledgeAppImageUpdate() {
+  if (process.platform !== "linux" || !windowReady || !rendererReady) return;
+  try {
+    completeAppImageUpdate({
+      userDataPath: app.getPath("userData"),
+      current: process.env.APPIMAGE,
+      args: process.argv,
+    });
+  } catch (error) {
+    console.error("AppImage update recovery files retained", error);
+  }
+}
+
 function createWindow() {
   if (!srv) return;
+  windowReady = false;
+  rendererReady = false;
   const b = savedBounds();
   win = new BrowserWindow({
     width: b?.width ?? 1320,
@@ -100,6 +129,8 @@ function createWindow() {
     },
   });
   win.once("ready-to-show", () => {
+    windowReady = true;
+    acknowledgeAppImageUpdate();
     win?.show();
     registerOnFirstLaunch(locale);
   });
@@ -110,10 +141,18 @@ function createWindow() {
   win.webContents.on("did-finish-load", sendFullscreen);
   win.on("close", (e) => {
     if (win) writeFileSync(boundsFile(), JSON.stringify(win.getNormalBounds()));
+    if (updateQuitRequested && !desktopUpdates?.canQuitForUpdate()) {
+      e.preventDefault();
+      return;
+    }
     // macOS keeps the app (and its agents) running with the window closed, like Mail.
-    if (isMac && !quitting) {
+    if (isMac && !quitting && !updateQuitRequested && !desktopUpdates?.canQuitForUpdate()) {
       e.preventDefault();
       win?.hide();
+    } else if (!quitting && !updateQuitRequested && !desktopUpdates?.canQuitForUpdate()) {
+      // Keep the last renderer alive until its cross-origin handoff has committed.
+      e.preventDefault();
+      app.quit();
     }
   });
   win.on("closed", () => {
@@ -218,28 +257,117 @@ function updateTrayMenu() {
   );
 }
 
-async function updates() {
-  // Only when the build was configured to publish (electron-builder writes app-update.yml then).
-  if (!app.isPackaged || process.env.TUANTUAN_AUTO_UPDATE === "0") return;
-  if (!existsSync(join(process.resourcesPath, "app-update.yml"))) return;
+function trustedUpdateCaller(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  if (!win || !srv || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) return false;
   try {
-    const { autoUpdater } = await import("electron-updater");
-    autoUpdater.autoDownload = true;
-    await autoUpdater.checkForUpdatesAndNotify({
-      // The download can finish after the user changes language.
-      get title() {
-        return t("新版本已就绪");
-      },
-      get body() {
-        return t("{appName} {version} 已下载，将在退出时自动安装。", {
-          appName: t("团团"),
-          version: "{version}",
-        });
-      },
-    });
-  } catch (e) {
-    console.error("update check failed", e);
+    return new URL(event.senderFrame.url).origin === srv.url;
+  } catch {
+    return false;
   }
+}
+
+async function updateActivity(action: "activity" | "prepare" | "resume"): Promise<UpdateActivity> {
+  if (!srv || quitting) throw new Error("无法确认 Agent 任务状态");
+  const response = await fetch(new URL(`/api/desktop/update-${action}`, srv.url), {
+    method: action === "activity" ? "GET" : "POST",
+    headers: { Authorization: `Bearer ${srv.updateToken}` },
+    signal: AbortSignal.timeout(5_000),
+  });
+  const value = await response.json();
+  if (!response.ok)
+    throw new Error(typeof value.error === "string" ? value.error : `任务状态检查失败（HTTP ${response.status}）`);
+  if (!Number.isSafeInteger(value.activeTasks) || value.activeTasks < 0 || typeof value.prepared !== "boolean")
+    throw new Error("任务状态无效，尚未开始安装");
+  return value;
+}
+
+async function updates() {
+  checkpointFile = new UpdateCheckpointFile(join(app.getPath("userData"), "update-checkpoint.json"));
+  const handoff = new DesktopCheckpoint(
+    checkpointFile,
+    (request) => {
+      if (!win || win.isDestroyed()) throw new Error("请打开团团窗口后重试保存");
+      win.webContents.send("tuantuan:update-prepare", request);
+    },
+    (state) => {
+      if (win && !win.isDestroyed()) win.webContents.send("tuantuan:checkpoint-state", state);
+    },
+  );
+  checkpoint = handoff;
+  ipcMain.on("tuantuan:update-checkpoint", (event, reply) => {
+    if (trustedUpdateCaller(event)) checkpoint?.reply(reply);
+  });
+  const policy = updatePolicy({
+    packaged: app.isPackaged,
+    disabled: process.env.TUANTUAN_AUTO_UPDATE === "0",
+    platform: process.platform,
+    homebrew: app.isPackaged && isMac && isHomebrewApp(process.execPath),
+    signedMac: !isMac || (app.isPackaged && hasMacUpdateIdentity(process.execPath)),
+    feed: existsSync(join(process.resourcesPath, "app-update.yml")),
+    appImage: !!process.env.APPIMAGE,
+  });
+  const updater =
+    policy.mode === "automatic"
+      ? (await import("./updater-adapter")).createUpdateAdapter({
+          platform: process.platform,
+          nativeUpdater,
+          relaunch: (options) => app.relaunch(options),
+        })
+      : undefined;
+  desktopUpdates = new DesktopUpdates({
+    version: app.getVersion(),
+    ...policy,
+    updater,
+    settingsPath: join(app.getPath("userData"), "settings.json"),
+    activity: () => updateActivity("activity"),
+    prepare: () => updateActivity("prepare"),
+    resume: () => updateActivity("resume"),
+    checkpoint: () => handoff.request("update"),
+    changed: (status) => {
+      // Installation was abandoned: later user edits must not be replaced by a stale restart snapshot.
+      if (status.phase !== "installing") {
+        try {
+          checkpoint?.abandonUpdate();
+        } catch (error) {
+          console.error("Could not remove abandoned update checkpoint", error);
+        }
+      }
+      if (win && !win.isDestroyed()) win.webContents.send("tuantuan:update-state", status);
+    },
+  });
+  const manager = desktopUpdates;
+  const actions = {
+    "tuantuan:update-status": () => {
+      rendererReady = true;
+      acknowledgeAppImageUpdate();
+      return manager.status();
+    },
+    "tuantuan:update-checkpoint-save": (value: unknown, requestId: unknown) => {
+      checkpoint?.save(value, requestId);
+    },
+    "tuantuan:update-checkpoint-read": () => checkpointFile?.read() ?? null,
+    "tuantuan:update-checkpoint-clear": (id: unknown) => {
+      checkpoint?.clear(id);
+    },
+    "tuantuan:update-check": () => manager.check(),
+    "tuantuan:update-download": () => manager.download(),
+    "tuantuan:update-install": () => {
+      if (quitInFlight) throw new Error("团团正在保存工作并退出，请稍后重试");
+      return manager.install();
+    },
+    "tuantuan:update-checks": (enabled: unknown) => {
+      if (typeof enabled !== "boolean") throw new Error(t("设置值必须为布尔值"));
+      return manager.setChecks(enabled);
+    },
+    "tuantuan:update-open-release": () =>
+      shell.openExternal(manager.status().releaseUrl ?? "https://github.com/bosshanz/tuantuan/releases/latest"),
+  };
+  for (const [channel, action] of Object.entries(actions))
+    ipcMain.handle(channel, (event, value: unknown, requestId: unknown) => {
+      if (!trustedUpdateCaller(event)) throw new Error("更新操作仅允许团团窗口调用");
+      return action(value, requestId);
+    });
+  manager.start();
 }
 
 async function boot() {
@@ -316,17 +444,61 @@ async function boot() {
     }
   });
   if (process.env.TUANTUAN_DESKTOP_SMOKE) console.log(`TUANTUAN_SERVER_URL=${srv.url}`);
+  await updates();
   createWindow();
   trayIcon();
-  void updates();
   app.on("activate", () => restore());
 }
 
 app.on("window-all-closed", () => {
   if (!isMac) app.quit();
 });
+// Native macOS updates close windows before emitting app.before-quit; NSIS uses the same marker.
+nativeUpdater.on("before-quit-for-update", () => {
+  updateQuitRequested = true;
+});
 app.on("before-quit", (e) => {
+  if (updateQuitRequested && !desktopUpdates?.canQuitForUpdate()) {
+    e.preventDefault();
+    updateQuitRequested = false;
+    return;
+  }
+  updateQuitRequested = false;
+  if (!quitting && !desktopUpdates?.canQuitForUpdate() && win && !win.isDestroyed()) {
+    e.preventDefault();
+    // An explicit update already owns its checkpoint and install lock. Do not race it.
+    if (desktopUpdates?.status().phase === "installing" || quitInFlight) return;
+    quitInFlight = (async () => {
+      for (;;) {
+        try {
+          if (!checkpoint) throw new Error("团团尚未准备好保存工作，请稍后重试");
+          await checkpoint.request("quit");
+          quitting = true;
+          app.quit();
+          return;
+        } catch (error) {
+          restore();
+          const options: Electron.MessageBoxOptions = {
+            type: "error",
+            title: t("无法保存当前工作"),
+            message: t("保存工作失败，退出已暂停。"),
+            detail: t((error as Error).message),
+            buttons: [t("重试"), t("继续编辑")],
+            defaultId: 0,
+            cancelId: 1,
+            noLink: true,
+          };
+          const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+          if (result.response !== 0) return;
+        }
+      }
+    })().finally(() => {
+      quitInFlight = null;
+    });
+    return;
+  }
   quitting = true;
+  desktopUpdates?.dispose();
   taskPower?.dispose();
   if (srv && srv.child.exitCode === null) {
     e.preventDefault();

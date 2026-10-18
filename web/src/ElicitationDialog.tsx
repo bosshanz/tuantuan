@@ -13,6 +13,9 @@ import { translateError, useI18n } from "./i18n";
 import "./ElicitationDialog.css";
 
 const controlSelector = "input:not(:disabled), select:not(:disabled), textarea:not(:disabled)";
+// Pending forms belong to the question, not the mounted chat page. Navigation must not answer or cancel them.
+const drafts = new Map<string, ElicitationValues>();
+export const forgetElicitationDraft = (id: string) => drafts.delete(id);
 
 function initialValues(fields: ElicitationField[]): ElicitationValues {
   const values: ElicitationValues = {};
@@ -80,7 +83,10 @@ export function ElicitationDialog(props: {
 }) {
   const { t: tr } = useI18n();
   const { ask } = props;
-  const [values, setValues] = useState<ElicitationValues>(() => initialValues(ask.fields));
+  const [values, setValues] = useState<ElicitationValues>(() => ({
+    ...initialValues(ask.fields),
+    ...drafts.get(ask.id),
+  }));
   const [issues, setIssues] = useState<ElicitationIssues>({});
   const [expanded, setExpanded] = useState(false);
   const card = useRef<HTMLDetailsElement>(null);
@@ -98,7 +104,9 @@ export function ElicitationDialog(props: {
   }, []);
 
   const update = (name: string, value: ElicitationValue) => {
-    setValues((current) => ({ ...current, [name]: value }));
+    const next = { ...values, [name]: value };
+    drafts.set(ask.id, next);
+    setValues(next);
     setIssues((current) => {
       if (!(name in current)) return current;
       const next = { ...current };

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { reducedMotion } from "./motion";
 
 const atBottom = (element: HTMLElement) => element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
-type ReadingAnchor = { id: string; offset: number; top: number };
+export type ReadingAnchor = { id: string; offset: number; top: number };
 const readingTargetTop = (element: HTMLElement, anchor: ReadingAnchor) => {
   const message = element.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.id)}"]`);
   if (!message) return anchor.top;
@@ -129,7 +129,8 @@ export function useChatScroll() {
     readingTop.current = element.scrollTop;
   }, [cancelLatestScroll, setFollow]);
 
-  const captureReadingPosition = useCallback((): ReadingAnchor | null => {
+  const captureReadingPosition = useCallback((onlyWhenPaused = false): ReadingAnchor | null => {
+    if (onlyWhenPaused && followingRef.current) return null;
     const element = listRef.current;
     if (!element) return null;
     const top = element.getBoundingClientRect().top;
@@ -161,7 +162,7 @@ export function useChatScroll() {
   );
 
   const restoreReadingPosition = useCallback(
-    (anchor: ReadingAnchor) => {
+    (anchor: ReadingAnchor, instant = false) => {
       const element = listRef.current;
       if (!element?.querySelector(`[data-message-id="${CSS.escape(anchor.id)}"]`)) return false;
       cancelLatestScroll();
@@ -169,7 +170,7 @@ export function useChatScroll() {
       setFollow(false);
       const top = readingTargetTop(element, anchor);
       restoring.current = { anchor, top };
-      element.scrollTo({ top, behavior: reducedMotion() ? "instant" : "smooth" });
+      element.scrollTo({ top, behavior: instant || reducedMotion() ? "instant" : "smooth" });
       previousTop.current = element.scrollTop;
       readingTop.current = element.scrollTop;
       if (Math.abs(element.scrollTop - top) <= 1) finishRestoring(element);

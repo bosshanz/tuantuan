@@ -1,4 +1,5 @@
 import type { TaskPowerStatus } from "../../shared/desktopPower";
+import type { DesktopUpdateBridge } from "../../shared/desktopUpdate";
 import type { Locale } from "../../shared/i18n";
 import { type GlobalEvent, NOTIFY_KINDS, type NotifyKind } from "../../shared/notify";
 
@@ -44,7 +45,7 @@ export type DesktopStatus = {
   signature: string;
   last: { at: number; result: { ok: boolean; shown?: boolean; reason?: string } } | null;
 };
-type Bridge = {
+type Bridge = Partial<DesktopUpdateBridge> & {
   setLocale?: (locale: Locale) => Promise<unknown>;
   notify?: (p: {
     title: string;
@@ -60,6 +61,25 @@ type Bridge = {
   setTaskPower?: (enabled: boolean) => Promise<TaskPowerStatus>;
 };
 export const bridge = (): Bridge | undefined => (window as { tuantuan?: Bridge }).tuantuan;
+
+export function updateBridge(): DesktopUpdateBridge | undefined {
+  const desktop = bridge();
+  if (
+    desktop?.updateStatus &&
+    desktop.checkForUpdates &&
+    desktop.downloadUpdate &&
+    desktop.installUpdate &&
+    desktop.setUpdateChecks &&
+    desktop.openUpdateRelease &&
+    desktop.onUpdateState &&
+    desktop.onPrepareUpdate &&
+    desktop.saveUpdateCheckpoint &&
+    desktop.readUpdateCheckpoint &&
+    desktop.clearUpdateCheckpoint
+  )
+    return desktop as DesktopUpdateBridge;
+  return undefined;
+}
 
 export function notifySupport(): "desktop" | "web" | "none" {
   if (bridge()?.notify) return "desktop";

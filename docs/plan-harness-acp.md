@@ -492,3 +492,40 @@ Browser 插件不可用，本次沿用项目 Playwright 流程。测试使用隔
 - [x] tap 更新已推送到 main（`dae8e2b`），`brew info --cask bosshanz/tap/tuantuan` 已显示 0.2.0；安装和升级命令见[安装文档](install.md#发布版本时同步-homebrew)。
 
 发布记录：版本 PR #18 已合并，标签对应 `19edac1ca825885990f85b2425fc85770a3707dd`；构建提交 `d55426ca31c8d45ee59075a0801f59326007a5b0` 与标签源码树一致。完整本地检查为 694 pass / 39 skip / 0 fail，远端 CI、三平台 Desktop 构建、Linux 桌面冒烟与 macOS 签名验证通过。六个安装文件已核对格式、macOS 应用版本和双架构、ZIP 完整性、DMG 校验；七个 Release 附件的远端大小和 SHA-256 与本地一致。本轮未对用户已安装的应用执行升级，未验证 Windows 实机安装或调用付费模型。
+
+## 2026-10-18 桌面 OTA 与任务保护
+
+用户批准设置内检查/下载/显式重启更新，并要求不打断正在运行的 Agent、继续同步 Homebrew。实现使用既有 electron-updater：关闭下载后退出自动安装，服务端新增主进程 capability 保护的原子安装锁；覆盖排队、取消收尾、权限/提问与交接，不以 renderer 的空闲显示代替安装前检查。设置页使用低干扰提示，重启前等待草稿、图片、引用、阅读位置与路由保存。普通导航不再取消 ACP 提问。
+
+Homebrew 管理的安装使用 brew 升级；ad-hoc macOS 保留检查与手动下载，正式签名配置后才启用自动安装。构建、更新清单与发布/同步分阶段验证，实际签名证书和跨仓库同步 token 由发布环境配置。本次改动不修改已发布 v0.2.0；后续用户授权审查 PR #20 后合并并发布 v0.2.1。
+
+平台安装边界：Windows 先确认安装器实际启动再退出；macOS 原生更新等待可取消，失败后的迟到事件不能关闭应用。Linux 在旧进程退出后启动新版，直到新版服务、窗口和 renderer 桥接都就绪才清理旧包；首次启动失败保留旧包与恢复记录，当前需要手动恢复，不声称自动回滚。
+
+已完成 `bun run check`：**753 pass / 39 skip / 0 fail**，11,543 断言、90 个文件；桌面 TypeScript 检查、桌面编译及前端构建通过。更新专项浏览器回归覆盖忙碌/未知状态禁止安装、保存失败恢复编辑、5 MiB 图片与跨端口恢复、导入失败重试、未访问会话的草稿和安全文本发布说明。真实 Electron 以隔离数据目录启动两次，实际端口变化后通过 preload IPC 恢复草稿、图片、引用、451 条历史的阅读锚点和页面，确认恢复文件清除且两个服务进程退出。独立审查推动修正平台安装失败路径，最终复查未报告该范围内的阻塞项；尚未执行已安装正式版本之间的升级，mock ACP 证据不代表真实模型调用。
+
+最终完整 Chrome `bun run e2e` 通过，覆盖启动引导、Harness 安装、提问/权限、阶段气泡、独立引用与返回、历史分页、流式阅读、终端、并行调度和服务商界面。既有回归按新行为更新：切换会话保留提问与阅读位置，需要初始末页的用例先显式回到最新；精简视图分别核对阶段气泡内容和外层状态的对齐。原工作区的两份 lockfile 改动保持不动，功能位于隔离分支 `codex/desktop-updates`。用户随后授权提交、推送并开 PR；安装文档补充 Developer ID 证书导出、公证、准确的 Actions Secret 名称与 tap token 最小权限步骤。签名凭据只在对应平台的打包步骤注入，防止 Windows 缺少独立证书时回退读取 macOS 证书。
+
+## 2026-10-18 用 DeepSeek Harness 验证 Homebrew 跨版本升级（待发布后执行）
+
+用户确认先发布带更新能力的版本，再新增 **DeepSeek Harness**，通过下一版本安装到本机验证；随后明确暂缓 Apple Developer，以 **Homebrew** 为当前发布和升级渠道。按两个连续稳定版本推进，不能把两个功能合在首次安装中代替跨版本升级证据，也不能用源码热更新或修改本地版本号冒充升级。Homebrew 升级结果不等同于 macOS 应用内 OTA 已验证。
+
+- [ ] 发布包含 OTA 的基线版本，完成安装包、更新元数据和双架构 Homebrew cask 校验；v0.2.0 首次升级需要手动安装或 brew。
+- [ ] 验证前先将本机 Homebrew 安装升级到基线版本，确认版本、草稿与会话恢复；本次发布不自动替换用户本机应用。
+- [ ] 在后续版本接入官方 DeepSeek Harness，优先使用其原生 `dsh acp` / `dsh --profile acp`。现有 DeepSeek 服务商接入继续保留；新增 Harness 按实际握手暴露能力，验证安装发现、配置、会话、消息、工具、权限、取消及恢复，再同步 Harness/产品/架构文档和发布说明。
+- [ ] 发布 DeepSeek 版本及 Homebrew 更新；在基线版本中检查到新版，等待所有 Agent 任务结束并正常退出后，显式执行 `brew update && brew upgrade --cask tuantuan`，再启动验证。Homebrew 不受应用内安装锁控制，不在任务运行时替换应用。
+- [ ] 在本机完成真实 Homebrew 跨版本安装，记录更新前后版本、Caskroom 版本、实际下载包及校验和、重启与数据恢复结果；确认 DeepSeek Harness 入口可用，并保留失败恢复证据。
+
+接入依据（2026-10-18 核实）：官方 [CLI 帮助](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) 提供 ACP stdio 启动方式；[ACP 能力文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md) 声明会话新建/列出/恢复/关闭、模型与思考等级、MCP、消息与工具更新、权限和取消，但不支持 `session/load`、历史回放、原生计划/终端或 elicitation。实施时需固定实际验证的发行版本，不能假设这些扩展存在。
+
+本机验证前置条件（2026-10-18 实查）：`/Applications/Tuantuan.app` 为 **0.2.0、ad-hoc 签名**，本机没有有效代码签名身份，现有 Caskroom 链接也指向该应用。因此当前安装会走 Homebrew/手动升级，不能据此宣称已通过 macOS 应用内 OTA。真实 macOS OTA 需要两个使用同一有效 Developer ID 签名的发行版本，并使用不由 Homebrew 管理的测试安装；不修改用户现有安装或绕过签名保护来制造通过结果。Apple Developer 与签名、公证配置按用户决定暂缓。`HOMEBREW_TAP_TOKEN` 仅用于 Actions 自动推送 tap；当前先使用文档中的校验脚本手动同步，发布仍需核对公开安装包与 tap 版本，但不声称自动同步已经验证。
+
+
+## 2026-10-18 PR #20 发布复查与 v0.2.1
+
+用户决定当前采用 Homebrew，暂缓 Apple Developer，授权检查 PR #20 后合并发布。复查修复三个阻塞：CI 仅安装根目录依赖导致类型检查失败；SDK 提前发出下载完成事件后缓存收尾失败会造成无法重试；普通退出未保存跨端口工作区，Homebrew 升级后无法恢复草稿。CI 现安装桌面依赖；下载完整 Promise 成功后才开放安装；正常退出复用带请求 id 的持久化保存握手，失败保持窗口并允许重试，后台检查不能清除退出快照。
+
+最终本地 `bun run check` 为 **761 pass / 39 skip / 0 fail**、11,582 断言；后续文案收敛再次通过类型检查与 lint。生产构建、桌面编译及更新专项 Chrome 回归通过。独立只读复核未发现剩余 P1/P2，另以隔离浏览器验证恢复期间退出不覆盖源文件、后台状态不解除退出锁、保存失败恢复编辑。
+
+真实 Electron 使用隔离数据启动三次，实际端口 52748 → 52772 → 52887；普通退出约 628 ms，恢复多个房间、5 MiB 附件、引用、451 条历史的阅读锚点及页面，并确认三次服务停止。故意令主机保存路径无法替换，验证重复退出只触发一份失败提示、服务与窗口保留、重试保存失败后的新编辑；macOS 关闭窗口仅隐藏。对话框选择由 Electron API 自动化，未声称手动操作原生对话框或完成正式安装包跨版本升级。Windows/Linux 原生关窗仍待对应平台实机验证；Linux 打包冒烟由发布工作流执行。
+
+v0.2.1 发布采用三平台构建与产物校验后公开，再校验并手动推送 Homebrew tap；当前未配置 `HOMEBREW_TAP_TOKEN`，不把手动同步记为 Actions 自动同步成功。此轮不替换本机已安装的应用，也不加入 DeepSeek Harness；后续先建立本机基线，再用 DeepSeek 版本验证 Homebrew 跨版本升级。

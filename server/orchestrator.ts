@@ -102,6 +102,7 @@ const CONTEXT_PREVIEW_CHARS = 240;
 interface RoomRuntime {
   tasks: Map<string, Task>;
   runs: Map<string, Run>;
+  executions: Map<string, Promise<void>>;
   idleWaiters: (() => void)[];
 }
 
@@ -109,6 +110,7 @@ interface RoomRuntime {
 export class Orchestrator implements ToolProvider {
   private rooms = new Map<string, RoomRuntime>();
   private closed = false;
+  private desktopUpdatePrepared = false;
   private turns = new Map<string, TurnCtx>(); // `${roomId}|${agentId}`
 
   constructor(
@@ -126,6 +128,7 @@ export class Orchestrator implements ToolProvider {
     replyToPartIndex?: number,
   ): Message {
     if (this.closed) throw new ValidationError("服务正在关闭", 503);
+    if (this.desktopUpdatePrepared) throw new ValidationError("正在安装桌面更新，请稍后再发送消息", 503);
     const room = this.store.getRoom(roomId);
     if (!room) throw new ValidationError("房间不存在", 404);
     const text = content.trim();
@@ -221,6 +224,32 @@ export class Orchestrator implements ToolProvider {
     for (const roomId of this.rooms.keys()) this.cancelAll(roomId);
   }
 
+  desktopUpdateActivity(): { activeTasks: number; prepared: boolean } {
+    let activeTasks = 0;
+    for (const rt of this.rooms.values()) {
+      const ids = new Set(this.visibleTasks(rt).map((task) => task.id));
+      for (const id of rt.executions.keys()) ids.add(id);
+      activeTasks += ids.size;
+      // A run also owns accepted handoffs and coordinator reviews between executions.
+      for (const runId of rt.runs.keys()) if (![...ids].some((id) => rt.tasks.get(id)?.runId === runId)) activeTasks++;
+    }
+    return { activeTasks, prepared: this.desktopUpdatePrepared };
+  }
+
+  /** No await between checking every runtime and closing the only human-task entry point. */
+  prepareDesktopUpdate() {
+    if (this.closed) throw new ValidationError("服务正在关闭", 503);
+    const activity = this.desktopUpdateActivity();
+    if (activity.activeTasks > 0) throw new ValidationError("仍有 Agent 任务正在运行，请等待全部任务结束后再安装", 409);
+    this.desktopUpdatePrepared = true;
+    return { activeTasks: 0, prepared: true };
+  }
+
+  resumeAfterDesktopUpdate() {
+    this.desktopUpdatePrepared = false;
+    return this.desktopUpdateActivity();
+  }
+
   state(roomId: string): RoomState {
     const rt = this.rooms.get(roomId);
     const tasks = rt ? this.visibleTasks(rt) : [];
@@ -229,7 +258,7 @@ export class Orchestrator implements ToolProvider {
 
   idle(roomId: string): Promise<void> {
     const rt = this.rooms.get(roomId);
-    if (!rt || rt.runs.size === 0) return Promise.resolve();
+    if (!rt || (rt.runs.size === 0 && rt.executions.size === 0)) return Promise.resolve();
     // Resolve on quiescence, after derived handoffs are registered, rather than taking a promise snapshot.
     return new Promise((resolve) => rt.idleWaiters.push(resolve));
   }
@@ -257,7 +286,7 @@ export class Orchestrator implements ToolProvider {
   private runtime(roomId: string): RoomRuntime {
     let rt = this.rooms.get(roomId);
     if (!rt) {
-      rt = { tasks: new Map(), runs: new Map(), idleWaiters: [] };
+      rt = { tasks: new Map(), runs: new Map(), executions: new Map(), idleWaiters: [] };
       this.rooms.set(roomId, rt);
     }
     return rt;
@@ -332,7 +361,9 @@ export class Orchestrator implements ToolProvider {
 
   private pump(roomId: string, rt: RoomRuntime) {
     const busy = new Set(
-      [...rt.tasks.values()].filter((t) => t.status === "running" || t.status === "cancelling").map((t) => t.agentId),
+      [...rt.tasks.values()]
+        .filter((t) => t.status === "running" || t.status === "cancelling" || rt.executions.has(t.id))
+        .map((t) => t.agentId),
     );
     for (const task of rt.tasks.values()) {
       if (task.status !== "queued" || busy.has(task.agentId)) continue;
@@ -345,7 +376,12 @@ export class Orchestrator implements ToolProvider {
       }
       task.status = "running";
       busy.add(task.agentId);
-      void this.execute(room, agent, run, task, rt);
+      const execution = this.execute(room, agent, run, task, rt);
+      rt.executions.set(task.id, execution);
+      void execution.finally(() => {
+        rt.executions.delete(task.id);
+        this.pump(roomId, rt);
+      });
     }
     // Register reviews before declaring quiescence. A batch settles once, including failures
     // and queued tasks cancelled without ever producing a message.
@@ -354,12 +390,13 @@ export class Orchestrator implements ToolProvider {
       return;
     }
     for (const runId of rt.runs.keys()) {
-      if ([...rt.tasks.values()].some((t) => t.runId === runId && this.isActive(t))) continue;
+      if ([...rt.tasks.values()].some((t) => t.runId === runId && (this.isActive(t) || rt.executions.has(t.id))))
+        continue;
       rt.runs.delete(runId);
       for (const [id, task] of rt.tasks) if (task.runId === runId) rt.tasks.delete(id);
     }
     this.publishState(roomId);
-    if (rt.runs.size === 0) {
+    if (rt.runs.size === 0 && rt.executions.size === 0) {
       this.rooms.delete(roomId);
       for (const resolve of rt.idleWaiters.splice(0)) resolve();
     }
@@ -413,7 +450,6 @@ export class Orchestrator implements ToolProvider {
       // Reservations outlive the host promise until children are atomically registered.
       for (const h of task.handoffs ?? []) run.reservations.delete(h.agentId);
       if (task.status !== "done" || task.abort.signal.aborted) run.handoffs -= task.handoffs?.length ?? 0;
-      this.pump(room.id, rt);
     }
   }
 

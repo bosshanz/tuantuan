@@ -10,6 +10,8 @@
 
 ## 开发命令
 
+使用 Bun 1.4.2；首次运行完整检查前执行 `bun install && bun run desktop:install`。根目录测试会导入桌面更新模块及锁定版本的 `electron-updater`，因此 CI 和本地都需要桌面依赖。
+
 ```bash
 bun run check      # tsc 类型检查 + biome lint + bun test
 bun run test       # 仅测试

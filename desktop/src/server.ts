@@ -21,6 +21,8 @@ export interface RunningServer {
   url: string;
   port: number;
   child: ChildProcess;
+  /** Main-process capability; never exposed to the renderer or harnesses. */
+  updateToken: string;
   stop(): Promise<void>;
 }
 
@@ -32,6 +34,7 @@ export async function startServer(opts: {
   logDir: string;
 }): Promise<RunningServer> {
   const port = await freePort();
+  const updateToken = crypto.randomUUID();
   mkdirSync(opts.logDir, { recursive: true });
   const log = createWriteStream(join(opts.logDir, "server.log"), { flags: "a" });
   const child = spawn(opts.layout.bun, [opts.layout.entry], {
@@ -49,6 +52,7 @@ export async function startServer(opts: {
       ...(opts.layout.staticDir ? { TUANTUAN_STATIC_DIR: opts.layout.staticDir } : {}),
       TUANTUAN_PARENT_PID: String(process.pid),
       TUANTUAN_DESKTOP: "1",
+      TUANTUAN_DESKTOP_UPDATE_TOKEN: updateToken,
     },
   });
   child.stdout?.pipe(log, { end: false });
@@ -82,6 +86,7 @@ export async function startServer(opts: {
     url,
     port,
     child,
+    updateToken,
     stop: () => {
       stopping ??= new Promise<void>((done) => {
         if (child.exitCode !== null || child.signalCode !== null) {

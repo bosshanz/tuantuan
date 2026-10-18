@@ -16,6 +16,7 @@
     "format": "biome check --write .",
     "test": "bun test tests/",
     "e2e": "bun scripts/e2e-smoke.ts",
+    "e2e:updates": "bun scripts/e2e-desktop-updates.ts",
     "check": "bun run typecheck && bun run lint && bun run test",
     "models:update": "bun scripts/update-model-catalog.ts",
     "desktop:install": "cd desktop && bun install && node node_modules/electron/install.js",

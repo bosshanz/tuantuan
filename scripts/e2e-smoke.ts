@@ -973,12 +973,19 @@ try {
     }
     const left = (el: Element | null) =>
       el ? el.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(el).paddingLeft) : Number.NaN;
-    // Agent bubbles: name label, meta and timeline line up with the text inside the bubble.
+    // Compact phases own their padding; full replies put padding on the whole message.
     for (const g of document.querySelectorAll('.msg-group[data-kind="agent"]')) {
-      const text = left(g.querySelector(".msg"));
-      near(g.querySelector(".msg-head")?.getBoundingClientRect().left ?? text, text, "message name vs text");
+      const compact = Boolean(g.querySelector(".message-row[data-compact]"));
+      const bubble = g.querySelector(".compact-bubble");
+      const outer = left(g.querySelector(".msg"));
+      const text = bubble ? left(bubble) : outer;
+      for (const bubble of g.querySelectorAll(".compact-bubble")) near(left(bubble), text, "phase bubble text");
+      // An empty cancelled compact reply has only a status, so there is no body text to align.
+      if (!compact || bubble)
+        near(g.querySelector(".msg-head")?.getBoundingClientRect().left ?? text, text, "message name vs text");
       for (const s of [".msg-meta", ".timeline"])
-        for (const el of g.querySelectorAll(s)) near(el.getBoundingClientRect().left, text, `${s} vs text`);
+        for (const el of g.querySelectorAll(s))
+          near(el.getBoundingClientRect().left, compact ? outer : text, `${s} content edge`);
     }
     // Human bubbles sit on the right edge of the message column.
     const col = r(document.querySelector(".messages"));

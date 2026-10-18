@@ -8,6 +8,7 @@ import {
   Folder,
   FolderOpen,
   Gauge,
+  Info,
   MessagesSquare,
   PlugZap,
   Plus,
@@ -16,20 +17,25 @@ import {
   Sparkles,
   UserRound,
 } from "lucide-react";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal, flushSync } from "react-dom";
+import type { DesktopCheckpointRequest } from "../../shared/desktopUpdate";
 import { previewText } from "../../shared/roomPreview";
+import { AboutUpdates } from "./AboutUpdates";
 import { AgentEditor } from "./AgentEditor";
 import { AvatarShowcase } from "./AvatarShowcase";
 import { type Agent, api, connectWs, type McpServer, type Meta, type Project, type Room, type WsEvent } from "./api";
 import { BrandMark } from "./BrandMark";
 import { ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
+import { chatWorkspace } from "./chatWorkspace";
 import { agentSubtitle, defaultsSummary } from "./config";
 import { setLocale, translateError, useI18n } from "./i18n";
 import { LibraryPage } from "./Library";
 import { usePresence } from "./motion";
 import { NewRoom } from "./NewRoom";
 import { NotificationsPage, useNotifications } from "./NotifyCenter";
+import { updateBridge } from "./notifications";
 import { Onboarding } from "./Onboarding";
 import { applyAppearance, EMPTY_PROFILE, type Profile, ProfilePage } from "./Profile";
 import { NewProject, ProjectSettings } from "./Projects";
@@ -85,6 +91,113 @@ export function App() {
     void reloadProfile();
   }, [reloadProfile]);
   const [route, go] = useHashRoute();
+  const workspaceError = useSyncExternalStore(chatWorkspace.subscribe, chatWorkspace.error);
+  const [checkpointError, setCheckpointError] = useState<string | null>(null);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [preparingCheckpoint, setPreparingCheckpoint] = useState<DesktopCheckpointRequest | null>(null);
+  const checkpointRequest = useRef<DesktopCheckpointRequest | null>(null);
+  const preparingUpdate = installingUpdate || !!preparingCheckpoint;
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateVersion, setUpdateVersion] = useState<string>();
+  const desktopUpdates = updateBridge();
+  const [restoringUpdate, setRestoringUpdate] = useState(!!desktopUpdates);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
+  useEffect(() => {
+    if (!desktopUpdates) return;
+    let alive = true;
+    let receivedEvent = false;
+    const show = (status: { phase: string; availableVersion?: string }) => {
+      setInstallingUpdate(status.phase === "installing");
+      setUpdateAvailable(status.phase === "available" || status.phase === "ready");
+      setUpdateVersion(status.availableVersion);
+    };
+    const off = desktopUpdates.onUpdateState((status) => {
+      receivedEvent = true;
+      if (alive) show(status);
+    });
+    void desktopUpdates.updateStatus().then(
+      (status) => {
+        if (alive && !receivedEvent) show(status);
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [desktopUpdates]);
+  useEffect(
+    () =>
+      desktopUpdates?.onCheckpointState?.((state) => {
+        if (state.phase === "preparing") {
+          checkpointRequest.current = state;
+          flushSync(() => setPreparingCheckpoint(state));
+        } else if (checkpointRequest.current?.id === state.id && state.phase === "error") {
+          checkpointRequest.current = null;
+          setPreparingCheckpoint(null);
+          setCheckpointError(state.error ?? t("无法保存当前工作"));
+        }
+      }),
+    [desktopUpdates, t],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: restoreAttempt explicitly retries a failed import or acknowledgement
+  useEffect(() => {
+    if (!desktopUpdates) return;
+    let alive = true;
+    setRestoreError(null);
+    void chatWorkspace
+      .restoreCheckpoint(desktopUpdates)
+      .then(
+        async (saved) => {
+          if (!alive) return;
+          if (saved) {
+            if (location.hash !== saved.route)
+              await new Promise<void>((resolve) => {
+                window.addEventListener("hashchange", () => resolve(), { once: true });
+                location.hash = saved.route;
+              });
+            if (!alive) return;
+            await desktopUpdates.clearUpdateCheckpoint(saved.id);
+          }
+          if (alive) setRestoringUpdate(false);
+        },
+        (error) => {
+          if (alive) setRestoreError((error as Error).message);
+        },
+      )
+      .catch((error) => {
+        if (alive) setRestoreError((error as Error).message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [desktopUpdates, restoreAttempt]);
+  useEffect(
+    () =>
+      desktopUpdates?.onPrepareUpdate(async (request) => {
+        const current = request ?? { id: crypto.randomUUID(), reason: "update" as const };
+        checkpointRequest.current = current;
+        // Commit the interaction lock before capturing state, even if IPC events share a React batch.
+        flushSync(() => setPreparingCheckpoint(current));
+        setCheckpointError(null);
+        try {
+          // Do not replace the only host copy while startup import/acknowledgement is incomplete.
+          if (restoringUpdate) throw new Error(t("正在恢复聊天草稿…"));
+          await chatWorkspace.prepareUpdate(location.hash || "#/c", desktopUpdates, request?.id);
+        } catch (error) {
+          if (checkpointRequest.current?.id === current.id) setCheckpointError((error as Error).message);
+          throw current.reason === "update" ? new Error(t("保存工作失败，未重启更新。请重试。")) : error;
+        } finally {
+          // A timed-out callback must not unlock a newer request. Quit stays locked until main exits.
+          if (checkpointRequest.current?.id === current.id && current.reason === "update") {
+            checkpointRequest.current = null;
+            setPreparingCheckpoint(null);
+          }
+        }
+      }),
+    [desktopUpdates, restoringUpdate, t],
+  );
   const listeners = useRef(new Set<(e: WsEvent) => void>());
   const ws = useRef<ReturnType<typeof connectWs> | null>(null);
 
@@ -137,6 +250,7 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (preparingUpdate) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
@@ -144,7 +258,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [preparingUpdate]);
 
   const section =
     route[0] === "a"
@@ -161,7 +275,9 @@ export function App() {
                 ? "profile"
                 : route[0] === "notify"
                   ? "notify"
-                  : "rooms";
+                  : route[0] === "about"
+                    ? "about"
+                    : "rooms";
   // 新手引导 opens by itself on first launch only; once finished or skipped it is gone for good.
   const onboarded = meta?.onboarded;
   const finishing = useRef(false);
@@ -202,13 +318,30 @@ export function App() {
     section === "providers" ||
     section === "library" ||
     section === "notify" ||
+    section === "about" ||
     section === "profile";
   const mobileView = fullPage || detailId ? "main" : "list";
   const harnessName = (id: string) => t(meta?.harnesses.find((h) => h.id === id)?.name ?? id);
 
+  if (restoringUpdate)
+    return (
+      <div className="update-preparing" role="status">
+        <p>{t("正在恢复上次的工作…")}</p>
+        {restoreError && (
+          <>
+            <p className="error-text" role="alert">
+              {t("无法恢复上次的工作：{error}", { error: translateError(restoreError) })}
+            </p>
+            <button type="button" className="btn" onClick={() => setRestoreAttempt((value) => value + 1)}>
+              {t("重试")}
+            </button>
+          </>
+        )}
+      </div>
+    );
   if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
-    <div className={`shell ${fullPage ? "no-list" : ""}`} data-mobile={mobileView}>
+    <div className={`shell ${fullPage ? "no-list" : ""}`} data-mobile={mobileView} inert={preparingUpdate}>
       <aside className="side" aria-label={t("侧栏")}>
         <div className="side-top">
           <span className="side-brand" title={t("团团 Tuantuan")}>
@@ -419,6 +552,13 @@ export function App() {
                 current={section === "notify"}
                 onClick={() => go("notify")}
               />
+              <SideNav
+                icon={<Info size={17} />}
+                label={t("关于与更新")}
+                badge={updateAvailable ? t("有可用更新") : undefined}
+                current={section === "about"}
+                onClick={() => go("about")}
+              />
             </>
           )}
         </div>
@@ -451,6 +591,27 @@ export function App() {
       </aside>
 
       <main className="main">
+        {(workspaceError || checkpointError) && (
+          <div className="form-error workspace-save-error" role="alert">
+            <span>
+              {t("聊天工作尚未保存：{error}", {
+                error: translateError(workspaceError ?? checkpointError ?? ""),
+              })}
+            </span>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() =>
+                void chatWorkspace.flush().then(
+                  () => setCheckpointError(null),
+                  (error) => setCheckpointError((error as Error).message),
+                )
+              }
+            >
+              {t("重试")}
+            </button>
+          </div>
+        )}
         <div className="pane" key={`${section}/${projectPage ?? ""}/${detailId ?? ""}`}>
           {loadError && (
             <div className="form-error" role="alert" style={{ margin: 12 }}>
@@ -533,6 +694,7 @@ export function App() {
           {section === "harness" && meta && <SetupPage meta={meta} agents={agents} onAgentsChange={reload} go={go} />}
           {section === "library" && meta && <LibraryPage meta={meta} />}
           {section === "notify" && <NotificationsPage />}
+          {section === "about" && <AboutUpdates />}
           {section === "profile" && profileLoaded && <ProfilePage profile={profile} onChange={applyProfile} />}
           {section === "providers" && meta && <ProvidersPage meta={meta} agents={agents} onAgentsChange={reload} />}
           {section === "agents" && !detailId && loaded && (
@@ -599,22 +761,40 @@ export function App() {
           }}
         />
       )}
+      {preparingUpdate &&
+        createPortal(
+          <div className="update-preparing" role="status" aria-live="polite">
+            <p>{t(preparingCheckpoint?.reason === "quit" ? "正在保存工作并退出…" : "正在保存工作并重启…")}</p>
+            {updateVersion && preparingCheckpoint?.reason !== "quit" && (
+              <p className="muted">{t("新版本 {version} 可用", { version: updateVersion })}</p>
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
-function SideNav(props: { icon: React.ReactNode; label: string; current: boolean; onClick: () => void }) {
+function SideNav(props: {
+  icon: React.ReactNode;
+  label: string;
+  current: boolean;
+  onClick: () => void;
+  badge?: string;
+}) {
   return (
     <button
       type="button"
       className="side-nav"
       aria-current={props.current ? "page" : undefined}
+      aria-description={props.badge}
       onClick={props.onClick}
     >
       {props.icon}
       {props.label}
+      {props.badge && <span className="side-update-dot" title={props.badge} aria-hidden />}
     </button>
   );
 }

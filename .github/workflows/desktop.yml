@@ -1,12 +1,21 @@
 name: Desktop
-# Builds the Electron app for macOS (arm64 + x64), Windows (x64) and Linux (x64 AppImage).
-# Artifacts are uploaded to the run. Nothing is published unless TUANTUAN_PUBLISH is set
-# (repository variable) — then electron-builder uploads to a GitHub release with GITHUB_TOKEN.
-# Signing / notarization use secrets when present and are skipped otherwise.
+# Tag publishing is opt-in (repository variable TUANTUAN_PUBLISH=github).
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the selected v* tag after validating every platform
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -22,22 +31,18 @@ jobs:
             arch: x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
-    env:
-      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-      TUANTUAN_PUBLISH: ${{ vars.TUANTUAN_PUBLISH }}
-      GH_TOKEN: ${{ vars.TUANTUAN_PUBLISH && secrets.GITHUB_TOKEN || '' }}
-      CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.MAC_CSC_LINK && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      - name: Validate requested version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          PUBLISH_REQUESTED: ${{ inputs.publish || (github.event_name == 'push' && vars.TUANTUAN_PUBLISH == 'github') }}
+        run: |
+          bun -e 'import { releaseVersion } from "./desktop/scripts/release"; const version = (await Bun.file("desktop/package.json").json()).version; if (process.env.PUBLISH_REQUESTED === "true" && process.env.REF_TYPE !== "tag") throw new Error("Select the v* tag when publishing manually"); if (process.env.REF_TYPE === "tag") releaseVersion(process.env.REF_NAME!, version);'
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: desktop
@@ -45,6 +50,16 @@ jobs:
         working-directory: desktop
       - run: bun run build
       - run: bun desktop/scripts/dist.ts --arch ${{ matrix.arch }}
+        env:
+          # Windows falls back to CSC_LINK when WIN_CSC_LINK is unset; never give it the macOS certificate.
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+          WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK && 'true' || 'false' }}
       - name: Smoke test (Linux, headless)
         if: runner.os == 'Linux'
         run: |
@@ -61,4 +76,94 @@ jobs:
             desktop/release/*.zip
             desktop/release/*.exe
             desktop/release/*.AppImage
+            desktop/release/*.blockmap
             desktop/release/latest*.yml
+
+  validate:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tuantuan-*
+          merge-multiple: true
+          path: desktop/release
+      - id: version
+        name: Resolve release tag
+        run: |
+          bun -e 'const version = (await Bun.file("desktop/package.json").json()).version; const tag = process.env.GITHUB_REF_TYPE === "tag" ? process.env.GITHUB_REF_NAME : `v${version}`; await Bun.write(process.env.GITHUB_OUTPUT!, `tag=${tag}\n`);'
+      - name: Verify installers, update metadata and blockmaps
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: bun desktop/scripts/release.ts prepare --tag "$RELEASE_TAG" --dir desktop/release --output desktop/release-ready
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-ready
+          if-no-files-found: error
+          path: desktop/release-ready/*
+
+  publish:
+    needs: validate
+    if: inputs.publish || (github.event_name == 'push' && vars.TUANTUAN_PUBLISH == 'github')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-ready
+          path: desktop/release-ready
+      - name: Publish only after local and remote digest verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: bun desktop/scripts/release.ts publish --tag "$RELEASE_TAG" --dir desktop/release-ready --repo "$GITHUB_REPOSITORY"
+
+  homebrew:
+    needs: [validate, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Require tap write credential
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::error::Release is published, but Homebrew sync requires HOMEBREW_TAP_TOKEN with contents:write on bosshanz/homebrew-tap. Manual recovery: clone the tap; bun desktop/scripts/sync-homebrew.ts --tag $RELEASE_TAG --tap /path/to/homebrew-tap; review, commit and push Casks/tuantuan.rb."
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+        with:
+          repository: bosshanz/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+      - name: Verify published downloads and synchronize cask
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: bun desktop/scripts/sync-homebrew.ts --tag "$RELEASE_TAG" --tap homebrew-tap
+      - name: Commit and push cask update
+        working-directory: homebrew-tap
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/tuantuan.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "Update tuantuan to $RELEASE_TAG"
+            git push
+          fi

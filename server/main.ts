@@ -5,8 +5,11 @@ import { visibleHarnesses } from "./harness";
 const port = Number(process.env.PORT ?? 8787);
 // The desktop app points these at its resources / userData; plain `bun start` uses the repo layout.
 const staticDir = process.env.TUANTUAN_STATIC_DIR || (existsSync("web/dist") ? "web/dist" : undefined);
+// Keep the desktop's update authority out of Harness and project-terminal environments.
+const desktopUpdateToken = process.env.TUANTUAN_DESKTOP_UPDATE_TOKEN;
+delete process.env.TUANTUAN_DESKTOP_UPDATE_TOKEN;
 const { server, app } = serve(
-  { dbPath: process.env.DB_PATH ?? "data/agent-hub.db", staticDir },
+  { dbPath: process.env.DB_PATH ?? "data/agent-hub.db", staticDir, desktopUpdateToken },
   port,
   process.env.TUANTUAN_HOST || "127.0.0.1",
 );

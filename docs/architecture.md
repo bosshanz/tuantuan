@@ -165,7 +165,7 @@ Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建�
 
 人类消息的引用由 `POST messages` 的 `replyToId` 指定；阶段气泡另传 `replyToPartIndex`，使用原始 timeline parts 中的阶段起点。前端展示与服务端选段共用 `timelineBodyPhases`，连续正文和图片同段，思考或工具记录分隔阶段。`Store.insertMessage` 在写入事务中校验同房间、完成态及真实阶段起点，只从选定原文生成最多 400 字符的快照；无效索引、跨房间或未完成来源原子拒绝，不回退为整轮引用。可选 `partIndex` 与文本一起保存到既有 quote JSON，刷新保留选段，不需要数据库迁移；不传片段索引的既有请求仍引用整条消息。界面引用操作用于群聊，单聊中断重试也可生成引用。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
 
-ACP 表单提问仅声明 `elicitation.form`。`HarnessHost` 按 ask ID 与活动 slot 保存待办，`shared/elicitation.ts` 规范化字段并供前后端共同校验，`POST /api/elicitations/:id` 成功时先移除待办再应答。待办通过 `elicitation` 事件和消息快照同步，刷新恢复，任务取消、进程退出或 slot 释放时返回 cancel。`ChatView` 在切换会话或离开聊天页面时取消该视图持有的提问；刷新不走组件卸载清理。`ElicitationDialog` 使用共同校验而非 HTML 原生约束，避免正则匹配和字符长度规则不同；日期时间保留时区，未知字段阻止提交。
+ACP 表单提问仅声明 `elicitation.form`。`HarnessHost` 按 ask ID 与活动 slot 保存待办，`shared/elicitation.ts` 规范化字段并供前后端共同校验，`POST /api/elicitations/:id` 成功时先移除待办再应答。待办通过 `elicitation` 事件和消息快照同步，刷新恢复，任务取消、进程退出或 slot 释放时返回 cancel。普通页面导航和会话切换不回答或取消提问；`ElicitationDialog` 按 ask ID 在内存保留未提交的表单值，成功回答、明确取消或已解决的请求清理对应草稿，刷新只恢复服务端仍待回答的问题。`ElicitationDialog` 使用共同校验而非 HTML 原生约束，避免正则匹配和字符长度规则不同；日期时间保留时区，未知字段阻止提交。
 
 消息分页沿用 `messages.seq` 和 `Store.recentMessages(roomId, limit, beforeSeq)`；`GET /api/rooms/:id/messages` 接受正整数 `limit`（默认 100，最多 500）与可选的排他游标 `beforeSeq`，返回按序排列的消息和 `nextBeforeSeq`（`null` 表示没有更早记录）。前端初始页为 200 条，历史页只合并消息与分页进度，不应用响应里的任务、会话或权限快照。消息按 id 去重、按 seq 排序，历史请求与最新快照分别标识和隔离；分页提交前记录当前可见消息的偏移，布局更新后恢复阅读位置。
 
@@ -224,3 +224,15 @@ Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio M
 - 登录 shell 环境在主进程解析一次，传给服务端，Harness 继承它（CC Switch 写的变量照常生效）。
 - 主进程启动时读取 `/api/profile` 初始化菜单语言；前端全局通知模块在语言变化时经 preload 的 `tuantuan:set-locale` 同步，主进程重建应用菜单和托盘菜单。系统通知使用当前语言生成应用标题、状态和提示，消息预览保留原文。浏览器桥接检查不能替代真实原生菜单显示验收。
 - macOS：`titleBarStyle: "hidden"`，红绿灯位置 `{x: 18, y: 20}`；网页侧 `html[data-desktop="darwin"]` 让侧栏顶行左侧留出红绿灯位置，搜索和「+」排在红绿灯右边；`data-fullscreen` 由主进程在进入 / 退出全屏时经 preload 设置，全屏时不再留空。
+
+## 桌面更新的状态与安装边界
+
+`desktop/src/updates.ts` 由 Electron 主进程持有检查、下载、显式安装和错误恢复状态，通过 `shared/desktopUpdate.ts` 与 preload 的窄 IPC 接口传给设置页。更新 URL、文件与安装器均不由 renderer 指定。更新 IPC 限定应用窗口主 frame 与本地服务 origin。`update-policy.ts` 区分 Homebrew、签名能力、更新源和 AppImage 环境；不具备自动安装条件时显式降级手动更新。
+
+服务进程由桌面启动时获得一次随机更新 capability，`server/main.ts` 捕获后移除环境变量，避免子 Harness/终端继承。受该 capability 保护的 `/api/desktop/update-activity`、`update-prepare`、`update-resume` 仅供主进程使用。`Orchestrator` 持有接收锁，并跟踪执行 Promise 的完整生命周期：prepare 在同一个同步步骤检查所有 runtime 并关闭新消息入口，不取消既有工作；失败时 resume 恢复入口。没有 capability 的普通浏览器服务不开放这组接口。
+
+renderer 在明确重启前完成持久化 checkpoint，主进程等待成功后才申请服务端锁。超时、存储异常、状态不可读或 prepare 失败均不调用安装器。`autoInstallOnAppQuit` 始终关闭；失败的锁释放会重试恢复接收，但不会重试安装。会话草稿与阅读锚点的持久化由前端聚焦模块管理，图片保存在 IndexedDB。桌面服务每次启动会换端口，更新和正常退出前还需通过主进程把所有房间的草稿、图片、引用、阅读锚点及路由原子写入 userData/update-checkpoint.json（64 MiB 上限、私有文件权限）；新窗口将其导入新 origin 的 IndexedDB，恢复路由后才按 checkpoint id 确认删除。导入失败保留源文件并提供重试，安装放弃后清理本次快照，避免覆盖后续编辑。安装页不维护另一份会话状态。 普通退出在窗口销毁和服务停止前完成相同保存握手；主进程按请求 id 拥有保存许可，迟到写入不能覆盖后续快照。退出保存与更新安装状态分开，后台检查不能清除退出快照或解除编辑锁。macOS 仅隐藏窗口时不保存退出快照、不停止服务；保存失败取消退出并允许重试。强制终止不保证此握手完成。
+
+退出许可与界面 installing 状态分开：只有 checkpoint 完成且 prepare 成功后才能授予，任何失败立即撤销。主进程使用 before-quit-for-update 区分更新退出，并覆盖 macOS 先关窗再退出的顺序。Windows 保留 NSIS 的安装参数和提权流程，但通过 SDK 声明的扩展点等待安装器启动成功；macOS 用原生更新器的一次性等待，失败撤销回调；AppImage 在同文件系统暂存并保留旧可执行文件，通过 app.relaunch 排程到旧实例退出、释放单实例锁后再启动。userData/appimage-update.json 记录本次 nonce 和恢复路径；新版服务健康、窗口 ready 且 renderer 成功调用更新状态 IPC 后，才按 nonce 和镜像路径确认并清理旧包。安排重启失败会还原；新版首次启动失败会留下旧包及记录供手动恢复，不自动回滚。下载、签名验证和更新源仍由 electron-updater 负责。
+
+发布流程与安装能力解耦：构建生成更新源及元数据，发布脚本验证所有平台文件后再公开 Release；macOS 双架构清单需合并而不能互相覆盖。Homebrew 的公开版本只在 Release 可下载并通过校验后更新，详细命令与凭据要求见 `docs/install.md`。

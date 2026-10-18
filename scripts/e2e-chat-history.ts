@@ -195,7 +195,14 @@ export async function chatHistorySmoke(
     await older.waitFor({ state: "hidden" });
     evidence.completed = { messages: 452, firstSeq: 1, duplicates: 0, exhausted: true, failedRequests };
 
-    // Refresh resets the window; navigating away makes a pending page harmless.
+    // Start from explicit Latest before refreshing this fresh-window pagination fixture.
+    const latestBeforeRefresh = page.getByRole("button", { name: "回到最新消息", exact: true });
+    await latestBeforeRefresh.click();
+    await latestBeforeRefresh.waitFor({ state: "hidden" });
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+    );
+    // Navigating away makes a pending page harmless; returning still owns this room's reading position.
     await page.reload();
     await assertIds([...originals, live].slice(-200));
     await top();
