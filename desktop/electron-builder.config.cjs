@@ -4,8 +4,8 @@
  *   macOS: CSC_LINK + CSC_KEY_PASSWORD (Developer ID), APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
  *          (or APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER) to notarize.
  *   Windows: WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD.
- * Auto-update: set TUANTUAN_PUBLISH=github (and GH_TOKEN) to embed the GitHub releases feed;
- * without it no app-update.yml is written and the app never checks for updates.
+ * Installers embed the GitHub releases feed, even when built with --publish never.
+ * TUANTUAN_UPDATE_FEED=none explicitly disables it. Uploads belong to scripts/release.ts.
  */
 const env = process.env;
 const notarize = !!(env.APPLE_ID && env.APPLE_APP_SPECIFIC_PASSWORD && env.APPLE_TEAM_ID) || !!env.APPLE_API_KEY;
@@ -14,7 +14,7 @@ const notarize = !!(env.APPLE_ID && env.APPLE_APP_SPECIFIC_PASSWORD && env.APPLE
 // the bundled Bun and everything Bun loads, with no security benefit, so it stays off in that case.
 const adhoc = !(env.CSC_LINK || env.CSC_NAME);
 const publish =
-  env.TUANTUAN_PUBLISH === "github"
+  env.TUANTUAN_UPDATE_FEED !== "none"
     ? [{ provider: "github", owner: env.TUANTUAN_GH_OWNER || "bosshanz", repo: env.TUANTUAN_GH_REPO || "tuantuan" }]
     : null;
 
@@ -62,4 +62,8 @@ module.exports = {
     target: ["AppImage"],
     synopsis: "多 Agent 群聊工作台",
   },
+  // electron-builder maps ${arch} to x86_64 for AppImage; keep the existing download URL contract.
+  // dist.ts supports Linux x64, so the filename and update metadata both use the same literal name.
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: electron-builder expands these macros.
+  appImage: { artifactName: "Tuantuan-${version}-linux-x64.${ext}" },
 };

@@ -4,6 +4,7 @@ import { desktopMessages } from "./locales/desktop";
 import { errorMessages } from "./locales/errors";
 import { harnessMessages } from "./locales/harness";
 import { LOCALES, type Locale, type MessageCatalog, type MessageParams } from "./locales/types";
+import { updateMessages } from "./locales/updates";
 
 export type { Locale, MessageCatalog, MessageParams };
 export { LOCALES };
@@ -12,6 +13,7 @@ export const messages: MessageCatalog = {
   ...harnessMessages,
   ...chatMessages,
   ...desktopMessages,
+  ...updateMessages,
   ...errorMessages,
 };
 export const LANGUAGE_NAMES: Record<Locale, string> = {

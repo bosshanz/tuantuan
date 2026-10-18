@@ -360,13 +360,46 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     await question.getByRole("button", { name: "取消提问", exact: true }).click();
     await question.waitFor({ state: "detached" });
 
-    // Leaving the view cancels even a collapsed question, independently of releasing the Harness.
+    // Navigation preserves the pending Agent question, its typed form and the room's composer draft.
     await input.fill("/ask");
     await input.press("Enter");
     await question.waitFor();
-    const leavingRun = (await history()).messages.filter((message) => message.senderKind === "human").at(-1)?.id;
-    await page.goto(`${base}/#/c/${other.id}`);
+    await expandQuestion();
+    await question.getByLabel("补充说明").fill("确认导航后保留");
+    await question.getByRole("radio", { name: "canary", exact: true }).check();
+    await input.fill("切换房间后保留的聊天草稿");
+    const leavingSnapshot = await history();
+    const leavingRun = leavingSnapshot.messages.filter((message) => message.senderKind === "human").at(-1)?.id;
+    const leavingAsk = leavingSnapshot.elicitations[0]?.id;
+    if (!leavingAsk) throw new Error("the navigation fixture has no pending question");
+    await page.evaluate((hash) => {
+      location.hash = hash;
+    }, `#/c/${other.id}`);
     await page.getByRole("heading", { name: "离开提问回归", exact: true }).waitFor();
+    const awaySnapshot = await history();
+    if (!awaySnapshot.elicitations.some((ask) => ask.id === leavingAsk))
+      throw new Error("leaving the conversation cancelled its pending Agent question");
+    if (
+      awaySnapshot.messages.some(
+        (message) => message.runId === leavingRun && message.content.startsWith("提问结果：cancel"),
+      )
+    )
+      throw new Error("ordinary navigation sent a cancel answer to the Agent");
+    await page.evaluate((hash) => {
+      location.hash = hash;
+    }, `#/c/${room.id}`);
+    await page.getByRole("heading", { name: "提问与结论回归", exact: true }).waitFor();
+    await question.waitFor();
+    await expandQuestion();
+    if ((await input.inputValue()) !== "切换房间后保留的聊天草稿")
+      throw new Error("returning to the conversation lost its composer draft");
+    if (
+      (await question.getByLabel("补充说明").inputValue()) !== "确认导航后保留" ||
+      !(await question.getByRole("radio", { name: "canary", exact: true }).isChecked())
+    )
+      throw new Error("returning to the conversation lost the partly filled question");
+    await question.getByRole("button", { name: "取消提问", exact: true }).click();
+    await question.waitFor({ state: "detached" });
     const leaveDeadline = Date.now() + 10_000;
     for (;;) {
       const snapshot = await history();
@@ -376,18 +409,9 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
       );
       if (!snapshot.elicitations.length && cancelled) break;
       if (Date.now() > leaveDeadline)
-        throw new Error(
-          `leaving the conversation left its question unanswered: ${JSON.stringify({
-            pending: snapshot.elicitations,
-            replies: snapshot.messages
-              .filter((message) => message.runId === leavingRun)
-              .map(({ status, content }) => ({ status, content })),
-          })}`,
-        );
+        throw new Error("explicit cancellation did not finish the preserved Agent question");
       await page.waitForTimeout(40);
     }
-    await page.goto(`${base}/#/c/${room.id}`);
-    await page.getByRole("heading", { name: "提问与结论回归", exact: true }).waitFor();
 
     // Saved notes share the reply status near the composer, with a floating detail rather than a pinned header.
     await input.fill(`/context ${JSON.stringify(context)}`);
@@ -578,7 +602,10 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     });
     await summary.click();
     await card.getByRole("button", { name: "查看来源消息" }).click();
-    await page.getByText(/加载失败：fixture unavailable/).waitFor();
+    await page
+      .locator(".quote-navigation-feedback")
+      .filter({ hasText: /加载失败：fixture unavailable/ })
+      .waitFor();
     await page.waitForTimeout(500);
     if (failedPages !== 1)
       throw new Error(`source navigation automatically retried a failed page ${failedPages} times`);
@@ -1016,6 +1043,8 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     await page.getByRole("button", { name: "关闭详情面板", exact: true }).click();
 
     // The selected bubble can live outside the first history page; keep its exact phase through pagination.
+    // Explicitly resume Latest; otherwise refresh now restores the saved old-phase reading anchor by paging.
+    await page.getByRole("button", { name: "回到最新消息", exact: true }).click();
     for (let index = 0; index < 205; index++)
       store.insertMessage({
         roomId: phaseRoom.id,

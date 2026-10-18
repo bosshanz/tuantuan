@@ -1,0 +1,13 @@
+.about-brand { display: flex; align-items: center; gap: 12px; }
+.about-updates p { margin: 0; }
+.about-updates .update-status { font-weight: 550; }
+.update-actions { flex-wrap: wrap; gap: 8px; }
+.update-help { display: grid; gap: 12px; }
+.update-help code { align-self: start; overflow-wrap: anywhere; }
+.update-progress { display: flex; align-items: center; gap: 12px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.update-progress progress { flex: 1; min-width: 0; accent-color: var(--accent); height: 8px; }
+.update-checked { font-size: 12px; }
+.update-notes { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.workspace-save-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px; }
+.update-preparing { position: fixed; inset: 0; z-index: 1000; display: grid; place-content: center; padding: 24px; background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--text); font-size: 15px; }
+.side-update-dot { flex: 0 0 6px; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--accent); }

@@ -56,8 +56,9 @@ import {
 import { agentActivity, messageExpression } from "./avatarState";
 import { SessionChips } from "./ConfigChips";
 import { type ChatSnapshot, chatReducer, emptyChat, historyCursor, type MessagePage } from "./chatState";
+import { chatWorkspace, type ImageAttachment } from "./chatWorkspace";
 import type { Opt } from "./config";
-import { ElicitationDialog } from "./ElicitationDialog";
+import { ElicitationDialog, forgetElicitationDraft } from "./ElicitationDialog";
 import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
 import { MissingKey } from "./HarnessAuth";
 import { MessageActions } from "./MessageActions";
@@ -67,6 +68,7 @@ import type { TerminalFocusRequest } from "./ProjectTerminal";
 import { insertSkill, matchingSkills, skillTokenAt } from "./skillCompletion";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
 import { useChatScroll } from "./useChatScroll";
+import { useChatWorkspace } from "./useChatWorkspace";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
 const HISTORY_PAGE_SIZE = 200;
@@ -79,11 +81,6 @@ function terminalWasOpen(projectId: string | null) {
   } catch {
     return false;
   }
-}
-
-interface ImageAttachment {
-  mimeType: string;
-  data: string;
 }
 
 function readImage(f: File): Promise<ImageAttachment> {
@@ -118,8 +115,6 @@ export function ChatView(props: {
   const nextBeforeSeq = history.initialized ? historyCursor(messages, history.nextBeforeSeq) : null;
   const [answers, setAnswers] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingAnswers = useRef(new Set<string>());
-  const pendingQuestions = useRef(elicitations);
-  pendingQuestions.current = elicitations;
   const [retries, setRetries] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingRetries = useRef(new Set<string>());
   const [cancellations, setCancellations] = useState<Record<string, { pending: boolean; error: string | null }>>({});
@@ -127,9 +122,14 @@ export function ChatView(props: {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [jumpError, setJumpError] = useState<{ source: string; reason?: string } | null>(null);
   const [replay, setReplay] = useState<ReplayTurn[]>([]);
-  const [draft, setDraft] = useState("");
-  const [images, setImages] = useState<ImageAttachment[]>([]);
-  const [quote, setQuote] = useState<MessageQuote | null>(null);
+  const workspace = useChatWorkspace(room.id);
+  const { draft, images, quote } = workspace.data;
+  const setDraft = (value: string | ((previous: string) => string)) =>
+    workspace.update({
+      draft: typeof value === "function" ? value(chatWorkspace.snapshot(room.id).data.draft) : value,
+    });
+  const setImages = (value: ImageAttachment[]) => workspace.update({ images: value });
+  const setQuote = (value: MessageQuote | null) => workspace.update({ quote: value });
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<{ source: string; reason: string } | null>(null);
@@ -175,6 +175,19 @@ export function ChatView(props: {
   } = useChatScroll();
   const [returnPosition, setReturnPosition] = useState<ReturnType<typeof captureReadingPosition>>(null);
   const densityAnchor = useRef<ReturnType<typeof preserveReadingPosition>>(null);
+  const restoringWorkspace = useRef(true);
+  const [readingRestoreError, setReadingRestoreError] = useState(false);
+  const captureWorkspaceReading = useCallback(() => {
+    if (!restoringWorkspace.current) chatWorkspace.update(room.id, { reading: captureReadingPosition(true) }, true);
+  }, [room.id, captureReadingPosition]);
+  useLayoutEffect(() => {
+    const off = chatWorkspace.capture(captureWorkspaceReading);
+    return () => {
+      // Layout cleanup still has the message DOM, unlike passive unmount cleanup.
+      captureWorkspaceReading();
+      off();
+    };
+  }, [captureWorkspaceReading]);
   useEffect(() => {
     const wrap = listRef.current?.parentElement;
     if (!wrap) return;
@@ -231,20 +244,6 @@ export function ChatView(props: {
   const primaryView = primary ? sessions[primary.id] : undefined;
 
   useEffect(() => {
-    return () => {
-      // Route changes unmount this room. A page reload does not run React cleanup, so its
-      // questions remain available in the next snapshot. Cancel only this room's known asks.
-      for (const question of pendingQuestions.current) {
-        if (question.roomId !== room.id) continue;
-        void api("POST", `/api/elicitations/${question.id}`, { action: "cancel" }).catch((error) => {
-          if (!(error instanceof ApiError && error.status === 404))
-            console.warn("Unable to cancel question when leaving the conversation", error);
-        });
-      }
-    };
-  }, [room.id]);
-
-  useEffect(() => {
     let alive = true;
     let requestId = 0;
     const load = async () => {
@@ -275,6 +274,7 @@ export function ChatView(props: {
         e.type === "terminal" ||
         e.type === "room.state"
       ) {
+        if (e.type === "elicitation" && e.resolvedId) forgetElicitationDraft(e.resolvedId);
         dispatch({ type: "event", event: e });
       }
     });
@@ -312,7 +312,24 @@ export function ChatView(props: {
   const jumpTarget = useRef<MessageTarget | null>(null);
   const loadHistoryRef = useRef(loadHistory);
   loadHistoryRef.current = loadHistory;
+  useLayoutEffect(() => {
+    if (!restoringWorkspace.current || !workspace.loaded || !history.initialized) return;
+    const anchor = workspace.data.reading;
+    if (!anchor || restoreReadingPosition(anchor, true)) {
+      restoringWorkspace.current = false;
+      setReadingRestoreError(false);
+      return;
+    }
+    pause();
+    if (history.error || nextBeforeSeq === null) {
+      setReadingRestoreError(true);
+      return;
+    }
+    if (!history.loading) void loadHistoryRef.current();
+  }, [workspace.loaded, workspace.data.reading, history, nextBeforeSeq, restoreReadingPosition, pause]);
   const jumpToMessage = (messageId: string, partIndex?: number) => {
+    restoringWorkspace.current = false;
+    setReadingRestoreError(false);
     const origin = captureReadingPosition();
     pause();
     setJumpError(null);
@@ -365,10 +382,15 @@ export function ChatView(props: {
     else setJumpError({ source: "无法定位来源内容" });
   };
   const goToLatest = () => {
+    restoringWorkspace.current = false;
+    setReadingRestoreError(false);
     clearJump();
     setReturnPosition(null);
     listRef.current?.focus({ preventScroll: true });
     followLatest();
+    // At the bottom this can be a no-op scroll, so persist the explicit intent without waiting for an event.
+    chatWorkspace.update(room.id, { reading: null }, true);
+    void chatWorkspace.save(room.id).catch(() => {});
   };
 
   // Warm up every member's session so the model picker and slash commands are there before the first message.
@@ -396,7 +418,7 @@ export function ChatView(props: {
 
   const send = async () => {
     const content = draft.trim();
-    if (sendingRef.current || (!content && images.length === 0)) return;
+    if (!workspace.loaded || sendingRef.current || (!content && images.length === 0)) return;
     // Sending resumes the tail now; a later upward gesture can revoke it before the HTTP reply arrives.
     followLatest();
     sendingRef.current = true;
@@ -404,16 +426,19 @@ export function ChatView(props: {
     setSendError(null);
     const imgs = images;
     try {
-      const sent = await api<Message>("POST", `/api/rooms/${room.id}/messages`, {
-        senderName: props.userName,
-        content,
-        images: imgs,
-        replyToId: quote?.messageId,
-        replyToPartIndex: quote?.partIndex,
-      });
-      setDraft("");
-      setImages([]);
-      setQuote(null);
+      const sent = await chatWorkspace.track(
+        api<Message>("POST", `/api/rooms/${room.id}/messages`, {
+          senderName: props.userName,
+          content,
+          images: imgs,
+          replyToId: quote?.messageId,
+          replyToPartIndex: quote?.partIndex,
+        }),
+      );
+      // Returning to this room can create a newer draft before the old HTTP request finishes.
+      const current = chatWorkspace.snapshot(room.id).data;
+      if (current.draft === draft && current.images === imgs && current.quote === quote)
+        workspace.update({ draft: "", images: [], quote: null, reading: null });
       // The server's reply is authoritative: show it now even if the socket is slow, reconnecting or raced.
       dispatch({ type: "event", event: { type: "message", message: sent } });
     } catch (e) {
@@ -479,9 +504,11 @@ export function ChatView(props: {
       setAnswers((a) => ({ ...a, [askId]: { pending: true, error: null } }));
       try {
         await api("POST", `/api/elicitations/${askId}`, { action, content });
+        forgetElicitationDraft(askId);
         dispatch({ type: "event", event: { type: "elicitation", roomId: room.id, ask: null, resolvedId: askId } });
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) {
+          forgetElicitationDraft(askId);
           // Another client, cancellation or a duplicate submit already resolved this question.
           dispatch({ type: "event", event: { type: "elicitation", roomId: room.id, ask: null, resolvedId: askId } });
         } else {
@@ -641,9 +668,22 @@ export function ChatView(props: {
               ref={listRef}
               tabIndex={-1}
               aria-label={tr("会话消息")}
-              onWheel={onWheel}
-              onTouchMove={onTouchMove}
-              onScroll={onScroll}
+              onWheel={(event) => {
+                restoringWorkspace.current = false;
+                setReadingRestoreError(false);
+                onWheel(event);
+                captureWorkspaceReading();
+              }}
+              onTouchMove={() => {
+                restoringWorkspace.current = false;
+                setReadingRestoreError(false);
+                onTouchMove();
+                captureWorkspaceReading();
+              }}
+              onScroll={(event) => {
+                onScroll(event);
+                captureWorkspaceReading();
+              }}
             >
               {nextBeforeSeq !== null && (
                 <div className="chat-history">
@@ -776,6 +816,20 @@ export function ChatView(props: {
           </div>
 
           <footer className="composer">
+            {readingRestoreError && (
+              <p className="quote-navigation-feedback" role="status">
+                {tr("无法恢复阅读位置，可重试加载历史或回到最新消息。")}
+                {nextBeforeSeq !== null && (
+                  <button type="button" className="btn ghost sm" onClick={() => void loadHistory()}>
+                    {tr("重试")}
+                  </button>
+                )}
+                <button type="button" className="btn ghost sm" onClick={goToLatest}>
+                  {tr("回到最新")}
+                </button>
+              </p>
+            )}
+            {!workspace.loaded && !workspace.error && <p className="muted">{tr("正在恢复聊天草稿…")}</p>}
             {jumpError && (
               <p className="quote-navigation-feedback" role="status">
                 {tr(jumpError.source, { reason: translateError(jumpError.reason ?? "") })}
@@ -814,7 +868,7 @@ export function ChatView(props: {
               quote={quote}
               onCancelQuote={() => setQuote(null)}
               onJumpToQuote={jumpToMessage}
-              sending={sending}
+              sending={sending || !workspace.loaded}
               onChange={setDraft}
               onSubmit={() => void send()}
               members={members.length > 1 ? members : []}
@@ -2234,9 +2288,13 @@ function Composer(props: {
   const fileRef = useRef<HTMLInputElement>(null);
   const addFiles = async (files: Iterable<File>) => {
     if (props.sending) return;
-    const next = [...props.images];
-    for (const f of files) if (f.type.startsWith("image/")) next.push(await readImage(f));
-    props.onImages(next.slice(0, 8));
+    await chatWorkspace.track(
+      (async () => {
+        const next = [...props.images];
+        for (const f of files) if (f.type.startsWith("image/")) next.push(await readImage(f));
+        props.onImages(next.slice(0, 8));
+      })(),
+    );
   };
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {

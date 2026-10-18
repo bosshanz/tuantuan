@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { DesktopUpdateCheckpoint, DesktopUpdateStatus } from "../../shared/desktopUpdate";
 
 /** The only surface the web UI gets: no Node, just these calls. */
 contextBridge.exposeInMainWorld("tuantuan", {
@@ -13,6 +14,34 @@ contextBridge.exposeInMainWorld("tuantuan", {
   openNotificationSettings: () => ipcRenderer.invoke("tuantuan:open-notification-settings"),
   taskPowerStatus: () => ipcRenderer.invoke("tuantuan:task-power-status"),
   setTaskPower: (enabled: boolean) => ipcRenderer.invoke("tuantuan:task-power-set", enabled),
+  updateStatus: () => ipcRenderer.invoke("tuantuan:update-status"),
+  checkForUpdates: () => ipcRenderer.invoke("tuantuan:update-check"),
+  downloadUpdate: () => ipcRenderer.invoke("tuantuan:update-download"),
+  installUpdate: () => ipcRenderer.invoke("tuantuan:update-install"),
+  setUpdateChecks: (enabled: boolean) => ipcRenderer.invoke("tuantuan:update-checks", enabled),
+  openUpdateRelease: () => ipcRenderer.invoke("tuantuan:update-open-release"),
+  saveUpdateCheckpoint: (checkpoint: DesktopUpdateCheckpoint) =>
+    ipcRenderer.invoke("tuantuan:update-checkpoint-save", checkpoint),
+  readUpdateCheckpoint: () => ipcRenderer.invoke("tuantuan:update-checkpoint-read"),
+  clearUpdateCheckpoint: (id: string) => ipcRenderer.invoke("tuantuan:update-checkpoint-clear", id),
+  onUpdateState: (cb: (status: DesktopUpdateStatus) => void) => {
+    const listener = (_event: unknown, status: DesktopUpdateStatus) => cb(status);
+    ipcRenderer.on("tuantuan:update-state", listener);
+    return () => ipcRenderer.removeListener("tuantuan:update-state", listener);
+  },
+  onPrepareUpdate: (cb: () => Promise<void>) => {
+    const listener = (_event: unknown, id: string) => {
+      Promise.resolve()
+        .then(cb)
+        .then(
+          () => ipcRenderer.send("tuantuan:update-checkpoint", { id, ok: true }),
+          (error) =>
+            ipcRenderer.send("tuantuan:update-checkpoint", { id, ok: false, error: String(error?.message ?? error) }),
+        );
+    };
+    ipcRenderer.on("tuantuan:update-prepare", listener);
+    return () => ipcRenderer.removeListener("tuantuan:update-prepare", listener);
+  },
   onOpenRoom: (cb: (roomId: string) => void) => {
     const h = (_e: unknown, roomId: string) => cb(roomId);
     ipcRenderer.on("tuantuan:open-room", h);

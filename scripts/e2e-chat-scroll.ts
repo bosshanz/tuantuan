@@ -221,20 +221,42 @@ export async function chatScrollSmoke(browser: Browser, base: string, shotsDir?:
     evidence.pendingSendTop = pendingTop;
     await page.unroute(`${base}${endpoint}`);
 
-    await page.goto(`${base}/#/c/${rooms[1]?.id}`);
+    // Each room owns its reading intent: a fresh room follows, while returning restores this pause.
+    await page.evaluate((hash) => {
+      location.hash = hash;
+    }, `#/c/${rooms[1]?.id}`);
     await page.locator(`[data-message-id="${otherSource.id}"]`).waitFor();
     await page.waitForFunction(() => {
       const element = document.querySelector(".messages");
       return !!element && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
     });
     await latest.waitFor({ state: "hidden" });
-    await page.goto(`${base}/#/c/${roomId}`);
+    await page.evaluate((hash) => {
+      location.hash = hash;
+    }, `#/c/${roomId}`);
     await page.locator(`[data-message-id="${source.id}"]`).waitFor();
+    await latest.waitFor();
+    await page.waitForFunction(
+      (top) => Math.abs((document.querySelector(".messages")?.scrollTop ?? 0) - top) < 2,
+      pendingTop,
+    );
     const switchedText = await streamLength();
     await moreStream(switchedText);
-    if ((await metrics()).distance > 2)
-      throw new Error("switching rooms retained the other room's paused follow state");
+    const restored = await metrics();
+    if (Math.abs(restored.top - pendingTop) > 2 || restored.distance <= 2)
+      throw new Error(
+        `returning to the paused room lost its reading position: ${JSON.stringify({ pendingTop, restored })}`,
+      );
+    evidence.roomPositions = {
+      paused: pendingTop,
+      restored: restored.top,
+      newRoomFollows: true,
+      streamPreservesPause: true,
+    };
     await shot("chat-scroll-room-return");
+    await latest.click();
+    await latest.waitFor({ state: "hidden" });
+    if ((await metrics()).distance > 2) throw new Error("explicit Latest did not reset the narrow viewport fixture");
     await page.setViewportSize({ width: 390, height: 844 });
     const narrowText = await streamLength();
     await moreStream(narrowText);

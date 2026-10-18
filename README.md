@@ -23,6 +23,7 @@ Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser 
 - **See the work as it happens.** Follow streaming replies, thinking when provided, tool calls, diffs, terminal output, plans, and permission requests. Read Markdown and Mermaid diagrams, and stop individual tasks.
 - **Use your API providers.** Configure compatible providers for Claude Code, OpenCode, Pi, and Codex. Direct BYOK mode supports OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages for chat and handoffs, without file or terminal tools. Compatibility depends on the harness and provider protocol.
 - **Bring your setup.** Discover local Skills and Claude plugins, choose them per agent, and import CC Switch providers without modifying CC Switch. View token usage and quotas where the harness reports them. Tuantuan does not rewrite `~/.claude` or `~/.codex`.
+- **Update when you are ready.** Desktop Settings → About & Updates checks for new releases and offers supported in-app updates. Restart waits for every Agent task to finish and saves chat drafts and reading positions. Homebrew installations continue to update through Homebrew; see [update and signing requirements](docs/install.md). This feature is in source and is not retroactively added to the released v0.2.0 app.
 - **Choose your language.** The interface supports English, Simplified Chinese, Traditional Chinese, and Japanese. Changing it leaves conversation content and model response language unchanged.
 
 See the [full feature list (Simplified Chinese)](docs/features.md).

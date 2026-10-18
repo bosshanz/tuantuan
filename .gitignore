@@ -13,4 +13,5 @@ playwright-report/
 .DS_Store
 desktop/dist/
 desktop/release/
+desktop/release-ready/
 desktop/build/stage/

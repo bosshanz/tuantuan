@@ -156,6 +156,8 @@ const ImageSchema = z.object({
 export interface AppDeps {
   dbPath: string;
   staticDir?: string;
+  /** Main-process secret; omitted for the ordinary browser server. */
+  desktopUpdateToken?: string;
 }
 
 /** UI clients subscribe to room topics. */
@@ -183,6 +185,7 @@ function localRequest(req: Request, url: URL): boolean {
 }
 
 export function createApp(deps: AppDeps) {
+  const desktopUpdateToken = deps.desktopUpdateToken ?? process.env.TUANTUAN_DESKTOP_UPDATE_TOKEN;
   const store = new Store(deps.dbPath);
   const projectTerminals = new ProjectTerminals();
   const changingProjects = new Set<string>();
@@ -972,6 +975,18 @@ export function createApp(deps: AppDeps) {
     const [resource, id, sub, subId, action] = parts;
     const method = req.method;
     const body = async () => (method === "GET" || method === "DELETE" ? undefined : await req.json());
+
+    if (resource === "desktop") {
+      if (!desktopUpdateToken) return json({ error: "Not found" }, 404);
+      if (req.headers.get("authorization") !== `Bearer ${desktopUpdateToken}`)
+        return json({ error: "Unauthorized" }, 401);
+      if (parts.length === 2) {
+        if (id === "update-activity" && method === "GET") return json(orchestrator.desktopUpdateActivity());
+        if (id === "update-prepare" && method === "POST") return json(orchestrator.prepareDesktopUpdate());
+        if (id === "update-resume" && method === "POST") return json(orchestrator.resumeAfterDesktopUpdate());
+      }
+      return json({ error: "Not found" }, 404);
+    }
 
     // Onboarding shows once: finishing or skipping it is remembered in the database.
     if (resource === "onboarding" && method === "POST") {

@@ -492,3 +492,28 @@ Browser 插件不可用，本次沿用项目 Playwright 流程。测试使用隔
 - [x] tap 更新已推送到 main（`dae8e2b`），`brew info --cask bosshanz/tap/tuantuan` 已显示 0.2.0；安装和升级命令见[安装文档](install.md#发布版本时同步-homebrew)。
 
 发布记录：版本 PR #18 已合并，标签对应 `19edac1ca825885990f85b2425fc85770a3707dd`；构建提交 `d55426ca31c8d45ee59075a0801f59326007a5b0` 与标签源码树一致。完整本地检查为 694 pass / 39 skip / 0 fail，远端 CI、三平台 Desktop 构建、Linux 桌面冒烟与 macOS 签名验证通过。六个安装文件已核对格式、macOS 应用版本和双架构、ZIP 完整性、DMG 校验；七个 Release 附件的远端大小和 SHA-256 与本地一致。本轮未对用户已安装的应用执行升级，未验证 Windows 实机安装或调用付费模型。
+
+## 2026-10-18 桌面 OTA 与任务保护
+
+用户批准设置内检查/下载/显式重启更新，并要求不打断正在运行的 Agent、继续同步 Homebrew。实现使用既有 electron-updater：关闭下载后退出自动安装，服务端新增主进程 capability 保护的原子安装锁；覆盖排队、取消收尾、权限/提问与交接，不以 renderer 的空闲显示代替安装前检查。设置页使用低干扰提示，重启前等待草稿、图片、引用、阅读位置与路由保存。普通导航不再取消 ACP 提问。
+
+Homebrew 管理的安装使用 brew 升级；ad-hoc macOS 保留检查与手动下载，正式签名配置后才启用自动安装。构建、更新清单与发布/同步分阶段验证，实际签名证书和跨仓库同步 token 由发布环境配置。本次改动不修改已发布 v0.2.0，不发布新版本。
+
+平台安装边界：Windows 先确认安装器实际启动再退出；macOS 原生更新等待可取消，失败后的迟到事件不能关闭应用。Linux 在旧进程退出后启动新版，直到新版服务、窗口和 renderer 桥接都就绪才清理旧包；首次启动失败保留旧包与恢复记录，当前需要手动恢复，不声称自动回滚。
+
+已完成 `bun run check`：**753 pass / 39 skip / 0 fail**，11,543 断言、90 个文件；桌面 TypeScript 检查、桌面编译及前端构建通过。更新专项浏览器回归覆盖忙碌/未知状态禁止安装、保存失败恢复编辑、5 MiB 图片与跨端口恢复、导入失败重试、未访问会话的草稿和安全文本发布说明。真实 Electron 以隔离数据目录启动两次，实际端口变化后通过 preload IPC 恢复草稿、图片、引用、451 条历史的阅读锚点和页面，确认恢复文件清除且两个服务进程退出。独立审查推动修正平台安装失败路径，最终复查未报告该范围内的阻塞项；尚未执行已安装正式版本之间的升级，mock ACP 证据不代表真实模型调用。
+
+最终完整 Chrome `bun run e2e` 通过，覆盖启动引导、Harness 安装、提问/权限、阶段气泡、独立引用与返回、历史分页、流式阅读、终端、并行调度和服务商界面。既有回归按新行为更新：切换会话保留提问与阅读位置，需要初始末页的用例先显式回到最新；精简视图分别核对阶段气泡内容和外层状态的对齐。原工作区的两份 lockfile 改动保持不动，功能位于隔离分支 `codex/desktop-updates`。用户随后授权提交、推送并开 PR；安装文档补充 Developer ID 证书导出、公证、准确的 Actions Secret 名称与 tap token 最小权限步骤。签名凭据只在对应平台的打包步骤注入，防止 Windows 缺少独立证书时回退读取 macOS 证书。
+
+## 2026-10-18 用 DeepSeek Harness 验证真实 OTA（待发布后执行）
+
+用户确认先发布带更新能力的版本，再新增 **DeepSeek Harness**，通过下一版本的 OTA 安装到本机验证；每次发布继续同步 Homebrew。按两个连续稳定版本推进，不能把两个功能合在首次安装中代替跨版本升级证据，也不能用源码热更新或修改本地版本号冒充 OTA。
+
+- [ ] 发布包含 OTA 的基线版本，完成安装包、更新元数据和双架构 Homebrew cask 校验；v0.2.0 首次升级需要手动安装或 brew。
+- [ ] 在后续版本接入官方 DeepSeek Harness，优先使用其原生 `dsh acp` / `dsh --profile acp`。现有 DeepSeek 服务商接入继续保留；新增 Harness 按实际握手暴露能力，验证安装发现、配置、会话、消息、工具、权限、取消及恢复，再同步 Harness/产品/架构文档和发布说明。
+- [ ] 发布 DeepSeek 版本及 Homebrew 更新，在基线版本中检查和下载；Agent 运行、排队、等待输入及取消收尾时尝试安装均不得退出或中断任务，结束后由用户显式安装。
+- [ ] 在本机完成真实跨版本安装，记录更新前后版本、实际下载包、签名、重启与数据恢复结果；确认 DeepSeek Harness 入口可用，并保留失败恢复证据。
+
+接入依据（2026-10-18 核实）：官方 [CLI 帮助](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) 提供 ACP stdio 启动方式；[ACP 能力文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md) 声明会话新建/列出/恢复/关闭、模型与思考等级、MCP、消息与工具更新、权限和取消，但不支持 `session/load`、历史回放、原生计划/终端或 elicitation。实施时需固定实际验证的发行版本，不能假设这些扩展存在。
+
+本机验证前置条件（2026-10-18 实查）：`/Applications/Tuantuan.app` 为 **0.2.0、ad-hoc 签名**，本机没有有效代码签名身份，现有 Caskroom 链接也指向该应用。因此当前安装会走 Homebrew/手动升级，不能据此宣称已通过 macOS 应用内 OTA。真实 macOS OTA 需要两个使用同一有效 Developer ID 签名的发行版本，并使用不由 Homebrew 管理的测试安装；不修改用户现有安装或绕过签名保护来制造通过结果。CI 的 macOS 签名、公证凭据及 `HOMEBREW_TAP_TOKEN` 尚需配置；Homebrew 同步可用文档中的校验脚本手动完成，但不等同于自动同步已经验证。

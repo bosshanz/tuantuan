@@ -2,6 +2,101 @@ import type { MessageCatalog } from "./types";
 
 /** Application-owned errors only. Placeholder values retain paths, names and third-party details. */
 export const errorMessages: MessageCatalog = {
+  "无法检查更新（HTTP {status}）": {
+    "zh-TW": "無法檢查更新（HTTP {status}）",
+    en: "Couldn’t check for updates (HTTP {status})",
+    ja: "更新を確認できませんでした（HTTP {status}）",
+  },
+  "任务状态检查失败（HTTP {status}）": {
+    "zh-TW": "任務狀態檢查失敗（HTTP {status}）",
+    en: "Couldn’t check task status (HTTP {status})",
+    ja: "タスク状況を確認できませんでした（HTTP {status}）",
+  },
+  更新版本信息无效: {
+    "zh-TW": "更新版本資訊無效",
+    en: "The update version information is invalid",
+    ja: "更新のバージョン情報が無効です",
+  },
+  无法读取更新信息: {
+    "zh-TW": "無法讀取更新資訊",
+    en: "Couldn’t read update information",
+    ja: "更新情報を読み取れませんでした",
+  },
+  "无法读取更新设置，请修复设置文件后重试": {
+    "zh-TW": "無法讀取更新設定，請修復設定檔後重試",
+    en: "Couldn’t read update settings. Repair the settings file and retry",
+    ja: "更新設定を読み取れませんでした。設定ファイルを修復して再試行してください",
+  },
+  当前安装方式不支持自动更新: {
+    "zh-TW": "目前安裝方式不支援自動更新",
+    en: "This installation doesn’t support automatic updates",
+    ja: "このインストール方法では自動更新を利用できません",
+  },
+  "Agent 任务仍在运行，请结束后再更新": {
+    "zh-TW": "Agent 任務仍在執行，請結束後再更新",
+    en: "Agent tasks are still running. Update after they finish",
+    ja: "Agent のタスクが実行中です。終了後に更新してください",
+  },
+  "无法恢复任务接收：{detail}": {
+    "zh-TW": "無法恢復任務接收：{detail}",
+    en: "Couldn’t resume accepting tasks: {detail}",
+    ja: "タスクの受け付けを再開できませんでした：{detail}",
+  },
+  请打开团团窗口后再更新: {
+    "zh-TW": "請開啟團團視窗後再更新",
+    en: "Open the Tuantuan window before updating",
+    ja: "Tuantuan のウインドウを開いてから更新してください",
+  },
+  "无法保存当前工作，请重试": {
+    "zh-TW": "無法儲存目前工作，請重試",
+    en: "Couldn’t save your current work. Please retry",
+    ja: "現在の作業を保存できませんでした。再試行してください",
+  },
+  "保存当前工作超时，尚未开始安装": {
+    "zh-TW": "儲存目前工作逾時，尚未開始安裝",
+    en: "Saving your current work timed out. Installation has not started",
+    ja: "作業の保存がタイムアウトしました。インストールは開始していません",
+  },
+  "无法确认 Agent 任务状态": {
+    "zh-TW": "無法確認 Agent 任務狀態",
+    en: "Couldn’t confirm Agent task status",
+    ja: "Agent のタスク状況を確認できませんでした",
+  },
+  "任务状态无效，尚未开始安装": {
+    "zh-TW": "任務狀態無效，尚未開始安裝",
+    en: "Task status is invalid. Installation has not started",
+    ja: "タスク状況が無効なため、インストールは開始していません",
+  },
+  "更新保存请求已过期，请重新点击安装": {
+    "zh-TW": "更新儲存請求已過期，請重新點擊安裝",
+    en: "The save request has expired. Click install again",
+    ja: "更新の保存リクエストが期限切れです。インストールを再度クリックしてください",
+  },
+  更新操作仅允许团团窗口调用: {
+    "zh-TW": "更新操作僅允許團團視窗呼叫",
+    en: "Updates can only be requested from the Tuantuan window",
+    ja: "更新操作は Tuantuan のウインドウからのみ実行できます",
+  },
+  "更新恢复数据过大，未自动清除原始数据": {
+    "zh-TW": "更新恢復資料過大，未自動清除原始資料",
+    en: "Update recovery data is too large. The original data has been kept",
+    ja: "更新の復元データが大きすぎます。元のデータは保持しています",
+  },
+  "更新恢复数据无效，未自动清除原始数据": {
+    "zh-TW": "更新恢復資料無效，未自動清除原始資料",
+    en: "Update recovery data is invalid. The original data has been kept",
+    ja: "更新の復元データが無効です。元のデータは保持しています",
+  },
+  无法保存无效的更新恢复数据: {
+    "zh-TW": "無法儲存無效的更新恢復資料",
+    en: "Couldn’t save invalid update recovery data",
+    ja: "無効な更新の復元データを保存できませんでした",
+  },
+  "草稿及图片超过更新恢复容量，请先发送或移除部分附件": {
+    "zh-TW": "草稿及圖片超過更新恢復容量，請先傳送或移除部分附件",
+    en: "Drafts and images exceed update recovery capacity. Send or remove some attachments first",
+    ja: "下書きと画像が更新の復元容量を超えています。添付ファイルの一部を送信または削除してください",
+  },
   "无法定位 OpenCode，未能探测服务商配置格式": {
     "zh-TW": "無法定位 OpenCode，未能探測服務商設定格式",
     en: "OpenCode was not found. Its provider configuration format could not be detected",

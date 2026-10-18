@@ -73,7 +73,7 @@ Grok 通过 `_meta.rules` 传递身份；其他 Harness 使用首条普通消息
 | ACP 提问 | 客户端已接 form elicitation；原生触发未实测 | 同左 | 原生提问工具（默认启用）+ form elicitation | 视 Harness 声明 | 无 |
 | 未接进 UI | providers、additionalDirectories、subagents、session.compaction | 同上；`/review-branch` 等已在命令列表可选 | MCP sse、自定义 skill tool 的单独面板 | 登录后能力未探 | 文件/终端 |
 
-**ACP 提问（elicitation）**：团团向 Harness 声明 `clientCapabilities.elicitation.form`，不声明 URL 模式。Harness 以 `elicitation/create` 发起表单时，团团渲染提问卡片并接受 `string`（含 `enum` / `oneOf` 选项）、`number`、`integer`、`boolean`、`array` 字段；未知类型只读显示且不能提交。回答在服务端按同一份 schema 再校验一次。用户关闭卡片、停止任务、Harness 进程退出或离开会话时都以 `cancel` 回应，避免请求永久挂起；刷新页面会从房间快照恢复未回答的问题。
+**ACP 提问（elicitation）**：团团向 Harness 声明 `clientCapabilities.elicitation.form`，不声明 URL 模式。Harness 以 `elicitation/create` 发起表单时，团团渲染提问卡片并接受 `string`（含 `enum` / `oneOf` 选项）、`number`、`integer`、`boolean`、`array` 字段；未知类型只读显示且不能提交。回答在服务端按同一份 schema 再校验一次。收起卡片、切换会话或打开设置不会取消提问，返回后保留本次应用运行中填写的答案；只有明确「取消提问」、停止任务或 Harness 进程退出才以 `cancel` 回应。刷新页面会从房间快照恢复未回答的问题，但未提交的表单值仅在本次应用运行中保留；存在待回答的问题时禁止安装应用更新。
 
 OpenCode 的原生提问工具由 `OPENCODE_ENABLE_QUESTION_TOOL=1` 打开；通过团团启动 OpenCode 时默认注入该变量，登录 shell、Agent 环境变量或显式配置中的值优先。其他 Harness 是否提供提问取决于其 ACP 声明，团团不为未声明的 Harness 猜测能力。
 

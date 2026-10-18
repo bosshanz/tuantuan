@@ -139,8 +139,13 @@ export async function quoteReturnSmoke(
     await latest.waitFor();
 
     // Returning while an old page is in flight cancels its navigation intent, not the legitimate history merge.
+    // Refresh now preserves reading intent; start from Latest so this case must request the old source again.
+    await latest.click();
+    await latest.waitFor({ state: "hidden" });
+    await settle();
     await page.reload();
     const pendingTop = await readOrigin();
+    if (await intermediateRow.count()) throw new Error("pending history fixture already loaded the quoted source");
     const gate = new Promise<void>((resolve) => {
       releasePage = resolve;
     });
