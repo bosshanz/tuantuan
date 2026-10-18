@@ -19,6 +19,7 @@ import {
 import { type ReactNode, useEffect, useRef } from "react";
 import { type Timeline, type TimelineBodyPhase, type ToolState, timelineBodyPhases } from "../../shared/timeline";
 import type { PermissionAsk, SessionView, TerminalSnapshot } from "./api";
+import { FileAttachmentDownload } from "./FileAttachments";
 import { PreviewImage } from "./ImagePreview";
 import { intlLocale, useI18n } from "./i18n";
 import { MessageMarkdown } from "./ui";
@@ -82,7 +83,8 @@ export function TimelineView(props: {
       {t.parts.map((p, i) => {
         // Timeline parts are append-only, so their original index remains stable when activity is hidden.
         const key = i;
-        if (view === "process" && (p.kind === "text" || p.kind === "image")) return null;
+        if (view === "process" && (p.kind === "text" || p.kind === "image" || p.kind === "file")) return null;
+        if (p.kind === "file") return <FileAttachmentDownload key={key} file={p} />;
         if (p.kind === "thought")
           return (
             <details key={key} className="thought" open={props.streaming && i === t.parts.length - 1}>

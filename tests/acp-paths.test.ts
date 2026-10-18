@@ -112,3 +112,32 @@ test("selected skill grants are read-only, realpath confined, and replaceable", 
   });
   await expect(files.readTextFile({ sessionId: "test", path: join(skill, "reference.md") })).rejects.toThrow();
 });
+
+test("attachment reads grant exact files only, retain write boundaries and reject replaced symlinks", async () => {
+  const attachment = join(outside, "attachment.txt");
+  writeFileSync(attachment, "attached text");
+  const { p, files } = client();
+  p.grantAttachmentReads([attachment]);
+  expect(await files.readTextFile({ sessionId: "test", path: attachment })).toEqual({ content: "attached text" });
+  await expect(files.readTextFile({ sessionId: "test", path: join(outside, "marker") })).rejects.toThrow();
+  await expect(files.writeTextFile({ sessionId: "test", path: attachment, content: "overwrite" })).rejects.toThrow();
+  rmSync(attachment);
+  symlinkSync(join(outside, "marker"), attachment);
+  await expect(files.readTextFile({ sessionId: "test", path: attachment })).rejects.toThrow();
+  expect(() => p.grantAttachmentReads([attachment])).toThrow("安全的文件");
+});
+
+test("managed attachments stay read-only when their data directory is inside the project cwd", async () => {
+  const attachment = join(root, "original.pdf");
+  const alias = join(root, "alias.pdf");
+  writeFileSync(attachment, "original bytes");
+  symlinkSync(attachment, alias);
+  const { p, files } = client();
+  p.grantAttachmentReads([attachment]);
+  expect(await files.readTextFile({ sessionId: "test", path: attachment })).toEqual({ content: "original bytes" });
+  for (const path of [attachment, alias, "original.pdf"])
+    await expect(files.writeTextFile({ sessionId: "test", path, content: "overwrite" })).rejects.toThrow("只读");
+  expect(readFileSync(attachment, "utf8")).toBe("original bytes");
+  await files.writeTextFile({ sessionId: "test", path: "normal.txt", content: "ordinary project edit" });
+  expect(readFileSync(join(root, "normal.txt"), "utf8")).toBe("ordinary project edit");
+});

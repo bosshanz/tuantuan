@@ -515,7 +515,13 @@ export class Store {
       (
         this.db
           .query(
-            `SELECT m.room_id, m.id, m.seq, m.status, m.sender_name, m.sender_kind, m.content, m.error, m.created_at FROM messages m
+            `SELECT m.room_id, m.id, m.seq, m.status, m.sender_name, m.sender_kind, m.content, m.error, m.created_at,
+               CASE WHEN trim(m.content) = '' AND json_valid(m.timeline) THEN
+                 (SELECT json_group_array(json_object('kind', json_extract(p.value, '$.kind'), 'name', json_extract(p.value, '$.name')))
+                  FROM json_each(m.timeline, '$.parts') p
+                  WHERE json_extract(p.value, '$.kind') IN ('file', 'image'))
+               END AS attachment_parts
+             FROM messages m
              JOIN (SELECT room_id, MAX(seq) AS seq FROM messages WHERE sender_kind != 'system' GROUP BY room_id) x
                ON x.room_id = m.room_id AND x.seq = m.seq`,
           )
@@ -536,6 +542,7 @@ export class Store {
             content: l.content as string,
             error: l.error as string | null,
             createdAt: l.created_at as number,
+            timeline: l.attachment_parts ? { parts: JSON.parse(l.attachment_parts as string) } : null,
           }) ?? undefined;
       return room;
     });
@@ -746,6 +753,20 @@ export class Store {
       .query("SELECT * FROM messages WHERE room_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?")
       .all(roomId, beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as Row[];
     return rows.reverse().map(toMessage);
+  }
+
+  /** Stream persisted user attachments for exact-file read grants when a Harness process is rebuilt. */
+  *humanAttachmentMessages(roomId: string): Generator<Message> {
+    const statement = this.db.prepare(
+      "SELECT * FROM messages WHERE room_id = ? AND sender_kind = 'human' AND status = 'done' AND timeline IS NOT NULL ORDER BY seq",
+    );
+    // A failed attachment check can close this generator early. Never leave a partially consumed
+    // bound iterator in Database.query's statement cache, or the next recovery may resume it.
+    try {
+      for (const row of statement.iterate(roomId)) yield toMessage(row as Row);
+    } finally {
+      statement.finalize();
+    }
   }
 
   /**

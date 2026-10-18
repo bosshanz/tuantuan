@@ -276,7 +276,7 @@ acp
     agentInfo: { name: "mock-agent", title: "Mock", version: "1.0" },
     agentCapabilities: {
       loadSession: true,
-      promptCapabilities: { image: true, embeddedContext: true },
+      promptCapabilities: { image: process.env.MOCK_AGENT_IMAGE !== "0", embeddedContext: true },
       mcpCapabilities: { http: process.env.MOCK_AGENT_MCP_HTTP === "1" },
       sessionCapabilities: { list: {}, resume: {} },
     },

@@ -8,23 +8,44 @@ export interface RoomPreview {
   text: string;
   at: number;
   status: Message["status"];
+  attachment?: { kind: "file" | "image" | "mixed"; count: number; name?: string };
 }
 
 type PreviewMessage = Pick<
   Message,
   "id" | "seq" | "senderKind" | "senderName" | "content" | "error" | "createdAt" | "status"
->;
+> & { timeline?: { parts: readonly { kind: string; name?: string | null }[] } | null };
 
 /** The list snapshot and global message events use the same last-message contract. */
 export function messagePreview(message: PreviewMessage): RoomPreview | null {
   if (message.senderKind === "system") return null;
+  const text = (message.content.trim() || message.error || "").replace(/\s+/g, " ").slice(0, 120);
+  let attachment: RoomPreview["attachment"];
+  if (!text) {
+    let fileCount = 0;
+    let imageCount = 0;
+    let name: string | undefined;
+    for (const part of message.timeline?.parts ?? []) {
+      if (part.kind === "file") {
+        fileCount++;
+        if (!name && part.name) name = part.name.replace(/\s+/g, " ").slice(0, 80);
+      } else if (part.kind === "image") imageCount++;
+    }
+    if (fileCount || imageCount)
+      attachment = {
+        kind: fileCount ? (imageCount ? "mixed" : "file") : "image",
+        count: fileCount + imageCount,
+        ...(name ? { name } : {}),
+      };
+  }
   return {
     messageId: message.id,
     seq: message.seq,
     sender: message.senderKind === "human" ? null : message.senderName,
-    text: (message.content || message.error || "").replace(/\s+/g, " ").slice(0, 120),
+    text,
     at: message.createdAt,
     status: message.status,
+    ...(attachment ? { attachment } : {}),
   };
 }
 
@@ -40,6 +61,19 @@ export function newerPreview(current: RoomPreview | undefined, incoming: RoomPre
 
 export function previewText(last: RoomPreview, locale: Locale = "zh-CN"): string {
   if (last.text) return last.text;
+  const attachment = last.attachment;
+  if (attachment?.kind === "image")
+    return `（${translate(locale, "图片")}${attachment.count > 1 ? ` × ${attachment.count}` : ""}）`;
+  if (attachment) {
+    if (attachment.name) {
+      if (attachment.count === 1) return translate(locale, "文件：{name}", { name: attachment.name });
+      return translate(locale, attachment.kind === "mixed" ? "{name} 等 {count} 个附件" : "{name} 等 {count} 个文件", {
+        name: attachment.name,
+        count: attachment.count,
+      });
+    }
+    return translate(locale, "{count} 个附件", { count: attachment.count });
+  }
   const empty = {
     streaming: "正在回复…",
     done: "（空回复）",

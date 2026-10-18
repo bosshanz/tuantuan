@@ -34,6 +34,8 @@
 | `server/registry-usage.ts` | Registry Harness 的原生额度查询与解析；Antigravity `/usage`、ZCode `account/usage_stats`；不读取凭据或改变登录渠道 |
 | `server/dirpicker.ts` | 选择文件夹：系统对话框（osascript / zenity / kdialog，可由桌面壳替换）+ 应用内浏览器的目录列表与常用位置 |
 | `server/host.ts` | `HarnessHost`：按「房间 + Agent + 工作目录」隔离进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；同房间同 Agent 防重入，权限请求挂起直到用户回答 |
+| `shared/attachments.ts` / `server/attachments.ts` | 附件数量、大小、编码契约；UTF-8 文本内联、二进制原件托管与精确只读路径授权 |
+| `web/src/composerAttachments.ts` / `FileAttachments.tsx` | 按房间串行读取附件、预览与安全下载；草稿仍由 `chatWorkspace.ts` 拥有 |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
 | `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
 | `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；直达 / 群主统筹路由、逐轮职责、成员结果收集与群主续轮、单个 Agent 回合、交接预算与定向取消 |
@@ -131,7 +133,7 @@ ACP session 的历史与压缩归 Harness，包括通过原生 Harness 使用自
 | 18 | `custom_history`：按房间 / Agent 保存有界 BYOK 上下文，房间或 Agent 删除时外键级联清理 |
 | 19 | `providers.model_catalog`：模型 ID 到能力来源引用的 JSON 映射，旧服务商默认 `{}` 自动识别 |
 
-BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计算完整 JSON body 的序列化字符数，上限 65,536；包含系统提示、工具定义、当前任务、工具链及 JSON 包装。超限先按完整旧轮淘汰，不截断当前任务或系统提示，不拆散工具调用与结果；当前轮自身超限则在发送前明确报错。完成轮按相同字符预算和最多 20 轮持久化；最终回复使单轮超限时保留可见回复、报告错误并保留上一成功上下文。这是字符预算，不是字节数或模型 token 窗口。
+BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计算 JSON body 的文本序列化字符数，上限 65,536；包含系统提示、工具定义、当前任务、工具链及 JSON 包装，剔除图片 Base64 本体。图片按原始字节另设 20 MiB 预算，三种 API 均使用各自的图片结构。超限先按完整旧轮淘汰，不截断当前任务或系统提示，不拆散工具调用与结果；当前轮自身超限则在发送前明确报错。完成轮按相同文本、图片预算和最多 20 轮持久化；最终回复使单轮超限时保留可见回复、报告错误并保留上一成功上下文。这是字符预算，不是字节数或模型 token 窗口。
 
 `custom_history` 缺行表示尚未初始化：仅 DM 从最近 40 条转写中按同一 runId 配对人类任务与该 Agent 的成功回复，经预算裁剪后恢复一次；群聊从空开始，历史由转述携带。`[]` 是明确清空的状态，新会话、成员移除、项目目录 / 归属重置后重启也不复活旧聊天。普通停机保留成功上下文；取消、错误或 slot 已释放的迟到回复不提交半轮。
 
@@ -232,8 +234,18 @@ Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio M
 
 服务进程由桌面启动时获得一次随机更新 capability，`server/main.ts` 捕获后移除环境变量，避免子 Harness/终端继承。受该 capability 保护的 `/api/desktop/update-activity`、`update-prepare`、`update-resume` 仅供主进程使用。`Orchestrator` 持有接收锁，并跟踪执行 Promise 的完整生命周期：prepare 在同一个同步步骤检查所有 runtime 并关闭新消息入口，不取消既有工作；失败时 resume 恢复入口。没有 capability 的普通浏览器服务不开放这组接口。
 
-renderer 在明确重启前完成持久化 checkpoint，主进程等待成功后才申请服务端锁。超时、存储异常、状态不可读或 prepare 失败均不调用安装器。`autoInstallOnAppQuit` 始终关闭；失败的锁释放会重试恢复接收，但不会重试安装。会话草稿与阅读锚点的持久化由前端聚焦模块管理，图片保存在 IndexedDB。桌面服务每次启动会换端口，更新和正常退出前还需通过主进程把所有房间的草稿、图片、引用、阅读锚点及路由原子写入 userData/update-checkpoint.json（64 MiB 上限、私有文件权限）；新窗口将其导入新 origin 的 IndexedDB，恢复路由后才按 checkpoint id 确认删除。导入失败保留源文件并提供重试，安装放弃后清理本次快照，避免覆盖后续编辑。安装页不维护另一份会话状态。 普通退出在窗口销毁和服务停止前完成相同保存握手；主进程按请求 id 拥有保存许可，迟到写入不能覆盖后续快照。退出保存与更新安装状态分开，后台检查不能清除退出快照或解除编辑锁。macOS 仅隐藏窗口时不保存退出快照、不停止服务；保存失败取消退出并允许重试。强制终止不保证此握手完成。
+renderer 在明确重启前完成持久化 checkpoint，主进程等待成功后才申请服务端锁。超时、存储异常、状态不可读或 prepare 失败均不调用安装器。`autoInstallOnAppQuit` 始终关闭；失败的锁释放会重试恢复接收，但不会重试安装。会话草稿与阅读锚点的持久化由前端聚焦模块管理，图片和文件保存在 IndexedDB。桌面服务每次启动会换端口，更新和正常退出前还需通过主进程把所有房间的草稿、图片、文件、引用、阅读锚点及路由原子写入 userData/update-checkpoint.json（64 MiB 上限、私有文件权限）；新窗口将其导入新 origin 的 IndexedDB，恢复路由后才按 checkpoint id 确认删除。导入失败保留源文件并提供重试，安装放弃后清理本次快照，避免覆盖后续编辑。安装页不维护另一份会话状态。 普通退出在窗口销毁和服务停止前完成相同保存握手；主进程按请求 id 拥有保存许可，迟到写入不能覆盖后续快照。退出保存与更新安装状态分开，后台检查不能清除退出快照或解除编辑锁。macOS 仅隐藏窗口时不保存退出快照、不停止服务；保存失败取消退出并允许重试。强制终止不保证此握手完成。
 
 退出许可与界面 installing 状态分开：只有 checkpoint 完成且 prepare 成功后才能授予，任何失败立即撤销。主进程使用 before-quit-for-update 区分更新退出，并覆盖 macOS 先关窗再退出的顺序。Windows 保留 NSIS 的安装参数和提权流程，但通过 SDK 声明的扩展点等待安装器启动成功；macOS 用原生更新器的一次性等待，失败撤销回调；AppImage 在同文件系统暂存并保留旧可执行文件，通过 app.relaunch 排程到旧实例退出、释放单实例锁后再启动。userData/appimage-update.json 记录本次 nonce 和恢复路径；新版服务健康、窗口 ready 且 renderer 成功调用更新状态 IPC 后，才按 nonce 和镜像路径确认并清理旧包。安排重启失败会还原；新版首次启动失败会留下旧包及记录供手动恢复，不自动回滚。下载、签名验证和更新源仍由 electron-updater 负责。
 
 发布流程与安装能力解耦：构建生成更新源及元数据，发布脚本验证所有平台文件后再公开 Release；macOS 双架构清单需合并而不能互相覆盖。Homebrew 的公开版本只在 Release 可下载并通过校验后更新，详细命令与凭据要求见 `docs/install.md`。
+
+## 文件与图片附件
+
+`POST messages` 保留旧 `images` 字段并增加可选 `files`，共享规则校验文件名、MIME、规范 Base64、数量与解码后大小；总计最多 8 个、单个 5 MiB、合计 20 MiB。人类原文及附件保存在既有 `messages.timeline`，文件使用带名称的 `file` part，无数据库迁移。附件文本不参与 @ 路由。
+
+UTF-8 文本直接内联；ACP 支持 embedded context 时使用文本 resource，否则使用文本块。二进制原件按房间、消息与内容摘要保存于数据目录 `attachments/`，落盘文件名使用内容摘要与验证过的扩展名，不接受客户端路径；创建拒绝符号链接，已有文件须与原字节一致。原生 Harness 收到 resource link 和本机路径，ACP 文件读取仅额外授权具体原件，不开放所在目录或写权限；即使数据目录位于项目内，已授权原件也拒绝 ACP 写入。进程重建时从同房间持久化的人类附件逐条恢复原件与精确读取授权，缺失文件可重建，替换的符号链接拒绝恢复。Harness 自身的工具与沙箱仍可能限制读取，上传成功不等于模型理解任意格式。BYOK 对非文本二进制明确拒绝。
+
+图片能力按实际接收成员判断：已知不支持则保留附件并提示，服务端与 Host 再检查；未知能力在真实接入后确认，不静默丢图。`custom_history` 为 BYOK 保存图片并按独立预算淘汰完整旧轮。
+
+附件读取按房间排队；读取中不允许发送或退出保存，读取失败不污染原草稿。发送仅在成功后清除对应快照，失败保留内容。`chatWorkspace` 在 IndexedDB 中持久化文件；桌面 checkpoint 的可选 `files` 默认空数组，兼容旧格式。消息下载通过 Blob 与 download 属性保留原名和字节，不将上传内容作为 HTML 展示。

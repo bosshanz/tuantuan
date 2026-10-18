@@ -78,10 +78,10 @@ export const updateMessages: MessageCatalog = {
     en: "Couldn’t restore your work from before the update: {error}",
     ja: "更新前の作業を復元できませんでした：{error}",
   },
-  "聊天草稿中的图片过大，无法保存更新前的工作。请减少图片后重试。": {
-    "zh-TW": "聊天草稿中的圖片過大，無法儲存更新前的工作。請減少圖片後重試。",
-    en: "Images in your chat drafts are too large to save before updating. Remove some images and retry.",
-    ja: "チャットの下書き画像が大きすぎるため、更新前の作業を保存できません。画像を減らして再試行してください。",
+  "聊天草稿中的附件过大，无法保存更新前的工作。请减少附件后重试。": {
+    "zh-TW": "聊天草稿中的附件過大，無法儲存更新前的工作。請減少附件後重試。",
+    en: "Attachments in your chat drafts are too large to save before updating. Remove some attachments and retry.",
+    ja: "チャットの下書き添付ファイルが大きすぎるため、更新前の作業を保存できません。添付ファイルを減らして再試行してください。",
   },
   有可用更新: { "zh-TW": "有可用更新", en: "Update available", ja: "更新を利用できます" },
   关于与更新: {

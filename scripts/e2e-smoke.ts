@@ -8,6 +8,7 @@ import { chromium, type Locator, type Page } from "playwright-core";
 import { serve } from "../server/app";
 import { setSkillLinked } from "../server/skills";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
+import { attachmentsSmoke } from "./e2e-attachments";
 import { chatHistorySmoke } from "./e2e-chat-history";
 import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { chatToolsSmoke } from "./e2e-chat-tools";
@@ -560,6 +561,7 @@ try {
     (message) => server.publish(`room:${message.roomId}`, JSON.stringify({ type: "message", message })),
     shotsDir,
   );
+  await attachmentsSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
   await schedulingSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   // Auxiliary smoke pages use their own contexts; return focus before testing caret-driven completion.
   await page.bringToFront();

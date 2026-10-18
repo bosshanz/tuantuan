@@ -19,7 +19,7 @@
   "trustedDependencies": [
     "electron"
   ],
-  "version": "0.2.2",
+  "version": "0.2.3",
   "scripts": {
     "compile": "bun scripts/compile.ts",
     "stage": "bun scripts/stage.ts",

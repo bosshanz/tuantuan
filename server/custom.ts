@@ -1,4 +1,10 @@
 import type * as acp from "@agentclientprotocol/sdk";
+import {
+  attachmentBytes,
+  attachmentError,
+  type ImageAttachment,
+  MAX_TOTAL_ATTACHMENT_BYTES,
+} from "../shared/attachments";
 import type { ToolDef } from "./tuantuan-mcp";
 
 /**
@@ -32,7 +38,7 @@ export function maskKey(key: string): string {
 
 /** Neutral conversation items, converted per API format. */
 export type Item =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; userImages?: ImageAttachment[] }
   | { kind: "assistant"; text: string; calls: Call[] }
   | { kind: "tool"; id: string; name: string; output: string };
 export interface Call {
@@ -51,30 +57,68 @@ const MAX_TOOL_ROUNDS = 5;
 
 /**
  * Bounded BYOK context. History is kept as whole completed turns (one `runTurn` each, tool calls
- * and results paired inside) and capped by turn count and serialized size — a character budget,
- * not a claim about any model's token window. The system prompt and the current user task are
- * never trimmed; only complete old turns are dropped.
+ * and results paired inside) and capped by turn count, serialized text and decoded image bytes.
+ * Base64 image payloads do not consume the text budget; their metadata and JSON wrappers do.
+ * These are resource budgets, not a claim about any model's token window. The system prompt
+ * and the current user task are never trimmed; only complete old turns are dropped.
  */
 export const CUSTOM_HISTORY_MAX_TURNS = 20;
 export const CUSTOM_HISTORY_MAX_CHARS = 64 * 1024;
+export const CUSTOM_HISTORY_MAX_IMAGE_BYTES = MAX_TOTAL_ATTACHMENT_BYTES;
+
+function withoutImageData(items: Item[]): Item[] {
+  return items.map((it) =>
+    it.kind === "user" && it.userImages?.length
+      ? { ...it, userImages: it.userImages.map((image) => ({ ...image, data: "" })) }
+      : it,
+  );
+}
 
 export function turnChars(items: Item[]): number {
-  return JSON.stringify(items).length;
+  return JSON.stringify(withoutImageData(items)).length;
 }
 
 export function historyChars(turns: Item[][]): number {
   return turns.reduce((n, t) => n + turnChars(t) + 1, 0);
 }
 
+/** Validate each user message at this boundary too; persisted images may bypass POST validation. */
+export function turnImageBytes(items: Item[]): number {
+  let bytes = 0;
+  for (const it of items) {
+    if (it.kind !== "user" || !it.userImages?.length) continue;
+    const error = attachmentError(it.userImages, []);
+    if (error) throw new Error(error);
+    for (const image of it.userImages) {
+      const size = attachmentBytes(image.data);
+      if (!size) throw new Error("图片内容为空");
+      bytes += size;
+    }
+  }
+  return bytes;
+}
+
+export function historyImageBytes(turns: Item[][]): number {
+  return turns.reduce((n, t) => n + turnImageBytes(t), 0);
+}
+
 /** Old turns kept for this turn, dropping whole oldest ones so old + incoming fits (a first pass;
  * every request is re-measured precisely inside runTurn before it is sent). */
-export function historyForRequest(turns: Item[][], incomingChars: number): Item[][] {
+export function historyForRequest(turns: Item[][], incomingChars: number, incomingImageBytes = 0): Item[][] {
   const kept = turns.slice();
+  let chars = historyChars(kept);
+  let imageBytes = historyImageBytes(kept);
   while (
     kept.length > 0 &&
-    (kept.length >= CUSTOM_HISTORY_MAX_TURNS || historyChars(kept) + incomingChars > CUSTOM_HISTORY_MAX_CHARS)
-  )
-    kept.shift();
+    (kept.length >= CUSTOM_HISTORY_MAX_TURNS ||
+      chars + incomingChars > CUSTOM_HISTORY_MAX_CHARS ||
+      imageBytes + incomingImageBytes > CUSTOM_HISTORY_MAX_IMAGE_BYTES)
+  ) {
+    const oldest = kept.shift();
+    if (!oldest) break;
+    chars -= turnChars(oldest) + 1;
+    imageBytes -= turnImageBytes(oldest);
+  }
   return kept;
 }
 
@@ -82,13 +126,28 @@ export function historyForRequest(turns: Item[][], incomingChars: number): Item[
  * committed turn is always within budget itself, so committing always keeps the newest. */
 export function fitTurns(turns: Item[][]): Item[][] {
   const out = turns.slice();
-  while (out.length > 0 && (out.length > CUSTOM_HISTORY_MAX_TURNS || historyChars(out) > CUSTOM_HISTORY_MAX_CHARS))
-    out.shift();
+  let chars = historyChars(out);
+  let imageBytes = historyImageBytes(out);
+  while (
+    out.length > 0 &&
+    (out.length > CUSTOM_HISTORY_MAX_TURNS ||
+      chars > CUSTOM_HISTORY_MAX_CHARS ||
+      imageBytes > CUSTOM_HISTORY_MAX_IMAGE_BYTES)
+  ) {
+    const oldest = out.shift();
+    if (!oldest) break;
+    chars -= turnChars(oldest) + 1;
+    imageBytes -= turnImageBytes(oldest);
+  }
   return out;
 }
 
 /** Append one complete turn, then drop whole oldest turns until back within budget. */
 export function commitBoundedTurn(turns: Item[][], newItems: Item[]): Item[][] {
+  if (historyChars([newItems]) > CUSTOM_HISTORY_MAX_CHARS)
+    throw new Error(`本轮对话超过自定义 API 的上下文预算 ${CUSTOM_HISTORY_MAX_CHARS} 字符，未写入会话上下文`);
+  if (turnImageBytes(newItems) > CUSTOM_HISTORY_MAX_IMAGE_BYTES)
+    throw new Error("本轮图片超过自定义 API 的图片上下文预算 20 MiB，未写入会话上下文");
   return fitTurns([...turns, newItems]);
 }
 
@@ -97,37 +156,54 @@ export function commitBoundedTurn(turns: Item[][], newItems: Item[]): Item[][] {
  * read-only whole old turns; the items this turn appended are returned for the caller to persist
  * (or drop when the turn failed, was cancelled, or exceeds the context budget).
  *
- * Before every upstream request the exact serialized body — system, tools, old history and the
- * current turn's tool chain — is measured against CUSTOM_HISTORY_MAX_CHARS; whole oldest old
- * turns are dropped to fit, and a current turn that alone exceeds the budget is rejected before
- * anything is sent. Nothing is ever truncated mid-item, so tool calls and results stay paired.
+ * Before every upstream request the serialized body, excluding base64 image data, is measured
+ * against CUSTOM_HISTORY_MAX_CHARS; decoded image bytes have their own 20 MiB budget. Whole
+ * oldest old turns are dropped to fit both, and a current turn that alone exceeds either budget
+ * is rejected before anything is sent. Nothing is truncated mid-item, so images, tool calls and
+ * results stay together.
  */
 export async function runTurn(opts: {
   cfg: CustomSecret;
   system: string;
   history: Item[][];
   userText: string;
+  userImages?: ImageAttachment[];
   tools: ToolDef[];
   callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
   onUpdate: (u: acp.SessionUpdate) => void;
   signal: AbortSignal;
 }): Promise<{ stopReason: acp.StopReason; newItems: Item[] }> {
-  const oldTurnLengths = opts.history.map((t) => t.length);
+  const userItem: Item = {
+    kind: "user",
+    text: opts.userText,
+    ...(opts.userImages?.length && { userImages: opts.userImages.map(({ mimeType, data }) => ({ mimeType, data })) }),
+  };
+  const incomingImageBytes = turnImageBytes([userItem]);
+  const oldTurns = opts.history.map((t) => ({ length: t.length, imageBytes: turnImageBytes(t) }));
+  let imageBytes = oldTurns.reduce((n, turn) => n + turn.imageBytes, incomingImageBytes);
   let oldCount = opts.history.reduce((n, t) => n + t.length, 0);
-  const items: Item[] = [...opts.history.flat(), { kind: "user", text: opts.userText }];
+  const items: Item[] = [...opts.history.flat(), userItem];
   const dropOldestTurn = (): boolean => {
-    const len = oldTurnLengths.shift();
-    if (len === undefined) return false;
-    items.splice(0, len);
-    oldCount -= len;
+    const oldest = oldTurns.shift();
+    if (!oldest) return false;
+    items.splice(0, oldest.length);
+    oldCount -= oldest.length;
+    imageBytes -= oldest.imageBytes;
     return true;
   };
   for (let round = 0; ; round++) {
     const roundTools = round < MAX_TOOL_ROUNDS ? opts.tools : [];
     for (;;) {
-      const size = JSON.stringify(request(opts.cfg, opts.system, items, roundTools).body).length;
-      if (size <= CUSTOM_HISTORY_MAX_CHARS) break;
+      const size = JSON.stringify(request(opts.cfg, opts.system, withoutImageData(items), roundTools).body).length;
+      if (
+        size <= CUSTOM_HISTORY_MAX_CHARS &&
+        imageBytes <= CUSTOM_HISTORY_MAX_IMAGE_BYTES &&
+        oldTurns.length < CUSTOM_HISTORY_MAX_TURNS
+      )
+        break;
       if (dropOldestTurn()) continue;
+      if (imageBytes > CUSTOM_HISTORY_MAX_IMAGE_BYTES)
+        throw new Error("本轮图片超过自定义 API 的图片上下文预算 20 MiB；请减少图片或开启新会话");
       throw new Error(
         `本轮请求序列化后 ${size} 字符，超过自定义 API 的上下文预算 ${CUSTOM_HISTORY_MAX_CHARS} 字符；请缩短输入或开启新会话`,
       );
@@ -285,7 +361,19 @@ function request(cfg: CustomSecret, system: string, items: Item[], tools: ToolDe
   if (cfg.format === "anthropic") {
     const messages: unknown[] = [];
     for (const it of items) {
-      if (it.kind === "user") messages.push({ role: "user", content: it.text });
+      if (it.kind === "user")
+        messages.push({
+          role: "user",
+          content: it.userImages?.length
+            ? [
+                ...(it.text ? [{ type: "text", text: it.text }] : []),
+                ...it.userImages.map((image) => ({
+                  type: "image",
+                  source: { type: "base64", media_type: image.mimeType, data: image.data },
+                })),
+              ]
+            : it.text,
+        });
       else if (it.kind === "assistant")
         messages.push({
           role: "assistant",
@@ -321,7 +409,19 @@ function request(cfg: CustomSecret, system: string, items: Item[], tools: ToolDe
   if (cfg.format === "openai-responses") {
     const input: unknown[] = [];
     for (const it of items) {
-      if (it.kind === "user") input.push({ role: "user", content: it.text });
+      if (it.kind === "user")
+        input.push({
+          role: "user",
+          content: it.userImages?.length
+            ? [
+                ...(it.text ? [{ type: "input_text", text: it.text }] : []),
+                ...it.userImages.map((image) => ({
+                  type: "input_image",
+                  image_url: `data:${image.mimeType};base64,${image.data}`,
+                })),
+              ]
+            : it.text,
+        });
       else if (it.kind === "assistant") {
         if (it.text) input.push({ role: "assistant", content: it.text });
         for (const c of it.calls)
@@ -350,7 +450,19 @@ function request(cfg: CustomSecret, system: string, items: Item[], tools: ToolDe
   }
   const messages: unknown[] = system ? [{ role: "system", content: system }] : [];
   for (const it of items) {
-    if (it.kind === "user") messages.push({ role: "user", content: it.text });
+    if (it.kind === "user")
+      messages.push({
+        role: "user",
+        content: it.userImages?.length
+          ? [
+              ...(it.text ? [{ type: "text", text: it.text }] : []),
+              ...it.userImages.map((image) => ({
+                type: "image_url",
+                image_url: { url: `data:${image.mimeType};base64,${image.data}` },
+              })),
+            ]
+          : it.text,
+      });
     else if (it.kind === "assistant")
       messages.push({
         role: "assistant",

@@ -1,4 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
+import { attachmentError, type FileAttachment, type ImageAttachment } from "../shared/attachments";
 import { quotePrompt } from "../shared/messageQuote";
 import {
   applyUpdate,
@@ -9,6 +10,7 @@ import {
   timelineText,
 } from "../shared/timeline";
 import type { TerminalSnapshot } from "./acp";
+import { attachmentText, filePromptBlock } from "./attachments";
 import { CUSTOM_HARNESS } from "./custom";
 import { harnessSpec } from "./harness";
 import type { ElicitationAsk, HarnessHost, PermissionAsk, SessionView } from "./host";
@@ -49,11 +51,7 @@ export interface RoomState {
   tasks: RoomTask[];
 }
 
-export interface ImageAttachment {
-  mimeType: string;
-  /** base64, no data: prefix */
-  data: string;
-}
+export type { ImageAttachment } from "../shared/attachments";
 
 interface Task extends Omit<RoomTask, "status"> {
   status: RoomTask["status"] | "done" | "error" | "cancelled";
@@ -70,6 +68,7 @@ interface Task extends Omit<RoomTask, "status"> {
 interface Run {
   human: Message;
   images: ImageAttachment[];
+  files: FileAttachment[];
   everyone: boolean;
   triggered: Set<string>;
   handoffs: number;
@@ -126,13 +125,32 @@ export class Orchestrator implements ToolProvider {
     images: ImageAttachment[] = [],
     replyToId?: string | null,
     replyToPartIndex?: number,
+    files: FileAttachment[] = [],
   ): Message {
     if (this.closed) throw new ValidationError("服务正在关闭", 503);
     if (this.desktopUpdatePrepared) throw new ValidationError("正在安装桌面更新，请稍后再发送消息", 503);
     const room = this.store.getRoom(roomId);
     if (!room) throw new ValidationError("房间不存在", 404);
     const text = content.trim();
-    if (!text && images.length === 0) throw new ValidationError("消息不能为空");
+    if (!text && images.length === 0 && files.length === 0) throw new ValidationError("消息不能为空");
+    const invalidAttachments = attachmentError(images, files);
+    if (invalidAttachments) throw new ValidationError(invalidAttachments);
+    const members = room.agentIds.map((id) => this.store.getAgent(id)).filter((a): a is Agent => a !== null);
+    const everyone = room.kind === "group" && mentionsEveryone(text);
+    let initial =
+      room.kind === "dm"
+        ? room.agentIds.slice(0, 1)
+        : everyone
+          ? members.map((a) => a.id)
+          : parseMentions(text, members);
+    const coordinated = room.kind === "group" && !everyone && initial.length === 0;
+    if (coordinated) initial = [room.mainAgentId ?? members[0]?.id].filter((id): id is string => !!id);
+    for (const member of members.filter((member) => initial.includes(member.id))) {
+      if (member.harness === CUSTOM_HARNESS && files.some((file) => attachmentText(file) === null))
+        throw new ValidationError("自定义 API 仅支持 UTF-8 文本文件，请移除非文本附件或选择原生 Harness");
+      if (images.length && this.host.view?.(room.id, member.id)?.capabilities.image === false)
+        throw new ValidationError(`Agent ${member.name} 的 Harness 不支持图片，请移除图片或切换 Harness`);
+    }
     const id = crypto.randomUUID();
     let msg = this.store.insertMessage({
       id,
@@ -147,27 +165,24 @@ export class Orchestrator implements ToolProvider {
       replyToId,
       replyToPartIndex,
     });
-    if (images.length > 0)
+    if (images.length > 0 || files.length > 0)
       msg = this.store.updateReply(id, {
         content: text,
         status: "done",
-        timeline: { ...emptyTimeline(), parts: images.map((i) => ({ kind: "image" as const, ...i })) },
+        timeline: {
+          ...emptyTimeline(),
+          parts: [
+            ...images.map((i) => ({ kind: "image" as const, ...i })),
+            ...files.map((file) => ({ kind: "file" as const, ...file })),
+          ],
+        },
       });
     this.publish(roomId, { type: "message", message: msg });
     const rt = this.runtime(roomId);
-    const members = room.agentIds.map((id) => this.store.getAgent(id)).filter((a): a is Agent => a !== null);
-    const everyone = room.kind === "group" && mentionsEveryone(text);
-    let initial =
-      room.kind === "dm"
-        ? room.agentIds.slice(0, 1)
-        : everyone
-          ? members.map((a) => a.id)
-          : parseMentions(text, members);
-    const coordinated = room.kind === "group" && !everyone && initial.length === 0;
-    if (coordinated) initial = [room.mainAgentId ?? members[0]?.id].filter((id): id is string => !!id);
     const run: Run = {
       human: msg,
       images,
+      files,
       everyone,
       triggered: new Set(initial),
       handoffs: 0,
@@ -457,10 +472,20 @@ export class Orchestrator implements ToolProvider {
    * What the agent is told this turn: the human text in a DM; in a group, a relay (会话转述) of what
    * was said since it last spoke, newest kept when over RELAY_MAX_CHARS, plus the hand-off task if any.
    */
-  promptFor(room: Room, agent: Agent, human: Message, images: ImageAttachment[], from?: Handoff): acp.ContentBlock[] {
+  promptFor(
+    room: Room,
+    agent: Agent,
+    human: Message,
+    images: ImageAttachment[],
+    from?: Handoff,
+    files: FileAttachment[] = [],
+  ): acp.ContentBlock[] {
     const quoted = human.quote ? `${quotePrompt(human.quote)}\n\n` : "";
-    const imageBlocks: acp.ContentBlock[] = images.map((i) => ({ type: "image", mimeType: i.mimeType, data: i.data }));
-    if (room.kind === "dm") return [{ type: "text", text: quoted + human.content }, ...imageBlocks];
+    const attachmentBlocks: acp.ContentBlock[] = [
+      ...images.map((i) => ({ type: "image" as const, mimeType: i.mimeType, data: i.data })),
+      ...files.map((file, index) => filePromptBlock(file, room.id, human.id, index)),
+    ];
+    if (room.kind === "dm") return [{ type: "text", text: quoted + human.content }, ...attachmentBlocks];
     const history = this.store.recentMessages(room.id, GROUP_CONTEXT_MESSAGES, human.seq + 1);
     // Later independent messages cannot replace this task. Handoffs also see their own run's completed replies.
     if (from)
@@ -496,7 +521,7 @@ export class Orchestrator implements ToolProvider {
     let text = `${header}\n以下是有界首尾摘录，省略内容可用 read_context(messageId, offset) 读取；更早记录可用 read_context(beforeSeq) 分页查找。\n\n${kept.join("\n\n")}\n\n<tuantuan-task>\n${quoted}[${human.senderName}]: ${human.content}\n</tuantuan-task>`;
     if (from)
       text += `\n\n<tuantuan-handoff from="${from.agentName}">\n${from.task}\n</tuantuan-handoff>\n@${from.agentName} 用 handoff 把上面这个任务交给了你，请接手处理。`;
-    return [{ type: "text", text }, ...imageBlocks];
+    return [{ type: "text", text }, ...attachmentBlocks];
   }
 
   private async runAgentTurn(
@@ -506,13 +531,13 @@ export class Orchestrator implements ToolProvider {
     task: Task,
     rt: RoomRuntime,
   ): Promise<{ reply: Message; handoffs: Handoff[] }> {
-    const { human, images } = run;
+    const { human, images, files } = run;
     const signal = task.abort.signal;
     const hop = task.hop;
     // Removing the last worker can turn the room into a DM while its group request
     // still needs a final review. Keep that request's context until it settles.
     const promptRoom: Room = run.coordinatorId ? { ...room, kind: "group" } : room;
-    const blocks = this.promptFor(promptRoom, agent, human, images, task.from);
+    const blocks = this.promptFor(promptRoom, agent, human, images, task.from, files);
     // A review's parent is always the root for cancellation; reviewOf identifies its actual source batch.
     const reviewSource = task.reviewOf ? rt.tasks.get(task.reviewOf) : undefined;
     const receivedContext = task.reviewOf ? reviewSource?.context : task.from?.context;
