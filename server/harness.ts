@@ -159,6 +159,22 @@ export const HARNESSES: HarnessSpec[] = [
     identity: "first-prompt",
   },
   {
+    id: "deepseek",
+    login: "",
+    name: "DeepSeek Harness",
+    bin: "dsh",
+    args: ["--profile", "acp"],
+    versionArgs: ["--version"],
+    install: "团团补充的官方 npm 预发布包 @deepseek-ai/dsh@0.2.1-rc.2（需要 Node ≥ 22.19）",
+    registry: "deepseek-harness",
+    runtime: "node",
+    curated: true,
+    experimental: true,
+    auth: "设置 DEEPSEEK_API_KEY；也可沿用 ~/.dsh/.credentials.yaml（DSH_HOME 可改目录）。本机已保存的凭据优先于环境变量；握手不验证 Key 是否有效。",
+    docs: "https://github.com/deepseek-ai/deepseek-harness",
+    identity: "first-prompt",
+  },
+  {
     id: "mock",
     login: "",
     name: "Mock（测试）",
@@ -412,7 +428,7 @@ export async function installerStatuses(spec: HarnessSpec, env: Record<string, s
     out.push({
       id: "registry",
       label: "团团安装",
-      command: `ACP Registry：${reg.name} ${reg.version}（${what}）`,
+      command: `${reg.origin === "tuantuan" ? "团团补充目录" : "ACP Registry"}：${reg.name} ${reg.version}（${what}）`,
       available: registryInstallable(reg),
       reason: registryInstallable(reg) ? null : `没有适合 ${platformKey()} 的安装包`,
     });

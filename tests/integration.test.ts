@@ -461,6 +461,7 @@ describe("ACP harness integration (mock ACP agent)", () => {
       "opencode",
       "pi",
       "minimax",
+      "deepseek",
       "mock",
       "mock-cli",
     ]);

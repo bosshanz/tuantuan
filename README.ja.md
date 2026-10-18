@@ -6,7 +6,7 @@
 
 **複数のエージェントがローカルで協力するためのワークスペース。**
 
-Claude Code、Codex、OpenCode、Pi、Grok Build、MiniMax Code などのコーディングエージェントを、プロジェクトごとの会話で利用できます。Tuantuan は [Agent Client Protocol（ACP）](https://agentclientprotocol.com) を通じて、各エージェントの実行環境（ハーネス）に接続します。
+Claude Code、Codex、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code などのコーディングエージェントを、プロジェクトごとの会話で利用できます。Tuantuan は [Agent Client Protocol（ACP）](https://agentclientprotocol.com) を通じて、各エージェントの実行環境（ハーネス）に接続します。
 
 macOS、Windows、Linux 向けの Electron デスクトップアプリ、またはブラウザーとローカルサーバーの組み合わせで動作します。モデルの利用には、ご自身のハーネス用アカウントや API プロバイダーを使います。Tuantuan 自体にモデルサービスは含まれていません。
 
@@ -16,7 +16,7 @@ macOS、Windows、Linux 向けの Electron デスクトップアプリ、また�
 
 ## 主な機能
 
-- **ハーネスを選択**：ローカルにインストール済みのハーネスを使うか、ACP Registry からエージェントをインストールできます。ハーネスが提供するログイン方法に沿って設定を進められます。
+- **ハーネスを選択**：ローカルにインストール済みのハーネスを使うか、ACP Registry からエージェントをインストールできます。Tuantuan が追加した公式 DeepSeek CLI のプレリリース版も、必要に応じてインストールできます。[インストールと認証の説明（簡体字中国語）](docs/harness.md)をご覧ください。ハーネスが提供するログイン方法に沿って設定を進められます。
 - **チームで作業**：1 つの会話に 1 人または複数のエージェントを参加させられます。`@` でメンバーを指定するほか、リードエージェントに分担、進捗確認、結果の取りまとめを任せられます。メンバーは同じプロジェクトの作業ディレクトリを共有します。
 - **構造化された引き継ぎ**：タスクの説明、目標、決定事項、残作業を引き継ぎます。長い元メッセージや結果はページ単位で読み返せます。各エージェントは独自のハーネスセッションを使い、引き継ぎ元の非公開セッション履歴は複製しません。
 - **ハーネス本来の機能を活用**：Claude Code、OpenCode、Pi、Codex のプロンプトとコンテキスト管理をそのまま使います。モデル、権限、推論、スラッシュコマンドの設定は、各ハーネスが提供するものを表示します。利用できる機能はハーネスによって異なります。
@@ -27,15 +27,15 @@ macOS、Windows、Linux 向けの Electron デスクトップアプリ、また�
 
 詳しくは[機能一覧（簡体字中国語）](docs/features.md)をご覧ください。
 
-## v0.1.1 をダウンロード
+## v0.2.2 をダウンロード
 
-[GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.1) からデスクトップアプリをダウンロードできます。
+[GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.2) からデスクトップアプリをダウンロードできます。
 
 - **macOS**：Apple シリコン（arm64）または Intel（x64）向けの `.dmg` と `.zip`。
 - **Windows**：x64 向けの `.exe` インストーラー。
 - **Linux**：x64 向けの `.AppImage`。
 
-デスクトップアプリには実行環境が含まれているため、Bun のインストールは不要です。v0.1.1 の macOS 版はアドホック署名を使用し、Apple の公証を受けていません。Windows 版にはコード署名がありません。詳しくは[インストールと署名の説明（簡体字中国語）](docs/install.md)をご覧ください。
+デスクトップアプリには実行環境が含まれているため、Bun のインストールは不要です。v0.2.2 の macOS 版はアドホック署名を使用し、Apple の公証を受けていません。Windows 版にはコード署名がありません。詳しくは[インストールと署名の説明（簡体字中国語）](docs/install.md)をご覧ください。
 
 ### Homebrew でインストール（macOS）
 

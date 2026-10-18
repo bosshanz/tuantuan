@@ -6,7 +6,7 @@
 
 **A local workspace for multi-agent collaboration.**
 
-Bring Claude Code, Codex, OpenCode, Pi, Grok Build, MiniMax Code, and other coding agents into project-based conversations. Tuantuan connects their coding runtimes (harnesses) through the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
+Bring Claude Code, Codex, DeepSeek, OpenCode, Pi, Grok Build, MiniMax Code, and other coding agents into project-based conversations. Tuantuan connects their coding runtimes (harnesses) through the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
 
 Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser with the local server. Bring your own harness account or API provider; Tuantuan does not include a model service.
 
@@ -16,7 +16,7 @@ Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser 
 
 ## What you can do
 
-- **Choose your harness.** Use an existing local installation or install an agent from the ACP Registry. Setup guides you through the sign-in options provided by the harness.
+- **Choose your harness.** Use an existing local installation or install an agent from the ACP Registry. Tuantuan also offers the official DeepSeek CLI prerelease as an on-demand install; see [setup and authentication](docs/harness.md). Setup guides you through the sign-in options provided by the harness.
 - **Work with a team.** Use one agent or several in a conversation. Mention members with `@`, or let a lead agent delegate, follow up, and bring the results together. Agents share the project's working directory.
 - **Hand off useful context.** Structured handoffs carry the task, goal, decisions, and pending work. Agents can read longer source messages and results in pages. Each agent keeps its own harness session; a handoff does not clone another agent's private session history.
 - **Keep native coding workflows.** Claude Code, OpenCode, Pi, and Codex use their native prompts and context management. Tuantuan exposes the model, permission, reasoning, and slash-command controls reported by each harness; available capabilities vary.
@@ -28,15 +28,15 @@ Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser 
 
 See the [full feature list (Simplified Chinese)](docs/features.md).
 
-## Download v0.2.1
+## Download v0.2.2
 
-Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1):
+Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.2):
 
 - **macOS**: Apple silicon (arm64) or Intel (x64), `.dmg` or `.zip`.
 - **Windows**: x64 `.exe` installer.
 - **Linux**: x64 `.AppImage`.
 
-The desktop app includes its runtime; you do not need to install Bun. The v0.2.1 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
+The desktop app includes its runtime; you do not need to install Bun. The v0.2.2 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
 
 ### Install with Homebrew (macOS)
 

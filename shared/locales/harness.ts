@@ -1,6 +1,30 @@
 import type { MessageCatalog } from "./types";
 
 export const harnessMessages = {
+  团团补充目录: { "zh-TW": "團團補充目錄", en: "Tuantuan additions", ja: "Tuantuan 追加カタログ" },
+  及团团补充目录: { "zh-TW": "及團團補充目錄", en: "and Tuantuan additions", ja: "および Tuantuan 追加カタログ" },
+  "团团补充的官方 npm 预发布包 @deepseek-ai/dsh@0.2.1-rc.2（需要 Node ≥ 22.19）": {
+    "zh-TW": "團團補充的官方 npm 預發佈套件 @deepseek-ai/dsh@0.2.1-rc.2（需要 Node ≥ 22.19）",
+    en: "Official npm prerelease @deepseek-ai/dsh@0.2.1-rc.2, added by Tuantuan (requires Node ≥ 22.19)",
+    ja: "Tuantuan が追加した公式 npm プレリリース @deepseek-ai/dsh@0.2.1-rc.2（Node ≥ 22.19 が必要）",
+  },
+  "设置 DEEPSEEK_API_KEY；也可沿用 ~/.dsh/.credentials.yaml（DSH_HOME 可改目录）。本机已保存的凭据优先于环境变量；握手不验证 Key 是否有效。":
+    {
+      "zh-TW":
+        "設定 DEEPSEEK_API_KEY；也可沿用 ~/.dsh/.credentials.yaml（DSH_HOME 可改目錄）。本機已儲存的憑證優先於環境變數；交握不驗證 Key 是否有效。",
+      en: "Set DEEPSEEK_API_KEY or keep using ~/.dsh/.credentials.yaml (DSH_HOME changes the directory). Saved native credentials take priority over environment variables. The handshake does not validate the key.",
+      ja: "DEEPSEEK_API_KEY を設定するか、既存の ~/.dsh/.credentials.yaml を使用します（DSH_HOME で場所を変更可能）。保存済みの認証情報は環境変数より優先されます。ハンドシェイクでは Key の有効性を確認しません。",
+    },
+  "DeepSeek 官方 Harness，原生支持 ACP。团团补充官方 npm 包，尚未收录于上游 ACP Registry。": {
+    "zh-TW": "DeepSeek 官方 Harness，原生支援 ACP。團團補充官方 npm 套件，尚未收錄於上游 ACP Registry。",
+    en: "DeepSeek's official Harness with native ACP. Tuantuan adds the official npm package; it is not listed in the upstream ACP Registry.",
+    ja: "ACP にネイティブ対応する DeepSeek 公式 Harness。公式 npm パッケージを Tuantuan が追加しています。上流の ACP Registry には未登録です。",
+  },
+  "DeepSeek 官方预发布版，团团补充安装入口；使用原生 ACP，不是社区桥接。": {
+    "zh-TW": "DeepSeek 官方預發佈版，由團團補充安裝入口；使用原生 ACP，並非社群橋接。",
+    en: "Official DeepSeek prerelease with a Tuantuan-added installer. Uses native ACP, without a community bridge.",
+    ja: "DeepSeek 公式プレリリースのインストール入口を Tuantuan が追加。コミュニティ製ブリッジではなく、ネイティブ ACP を使用します。",
+  },
   "删除 Agent「{name}」？\n它会退出所有会话；已有的聊天记录会保留。此操作不可撤销。": {
     "zh-TW": "刪除 Agent「{name}」？\n它會退出所有對話；現有的聊天記錄會保留。此操作無法復原。",
     en: "Delete Agent “{name}”?\nIt will leave all conversations. Existing messages will be kept. This cannot be undone.",

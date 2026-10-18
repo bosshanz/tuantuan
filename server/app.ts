@@ -312,6 +312,7 @@ export function createApp(deps: AppDeps) {
           installedVersion: m?.version ?? null,
           updateAvailable: !!(m && m.version !== a.version),
           experimental: "experimental" in a ? !!a.experimental : false,
+          origin: a.origin ?? "acp",
           note: "note" in a ? (a.note as string) : null,
         };
       }),
@@ -327,7 +328,7 @@ export function createApp(deps: AppDeps) {
     return installer.startTask(
       harnessId,
       "registry",
-      `安装 ${a.name} ${a.version}（ACP Registry）`,
+      `安装 ${a.name} ${a.version}（${a.origin === "tuantuan" ? "团团补充目录" : "ACP Registry"}）`,
       async (log, signal) => {
         const env = await loginShellEnv();
         await installManaged(a, { log, signal, env, runtime: spec?.runtime });
@@ -756,6 +757,18 @@ export function createApp(deps: AppDeps) {
               : null,
         };
       });
+      // DSH's ACP authentication is a no-op. Offer its documented env fallback without claiming
+      // the key is required: its native credential file can already provide a higher-priority key.
+      if (id === "deepseek")
+        authMethods.push({
+          id: "deepseek-api-key",
+          name: "DeepSeek API Key",
+          description: spec.auth,
+          type: "env",
+          vars: ["DEEPSEEK_API_KEY"],
+          missing: null,
+          command: null,
+        });
       // A method whose description says "run `glm-acp-agent --setup`" gets a terminal login too,
       // with the real (managed, absolute) command instead of a name that is not on PATH.
       const bins = new Set(
@@ -898,7 +911,7 @@ export function createApp(deps: AppDeps) {
         }
         modes = created.modes ?? null;
         if (current()) harnessOptions.set(cacheKey, { at: Date.now(), configOptions, modes, error: null });
-        loggedIn = true;
+        loggedIn = id === "deepseek" ? null : true;
       } catch (e) {
         const error = e as { message?: string; code?: number } | null;
         const msg = error?.message ?? String(e);

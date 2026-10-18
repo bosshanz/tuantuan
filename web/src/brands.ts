@@ -88,6 +88,7 @@ export function harnessBrand(harness: string): Brand {
   if (harness === "grok") return "xai";
   if (harness === "opencode") return "opencode";
   if (harness === "minimax") return "minimax";
+  if (harness === "deepseek") return "deepseek";
   return "generic";
 }
 

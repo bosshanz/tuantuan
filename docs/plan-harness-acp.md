@@ -510,8 +510,8 @@ Homebrew 管理的安装使用 brew 升级；ad-hoc macOS 保留检查与手动�
 用户确认先发布带更新能力的版本，再新增 **DeepSeek Harness**，通过下一版本安装到本机验证；随后明确暂缓 Apple Developer，以 **Homebrew** 为当前发布和升级渠道。按两个连续稳定版本推进，不能把两个功能合在首次安装中代替跨版本升级证据，也不能用源码热更新或修改本地版本号冒充升级。Homebrew 升级结果不等同于 macOS 应用内 OTA 已验证。
 
 - [x] 发布基线版本 [v0.2.1](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1)，完成安装包、更新元数据和双架构 Homebrew cask 校验；v0.2.0 首次升级需要手动安装或 brew。
-- [ ] 验证前先将本机 Homebrew 安装升级到基线版本，确认版本、草稿与会话恢复；本次发布不自动替换用户本机应用。
-- [ ] 在后续版本接入官方 DeepSeek Harness，优先使用其原生 `dsh acp` / `dsh --profile acp`。现有 DeepSeek 服务商接入继续保留；新增 Harness 按实际握手暴露能力，验证安装发现、配置、会话、消息、工具、权限、取消及恢复，再同步 Harness/产品/架构文档和发布说明。
+- [x] 用户随后授权本机升级；已通过 Homebrew 安装 0.2.1 基线，应用版本与 Caskroom 均为 0.2.1，会话数据逐项比对不变。旧 0.2.0 没有跨端口退出快照，未声称这一步验证了草稿恢复；草稿等工作区恢复在 0.2.1 → 后续版本验证。
+- [x] 在后续版本接入官方 DeepSeek Harness，优先使用其原生 `dsh acp` / `dsh --profile acp`。现有 DeepSeek 服务商接入继续保留；新增 Harness 按实际握手暴露能力，验证安装发现、配置、会话、消息、工具、权限、取消及恢复，再同步 Harness/产品/架构文档和发布说明。
 - [ ] 发布 DeepSeek 版本及 Homebrew 更新；在基线版本中检查到新版，等待所有 Agent 任务结束并正常退出后，显式执行 `brew update && brew upgrade --cask tuantuan`，再启动验证。Homebrew 不受应用内安装锁控制，不在任务运行时替换应用。
 - [ ] 在本机完成真实 Homebrew 跨版本安装，记录更新前后版本、Caskroom 版本、实际下载包及校验和、重启与数据恢复结果；确认 DeepSeek Harness 入口可用，并保留失败恢复证据。
 
@@ -534,3 +534,20 @@ v0.2.1 发布采用三平台构建与产物校验后公开，再校验并手动�
 发布结果：PR [#20](https://github.com/bosshanz/tuantuan/pull/20) 已合并，`v0.2.1` 指向 `4625a2d15425b8c779eda373c249de8f5055c17c`。[PR CI](https://github.com/bosshanz/tuantuan/actions/runs/39128401947) 与 [Desktop 三平台构建、Linux 冒烟及产物校验](https://github.com/bosshanz/tuantuan/actions/runs/39128638988) 通过。2026-10-18 公开 [v0.2.1 Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1) 为 latest stable，共 15 个附件（6 个安装文件、5 个外置 blockmap、3 份更新清单和 SHA256SUMS）；每个远端文件的大小、SHA-256 与本地一致，公开下载的校验和文件也一致。两个 macOS 包均为 0.2.1、架构与 ad-hoc 签名验证通过，ZIP 完整性和 DMG 校验通过；没有启用 Developer ID 或 Apple 公证。
 
 Homebrew cask 已校验公开 Release 的资产摘要及本地安装包，并推送至 [tap main 的 `786bd64`](https://github.com/bosshanz/homebrew-tap/commit/786bd64)，版本与 arm64 / x64 哈希同步完成。本机 tap 快进更新后 `brew info --cask bosshanz/tap/tuantuan` 显示可用版本 0.2.1；未执行 brew 安装或升级，现有 Caskroom 安装记录仍为 0.1.1，后续建立基线时应同时核对应用实际版本与该记录。此轮由本机显式发布和手动推送 tap，Actions 的 publish/homebrew job 按默认配置跳过，不声称 HOMEBREW_TAP_TOKEN 自动同步已验证。下一步仍是单独接入 DeepSeek Harness，再通过 Homebrew 做实际跨版本升级验证。
+
+## 2026-10-18 本机 Homebrew 0.2.1 基线与 DeepSeek 接入
+
+用户授权先把本机升到 0.2.1，再接入 DeepSeek Harness 并用下一稳定版验证 Homebrew 升级。实际升级前，所有房间均无运行、排队、权限或提问任务；正常退出应用，并备份 SQLite 与应用数据。`brew upgrade --cask bosshanz/tap/tuantuan` 将 Caskroom 的旧 0.1.1 记录更新为 0.2.1，替换原实际版本 0.2.0 的应用。实际下载 arm64 DMG 的 SHA-256 为 `2100db2db5f65162b3489d40a0f03183830bd0e7897a8709fc86c37c39ffcece`，与公开发布及 tap 一致。
+
+重新启动后，应用「关于与更新」、Info.plist 和 Homebrew 安装记录均显示 0.2.1，界面正确识别 Homebrew 渠道。原有 Agent、房间、消息、原生会话映射与服务商记录逐项一致。旧 0.2.0 未保存跨端口路由，启动后显示会话列表；本步骤只建立真实发行包基线，不将其记为 0.2.1 的退出恢复验证。后续通过 0.2.1 → 0.2.2 的实际 Homebrew 安装验证工作区恢复及新增 Harness 入口。
+
+
+DeepSeek 接入固定官方 npm 预发布包 `@deepseek-ai/dsh@0.2.1-rc.2`，使用原生 `dsh --profile acp`，按需托管安装；本机自装版本继续优先。该包的原生扩展要求 Node，实际使用 Node 24.14.1 与托管回退版本 Node 22.20.0 验证，未用 Bun 运行。官方 ACP 的认证与新建会话不验证凭据，因此即便环境中有 Key 也保留「登录状态未知」，不误报已登录；原生凭据优先顺序与不支持历史回放的边界已写入 Harness 文档。既有 DeepSeek 服务商保持独立。
+
+隔离环境已通过团团实际安装路由完成 npm 下载、暂存目录提交和真实 CLI 握手；新建 Agent 后浏览器实际选择 DeepSeek 模型并显示原生推理等级。真实 CLI 回归在 Node 24 与 Node 22 各通过 60 个断言，覆盖文本/思考、模型与推理请求字段、读写工具、允许与拒绝权限、取消后继续、跨进程会话恢复、stdio MCP 和退出清理。模型响应来自本机隔离 Messages SSE fixture，没有调用付费服务；HTTP MCP 只核对能力声明，不能据此声称真实模型效果或所有平台 CLI 已验证。
+
+独立只读审查推动修正引导页认证/会话错误仍误报就绪的问题，未知状态可继续但显式错误保持重试入口，复查未发现剩余必修项。完整浏览器回归发现减少动态模式全局规则生成 0.01ms 的背景/圆角过渡，属于首帧采样竞态；消息正文在该模式显式禁用过渡，保留静态来源高亮，原测试断言未削弱，正常动效不受影响。
+
+最终完整 `bun run check` 为 **768 pass / 40 skip / 0 fail**，11,745 断言，类型检查与 lint 通过。生产构建及完整 Chrome `bun run e2e` 通过，覆盖引导、安装、权限/提问、阶段气泡、引用与返回、补全、并行任务与取消、终端、富媒体、服务商及 Vite 代理。发布与本机 0.2.1 → 0.2.2 升级结果待执行后补记。
+
+浏览器回归另复现既有补全光标竞争：命令/Skill 补全延迟到下一帧恢复光标，会覆盖刚做的全选，使下一次替换输入追加到旧内容。改为在同一事件内提交受控值并恢复光标；回归在补全事件后、下一帧前选择全文，确认新选择不被覆盖，原中间文本补全断言保留。

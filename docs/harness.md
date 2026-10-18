@@ -4,12 +4,13 @@
 
 ## 安装和登录 Harness
 
-团团优先用你自己装的版本（登录 shell 的 PATH，或在「Harness」页填的绝对路径），这样会沿用你的版本和配置；找不到时用团团内置的（源码运行时）或团团从 ACP Registry 装的。「Harness」页会标出当前用的是「本机」「自定义路径」「内置」还是「团团安装」。桌面包默认不内置 Claude Code / Codex，下表「内置」一列指源码运行。
+团团优先用你自己装的版本（登录 shell 的 PATH，或在「Harness」页填的绝对路径），这样会沿用你的版本和配置；找不到时用团团内置的（源码运行时）或团团管理的固定版本。「Harness」页会标出当前用的是「本机」「自定义路径」「内置」还是「团团安装」。桌面包默认不内置 Claude Code / Codex，也不捆绑 DeepSeek，下表「内置」一列指源码运行。
 
 | Harness | 团团怎么提供 | 还需要什么 | 登录 |
 | --- | --- | --- | --- |
 | Claude Code | **内置**：`@agentclientprotocol/claude-agent-acp` 是团团的依赖，用团团自己的 bun 启动；它依赖的 Claude Agent SDK 按平台自带 Claude Code 可执行文件（macOS arm64/x64、Linux x64/arm64，含 musl） | 不需要另装 Claude Code 或 Node | 本机有 `claude` 就运行它完成 `/login`；没有时「Harness」页给出内置 Claude Code 的路径来登录；或设置 `ANTHROPIC_API_KEY`（CC Switch 写入的 `~/.claude/settings.json` 照常生效） |
 | Codex | **内置**：`@agentclientprotocol/codex-acp`，它依赖的 `@openai/codex` 按平台自带 codex 可执行文件（macOS arm64/x64、Linux x64/arm64） | 不需要另装 Codex 或 Node | ACP 登录（ChatGPT）；或 `codex login`（没有全局 `codex` 时页面给出内置命令）；或 `OPENAI_API_KEY`。`~/.codex/config.toml` 照常生效 |
+| DeepSeek | **按需安装**：团团补充的官方 npm 包 `@deepseek-ai/dsh@0.2.1-rc.2`，使用原生 `dsh --profile acp`，当前标为实验性 | Node ≥ 22.19；符合版本的本机 Node 优先，否则团团下载托管版本；本机 `dsh` 仍优先 | Harness 页填写 `DEEPSEEK_API_KEY`，或沿用本机 DeepSeek 凭据；握手不验证 Key，详见下节 |
 | Grok Build | **一键安装**：官方脚本 `curl -fsSL https://x.ai/cli/install.sh \| bash`（装到 `~/.grok/bin`，不需要 sudo） | curl、bash | `grok login`，或 `XAI_API_KEY` |
 | OpenCode | **一键安装**：官方脚本（`~/.opencode/bin`）、`bun add -g opencode-ai`（`~/.bun/bin`）、Homebrew，或 npm（仅当全局目录可写） | 对应工具 | `opencode auth login`（自带免费模型时可不登录） |
 
@@ -17,11 +18,23 @@
 
 一键安装只在你点按钮后运行官方安装命令：后台执行，日志实时显示，可取消，失败时显示最后一行错误，完成后自动重新检测。取消或超时会回收安装命令及其子进程组。不会用 sudo；某种方式在这台机器上不可用（没有 curl / brew，npm 全局目录需要 sudo）时按钮置灰并说明原因。都不可用时显示手动安装命令。
 
+### DeepSeek 官方 Harness（预发布）
+
+常用列表里的 DeepSeek 连接官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.2)。本次接入核实时，上游 ACP Registry 尚未收录它，因此团团补充了固定版本条目；「实验性」标记对应官方预发布状态。安装进入团团自己的目录，不装全局、不修改本机 `dsh`；桌面包按需下载。该版本需要 Node ≥ 22.19，优先使用符合版本的本机 Node，没有合适版本时由团团下载托管 Node，不用 Bun 运行。
+
+可在 Harness 页的 Key 输入框保存 `DEEPSEEK_API_KEY`，也可沿用原生凭据。`DSH_HOME` 默认是 `~/.dsh`；此版本的原生查找顺序是 `$DSH_HOME/.credentials.yaml` → `DEEPSEEK_API_KEY` → 项目 `.env` → `$DSH_HOME/.env`。因此，本机已保存的凭据可能优先于团团注入的 Key；需要更换时应按 [DeepSeek 凭据规则](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/packages/credentials/credentials-local/README.md)管理，团团不改写这些文件。团团保存的 Key 沿用下方的服务端保存与打码契约；Agent 自己的环境变量优先于团团保存的环境变量。
+
+当前 DeepSeek ACP 不声明登录方法，`authenticate` 不执行凭据校验；初始化、建会话和读取模型选项都可能在无效 Key 下成功。团团因此在握手和建会话成功时将登录状态保留为「未知」，也不因没有环境变量 Key 阻止使用本机凭据。可识别的真实认证失败仍显示未登录及对应错误；重新握手不能证明 Key 有效。
+
+模型、推理等级、MCP、权限、取消与会话恢复沿用实际 [ACP 能力](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/packages/acp/acp/README.md)。固定版本提供会话 list / resume，不支持 `session/load` 历史回放或 fork；模型与推理以响应选项为准，图片以所选模型的实际能力为准。团团身份通过新会话首条普通消息传入。安装版本取自实际 npm 包 / CLI，ACP `agentInfo.version` 中的 `0.0.1` 不能代表 CLI 安装版本。
+
+DeepSeek Harness 与「服务商」页的 DeepSeek 是独立入口：后者仍可供 Claude Code、OpenCode、Pi 或自定义 API 等兼容 Harness 使用，不会因安装 DeepSeek CLI 改变原绑定。
+
 ### ACP Registry 与「更多 Agent」
 
 团团直接读取官方 [ACP Registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)：启动时用本地缓存（没有缓存时用随包的快照，离线也能看），后台每 6 小时更新一次，「刷新」按钮立即更新；数据先过 schema 校验，坏条目跳过，更新失败保留旧数据并显示原因。图标从 Registry 下载后缓存在本地。
 
-- 常用列表：Claude Code、Codex、Grok Build、OpenCode、Pi、MiniMax Code。「更多 Agent」列出 Registry 里所有 Agent（图标、名称、简介、版本、协议、平台），可搜索。
+- 常用列表：Claude Code、Codex、DeepSeek、Grok Build、OpenCode、Pi、MiniMax Code。「更多 Agent」列出 Registry 与团团补充的条目（图标、名称、简介、版本、协议、平台），可搜索；补充来源会单独说明。
 - 一键安装只在点按钮后执行，装到团团自己的目录（`<数据目录>/harnesses/agents/<id>/<版本>`，可用 `TUANTUAN_HARNESS_DIR` 改），固定版本，不用 sudo，不装全局：npx 包用团团自带的 Bun 安装运行；需要 Node ≥ 22 的（如 MiniMax Code）自动下载团团专用的 Node 22（校验 SHASUMS256）；uvx 包用你的 uv，没有就下载一份；二进制包按平台下载，带 sha256 时校验。
 - Registry 的 Agent id、版本必须是安全的单个目录段；拒绝路径穿越和保留名称。二进制 / npx 安装先写入独立随机暂存目录，成功后更新版本目录与 manifest，失败或取消时清理暂存；uvx 因 venv 固定路径仍直接写目标版本目录，失败时清理该目录。
 - Registry 版本变了显示「更新到 x」；可卸载团团装的版本。你自己装的版本始终优先（`TUANTUAN_PREFER_MANAGED=1` 反过来）。
@@ -42,7 +55,7 @@ ACP 适配器与底层 CLI 可能是不同版本：Claude Code 默认使用所�
 
 Registry 中的登录选项来自各 Harness 自己的认证方式。第三方服务商可在 Claude Code、OpenCode、Pi、Codex 和自定义 API 的 Agent 设置里选择，具体地址、格式和模型要求见[服务商](providers.md)；不能把一个 Harness 的登录选项当成任意服务商都兼容。
 
-> Claude Code 的适配器没有声明登录方式，而且未登录时也能建会话，所以「已登录」只代表握手和建会话成功；真正发消息时没登录会提示去终端运行 `claude` 登录。
+> Claude Code 的适配器没有声明登录方式，而且未登录时也能建会话，所以「已登录」只代表握手和建会话成功；真正发消息时没登录会提示去终端运行 `claude` 登录。DeepSeek 成功握手后则保留「未知」，其凭据有效性不能通过握手判断。
 
 ## 原生提示词与团团身份
 
