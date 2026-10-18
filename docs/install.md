@@ -2,18 +2,18 @@
 
 下载桌面安装包，或从源码运行（浏览器 + 本机服务）和构建桌面版。
 
-## 下载桌面版 v0.1.1
+## 下载桌面版 v0.2.0
 
-前往 [GitHub Releases v0.1.1](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.1)，按操作系统和芯片选择安装包：
+前往 [GitHub Releases v0.2.0](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.0)，按操作系统和芯片选择安装包：
 
 | 平台 | 安装包 |
 | --- | --- |
-| macOS · Apple 芯片（arm64） | `Tuantuan-0.1.1-mac-arm64.dmg` |
-| macOS · Intel（x64） | `Tuantuan-0.1.1-mac-x64.dmg` |
-| Windows · x64 | `Tuantuan-0.1.1-win-x64.exe` |
-| Linux · x64 | `Tuantuan-0.1.1-linux-x64.AppImage` |
+| macOS · Apple 芯片（arm64） | `Tuantuan-0.2.0-mac-arm64.dmg` |
+| macOS · Intel（x64） | `Tuantuan-0.2.0-mac-x64.dmg` |
+| Windows · x64 | `Tuantuan-0.2.0-win-x64.exe` |
+| Linux · x64 | `Tuantuan-0.2.0-linux-x64.AppImage` |
 
-macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.1.1 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。自动更新默认关闭，后续版本请从 Release 页面下载。
+macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.2.0 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。自动更新默认关闭，后续版本请从 Release 页面下载。
 
 - **macOS（Homebrew，推荐）**：`brew install --cask bosshanz/tap/tuantuan`。[这个 tap](https://github.com/bosshanz/homebrew-tap) 安装后会自动清除隔离标记，打开时不会被 Gatekeeper 拦截，升级用 `brew upgrade --cask tuantuan`。
 - **macOS**：打开 `.dmg`，把 **tuantuan.app** 拖进「应用程序」后启动（用 `.zip` 时在访达里双击解压，再移到「应用程序」）。不要直接在磁盘映像里运行。因为没有 Developer ID 和公证，第一次打开会被拦截：
@@ -26,8 +26,8 @@ macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需
 - **Linux**：给 `.AppImage` 添加可执行权限后运行：
 
   ```bash
-  chmod +x Tuantuan-0.1.1-linux-x64.AppImage
-  ./Tuantuan-0.1.1-linux-x64.AppImage
+  chmod +x Tuantuan-0.2.0-linux-x64.AppImage
+  ./Tuantuan-0.2.0-linux-x64.AppImage
   ```
 
 ## 从源码运行
@@ -56,7 +56,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-可直接使用 [v0.1.1 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.1)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+可直接使用 [v0.2.0 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.0)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](screenshots/desktop-linux.png)
 
@@ -88,7 +88,7 @@ macOS 本机构建：在 Mac 上执行上面的依赖安装和 `desktop:build` �
 2. 更新 tap 仓库的 `Casks/tuantuan.rb`：将 `version` 改为本次版本，并从该 Release 的 `SHA256SUMS.txt` 同步两个架构的 `sha256`；核对下载 URL 与实际标签、文件名一致。
 3. 提交并合并 tap 更新，确认 `brew info --cask bosshanz/tap/tuantuan` 显示新版本，按对应架构验证下载与安装，确保现有用户能通过 `brew upgrade --cask tuantuan` 升级。
 
-正式安装包可用后再更新 cask，避免 Homebrew 指向尚未发布的文件。本轮仅登记 0.2.0 发布步骤，不提前更改当前稳定版安装入口。
+正式安装包可用后再更新 cask，避免 Homebrew 指向尚未发布的文件。安装包发布并验证后，同步更新 Homebrew tap。
 
 ---
 
