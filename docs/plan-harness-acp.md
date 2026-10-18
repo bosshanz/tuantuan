@@ -505,15 +505,15 @@ Homebrew 管理的安装使用 brew 升级；ad-hoc macOS 保留检查与手动�
 
 最终完整 Chrome `bun run e2e` 通过，覆盖启动引导、Harness 安装、提问/权限、阶段气泡、独立引用与返回、历史分页、流式阅读、终端、并行调度和服务商界面。既有回归按新行为更新：切换会话保留提问与阅读位置，需要初始末页的用例先显式回到最新；精简视图分别核对阶段气泡内容和外层状态的对齐。原工作区的两份 lockfile 改动保持不动，功能位于隔离分支 `codex/desktop-updates`。用户随后授权提交、推送并开 PR；安装文档补充 Developer ID 证书导出、公证、准确的 Actions Secret 名称与 tap token 最小权限步骤。签名凭据只在对应平台的打包步骤注入，防止 Windows 缺少独立证书时回退读取 macOS 证书。
 
-## 2026-10-18 用 DeepSeek Harness 验证 Homebrew 跨版本升级（待发布后执行）
+## 2026-10-18 用 DeepSeek Harness 验证 Homebrew 跨版本升级
 
 用户确认先发布带更新能力的版本，再新增 **DeepSeek Harness**，通过下一版本安装到本机验证；随后明确暂缓 Apple Developer，以 **Homebrew** 为当前发布和升级渠道。按两个连续稳定版本推进，不能把两个功能合在首次安装中代替跨版本升级证据，也不能用源码热更新或修改本地版本号冒充升级。Homebrew 升级结果不等同于 macOS 应用内 OTA 已验证。
 
 - [x] 发布基线版本 [v0.2.1](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1)，完成安装包、更新元数据和双架构 Homebrew cask 校验；v0.2.0 首次升级需要手动安装或 brew。
 - [x] 用户随后授权本机升级；已通过 Homebrew 安装 0.2.1 基线，应用版本与 Caskroom 均为 0.2.1，会话数据逐项比对不变。旧 0.2.0 没有跨端口退出快照，未声称这一步验证了草稿恢复；草稿等工作区恢复在 0.2.1 → 后续版本验证。
 - [x] 在后续版本接入官方 DeepSeek Harness，优先使用其原生 `dsh acp` / `dsh --profile acp`。现有 DeepSeek 服务商接入继续保留；新增 Harness 按实际握手暴露能力，验证安装发现、配置、会话、消息、工具、权限、取消及恢复，再同步 Harness/产品/架构文档和发布说明。
-- [ ] 发布 DeepSeek 版本及 Homebrew 更新；在基线版本中检查到新版，等待所有 Agent 任务结束并正常退出后，显式执行 `brew update && brew upgrade --cask tuantuan`，再启动验证。Homebrew 不受应用内安装锁控制，不在任务运行时替换应用。
-- [ ] 在本机完成真实 Homebrew 跨版本安装，记录更新前后版本、Caskroom 版本、实际下载包及校验和、重启与数据恢复结果；确认 DeepSeek Harness 入口可用，并保留失败恢复证据。
+- [x] 发布 DeepSeek 版本 v0.2.2 并同步 Homebrew；0.2.1 检查到新版后，确认所有 Agent 已空闲并正常退出，快进本机 tap 后显式执行 `brew upgrade --cask bosshanz/tap/tuantuan`。Homebrew 不受应用内安装锁控制，不在任务运行时替换应用。
+- [x] 本机完成 0.2.1 → 0.2.2 真实 Homebrew 安装；应用和 Caskroom 版本、下载包摘要、重启及工作区恢复已核对，DeepSeek Harness 入口已出现。升级前数据和安装包保留为恢复材料。
 
 接入依据（2026-10-18 核实）：官方 [CLI 帮助](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) 提供 ACP stdio 启动方式；[ACP 能力文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md) 声明会话新建/列出/恢复/关闭、模型与思考等级、MCP、消息与工具更新、权限和取消，但不支持 `session/load`、历史回放、原生计划/终端或 elicitation。实施时需固定实际验证的发行版本，不能假设这些扩展存在。
 
@@ -548,6 +548,17 @@ DeepSeek 接入固定官方 npm 预发布包 `@deepseek-ai/dsh@0.2.1-rc.2`，使
 
 独立只读审查推动修正引导页认证/会话错误仍误报就绪的问题，未知状态可继续但显式错误保持重试入口，复查未发现剩余必修项。完整浏览器回归发现减少动态模式全局规则生成 0.01ms 的背景/圆角过渡，属于首帧采样竞态；消息正文在该模式显式禁用过渡，保留静态来源高亮，原测试断言未削弱，正常动效不受影响。
 
-最终完整 `bun run check` 为 **768 pass / 40 skip / 0 fail**，11,745 断言，类型检查与 lint 通过。生产构建及完整 Chrome `bun run e2e` 通过，覆盖引导、安装、权限/提问、阶段气泡、引用与返回、补全、并行任务与取消、终端、富媒体、服务商及 Vite 代理。发布与本机 0.2.1 → 0.2.2 升级结果待执行后补记。
+最终完整 `bun run check` 为 **768 pass / 40 skip / 0 fail**，11,745 断言，类型检查与 lint 通过。生产构建及完整 Chrome `bun run e2e` 通过，覆盖引导、安装、权限/提问、阶段气泡、引用与返回、补全、并行任务与取消、终端、富媒体、服务商及 Vite 代理。发布与本机 0.2.1 → 0.2.2 升级结果见下方记录。
 
 浏览器回归另复现既有补全光标竞争：命令/Skill 补全延迟到下一帧恢复光标，会覆盖刚做的全选，使下一次替换输入追加到旧内容。改为在同一事件内提交受控值并恢复光标；回归在补全事件后、下一帧前选择全文，确认新选择不被覆盖，原中间文本补全断言保留。
+
+
+## 2026-10-18 v0.2.2 发布与 Homebrew 升级验证
+
+[PR #22](https://github.com/bosshanz/tuantuan/pull/22) 的 [CI](https://github.com/bosshanz/tuantuan/actions/runs/39133717186) 通过后合并；`v0.2.2` 指向 `927440c787d7ee50273491da46fab82447dad1fd`，源码树与审查、测试过的 `3e851ea8b4cd2265ae7e894e8378790fd704e772` 一致。[Desktop 工作流](https://github.com/bosshanz/tuantuan/actions/runs/39134076338) 完成 macOS 双架构、Windows、Linux 构建，Linux 桌面冒烟和统一产物校验均通过。下载的安装包及更新清单全部通过 SHA-256、格式和 blockmap 复核；两个 macOS ZIP / DMG 完整，包内版本均为 0.2.2，架构匹配，ad-hoc 签名校验通过。Windows 安装器没有签名证书表；没有启用 Developer ID 或 Apple 公证。
+
+[公开 v0.2.2 Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.2) 包含 15 个附件；发布前逐项核对远端大小、SHA-256 与本地产物一致。[Homebrew tap 的 `29ec35d`](https://github.com/bosshanz/homebrew-tap/commit/29ec35d) 同步版本与 macOS 双架构摘要。当前仍为显式发布、校验脚本加手动推送 tap，未配置 `HOMEBREW_TAP_TOKEN`；Actions 的 publish/homebrew job 按配置跳过，不记为自动同步成功。
+
+本机 0.2.1 的「关于与更新」实际检查到 0.2.2。升级前再次确认全部房间空闲，正常退出并备份数据及退出快照，再执行 Homebrew 升级。命令成功完成 0.2.1 → 0.2.2，Info.plist 和 Caskroom 均为 0.2.2，实际下载 arm64 DMG 的 SHA-256 为 `34559adf0cfbfe7fc384ec57862d871c8dc480b64fc4b00f4a09b2e2ea28da2a`，与公开 Release 和 tap 一致；重新启动的安装版已显示 DeepSeek Harness 实验性入口。
+
+跨端口恢复后，用户确认草稿、引用和阅读位置恢复；界面再次读到测试草稿、引用取消入口和「回到最新消息」，退出快照已在导入确认后清除。本轮使用文本草稿与引用，没有实际携带图片升级，先前隔离 Electron 的附件恢复证据另记。消息、Agent、房间、项目、服务商等持久记录逐项不变；一条 Codex 原生会话映射在启动后更换了 session id 和创建时间，其余映射不变，因此不将本轮结果表述为所有 Harness 原生会话均原样延续。当前验证的是 Homebrew 更新、用户内容与工作区恢复，不代表 macOS 原生 OTA、Windows 实机安装或付费模型调用已验证。
