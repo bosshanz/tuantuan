@@ -1610,9 +1610,13 @@ export function createApp(deps: AppDeps) {
             content: z.string().max(100000),
             images: z.array(ImageSchema).max(8).default([]),
             replyToId: z.string().min(1).max(200).nullable().optional(),
+            replyToPartIndex: z.number().int().nonnegative().safe().optional(),
           })
           .parse(await body());
-        return json(orchestrator.postHumanMessage(room.id, m.senderName, m.content, m.images, m.replyToId), 201);
+        return json(
+          orchestrator.postHumanMessage(room.id, m.senderName, m.content, m.images, m.replyToId, m.replyToPartIndex),
+          201,
+        );
       }
       // Retry is a new request that quotes the original human message; it never resumes the old turn.
       if (room && sub === "messages" && subId && action === "retry" && method === "POST") {

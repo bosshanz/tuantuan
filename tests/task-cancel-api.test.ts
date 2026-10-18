@@ -13,6 +13,7 @@ type PromptArgs = Parameters<HarnessHost["prompt"]>;
 interface ControlledCall {
   roomId: string;
   agentId: string;
+  blocks: PromptArgs[3];
   text: string;
   signal: AbortSignal;
   update: PromptArgs[4];
@@ -33,6 +34,7 @@ function fixture() {
       calls.push({
         roomId: room.id,
         agentId: agent.id,
+        blocks,
         text: blocks
           .filter((b) => b.type === "text")
           .map((b) => b.text)
@@ -151,7 +153,12 @@ describe("task cancellation HTTP scope", () => {
     expect((await f.state(room)).tasks.find((task) => task.runId === next.id)?.status).toBe("queued");
     f.finish(0);
     await until(() => f.calls.length === 2);
-    expect(f.calls[1]?.text).toBe("下一条独立请求");
+    expect(f.calls[1]?.blocks).toHaveLength(2);
+    expect(f.calls[1]?.blocks[0]).toEqual({ type: "text", text: "下一条独立请求" });
+    expect(f.calls[1]?.blocks[1]).toEqual({
+      type: "text",
+      text: expect.stringMatching(/^<tuantuan-response>\n[\s\S]*\n<\/tuantuan-response>$/),
+    });
     expect(f.calls[1]?.signal.aborted).toBe(false);
   });
 

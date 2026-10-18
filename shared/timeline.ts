@@ -111,6 +111,73 @@ export function timelineText(t: Timeline): string {
     .join("");
 }
 
+export interface TimelineBodyPhase {
+  /** Stable position in the original timeline, shared by rendering and phase references. */
+  start: number;
+  parts: { part: Extract<TimelinePart, { kind: "text" | "image" }>; index: number }[];
+  text: string;
+}
+
+/** Consecutive body content forms one visible phase; thought/tool activity separates phases. */
+export function timelineBodyPhases(t: Timeline | null | undefined): TimelineBodyPhase[] {
+  const phases: TimelineBodyPhase[] = [];
+  let current: TimelineBodyPhase | null = null;
+  for (const [index, part] of (t?.parts ?? []).entries()) {
+    if (part.kind === "thought" || part.kind === "tool") {
+      current = null;
+    } else if (part.kind === "image" || part.text.trim()) {
+      if (!current) {
+        current = { start: index, parts: [], text: "" };
+        phases.push(current);
+      }
+      current.parts.push({ part, index });
+      if (part.kind === "text") current.text += part.text;
+    }
+  }
+  return phases;
+}
+
+export interface TimelineProcess {
+  tools: number;
+  thoughts: number;
+  planDone: number;
+  planTotal: number;
+  failed: number;
+}
+
+/** What the compact view folds into one summary line: every tool, thought and plan step. */
+export function timelineProcess(t: Timeline | null | undefined): TimelineProcess {
+  const ids = new Set(
+    (t?.parts ?? [])
+      .filter((p): p is { kind: "tool"; toolCallId: string } => p.kind === "tool")
+      .map((p) => p.toolCallId),
+  );
+  let failed = 0;
+  for (const id of ids) if (t?.tools[id]?.status === "failed") failed++;
+  const plan = t?.plan ?? [];
+  return {
+    tools: ids.size,
+    thoughts: (t?.parts ?? []).filter((p) => p.kind === "thought").length,
+    planDone: plan.filter((entry) => entry.status === "completed").length,
+    planTotal: plan.length,
+    failed,
+  };
+}
+
+/** The tool the compact view names while the reply is still running, if any. */
+export function currentToolOf(t: Timeline | null | undefined): string | null {
+  const parts = t?.parts ?? [];
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i];
+    if (!part) continue;
+    if (part.kind !== "tool") continue;
+    const tool = t?.tools[part.toolCallId];
+    if (tool && (tool.status === "pending" || tool.status === "in_progress")) return tool.title;
+    return null;
+  }
+  return null;
+}
+
 /** Returns a new timeline (never mutates), or the same object when the update is not reply content. */
 export function applyUpdate(t: Timeline, u: acp.SessionUpdate): Timeline {
   switch (u.sessionUpdate) {
@@ -197,6 +264,7 @@ export function replayTurns(updates: acp.SessionUpdate[]): ReplayTurn[] {
       .replace(/<tuantuan-skills>[\s\S]*?<\/tuantuan-skills>\s*/g, "")
       .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
       .replace(/<tuantuan-context>[\s\S]*?<\/tuantuan-context>\s*/g, "")
+      .replace(/<tuantuan-response>[\s\S]*?<\/tuantuan-response>\s*/g, "")
       .trim();
   return turns;
 }

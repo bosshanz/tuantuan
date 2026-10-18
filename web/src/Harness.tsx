@@ -16,8 +16,8 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
-import type { Timeline, ToolState } from "../../shared/timeline";
+import { type ReactNode, useEffect, useRef } from "react";
+import { type Timeline, type TimelineBodyPhase, type ToolState, timelineBodyPhases } from "../../shared/timeline";
 import type { PermissionAsk, SessionView, TerminalSnapshot } from "./api";
 import { PreviewImage } from "./ImagePreview";
 import { intlLocale, useI18n } from "./i18n";
@@ -29,16 +29,60 @@ export function TimelineView(props: {
   streaming: boolean;
   terminals: Record<string, TerminalSnapshot>;
   mentionNames: string[];
+  /** "body" shows only what the agent said (text/images); "process" only thoughts, tools and plan. */
+  view?: "full" | "body" | "process";
+  renderBodyActions?: (phase: TimelineBodyPhase) => ReactNode;
+  hideHandoffTools?: boolean;
 }) {
   const { t: tr } = useI18n();
   const { t } = props;
+  const view = props.view ?? "full";
   const lastText = t.parts.findLastIndex((p) => p.kind === "text");
+  const phases = timelineBodyPhases(t);
+  const phaseByPart = new Map(phases.flatMap((phase) => phase.parts.map(({ index }) => [index, phase.start] as const)));
+  type BodyPart = Extract<Timeline["parts"][number], { kind: "text" | "image" }>;
+  const renderBodyPart = (part: BodyPart, index: number) => (
+    <div
+      key={index}
+      className={
+        part.kind === "image"
+          ? "timeline-image"
+          : props.streaming && index === lastText && index === t.parts.length - 1
+            ? "caret-wrap"
+            : undefined
+      }
+      data-message-body=""
+      data-body-phase={phaseByPart.get(index)}
+      data-part-index={index}
+    >
+      {part.kind === "image" ? (
+        <PreviewImage src={`data:${part.mimeType};base64,${part.data}`} alt={tr("图片")} />
+      ) : (
+        <MessageMarkdown text={part.text} mentionNames={props.mentionNames} />
+      )}
+    </div>
+  );
+  if (view === "body") {
+    return (
+      <div className="timeline timeline-body">
+        {phases.map((phase) => (
+          <div key={phase.start} className="compact-phase-row">
+            <div className="compact-bubble" data-reply-phase={phase.start}>
+              {phase.parts.map(({ part, index }) => renderBodyPart(part, index))}
+            </div>
+            {props.renderBodyActions?.(phase)}
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="timeline">
       {t.plan && t.plan.length > 0 && <PlanList entries={t.plan} />}
       {t.parts.map((p, i) => {
-        // biome-ignore lint/suspicious/noArrayIndexKey: parts are append-only
+        // Timeline parts are append-only, so their original index remains stable when activity is hidden.
         const key = i;
+        if (view === "process" && (p.kind === "text" || p.kind === "image")) return null;
         if (p.kind === "thought")
           return (
             <details key={key} className="thought" open={props.streaming && i === t.parts.length - 1}>
@@ -52,18 +96,10 @@ export function TimelineView(props: {
           );
         if (p.kind === "tool") {
           const tool = t.tools[p.toolCallId];
+          if (props.hideHandoffTools && t.handoffs?.length && tool && /handoff/i.test(tool.title)) return null;
           return tool ? <ToolCard key={key} tool={tool} terminals={props.terminals} /> : null;
         }
-        if (p.kind === "image")
-          return <PreviewImage key={key} src={`data:${p.mimeType};base64,${p.data}`} alt={tr("图片")} />;
-        return (
-          <div
-            key={key}
-            className={props.streaming && i === lastText && i === t.parts.length - 1 ? "caret-wrap" : undefined}
-          >
-            <MessageMarkdown text={p.text} mentionNames={props.mentionNames} />
-          </div>
-        );
+        return renderBodyPart(p, i);
       })}
     </div>
   );

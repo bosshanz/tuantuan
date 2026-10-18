@@ -104,8 +104,73 @@ export async function taskContextSmoke(browser: Browser, base: string, store: St
       if (JSON.stringify(message.timeline?.taskContext) !== JSON.stringify(context))
         throw new Error("successful reply did not persist its task context");
     }
+    for (const [message, expected] of [
+      [sent, "/handoff_context"],
+      [received, "接手 @交接发起者 的任务「保留任务正文与约束。"],
+    ] as const) {
+      const messageRow = row(message.id);
+      await messageRow.locator(".compact-body").waitFor();
+      if ((await messageRow.getAttribute("data-compact")) === null)
+        throw new Error("new handoff replies did not start in compact view");
+      const body = messageRow.locator(".compact-body");
+      if (!(await body.innerText()).includes(expected))
+        throw new Error(`compact reply lost its key body content: ${expected}`);
+      const details = messageRow.locator('.handoff-card, .handoff-from, .task-context[data-kind="saved"]');
+      for (const detail of await details.all())
+        if (await detail.isVisible()) throw new Error("compact reply exposed handoff or saved task-context details");
+    }
+
+    const openMessageDetails = async (message: Message) => {
+      const messageRow = row(message.id);
+      await messageRow.hover();
+      await messageRow.getByRole("button", { name: "更多消息操作", exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "消息操作", exact: true })
+        .getByRole("button", { name: "查看详情", exact: true })
+        .click();
+      await page.getByRole("heading", { name: "回复详情", exact: true }).waitFor();
+      return page.locator(".details");
+    };
+    const closeMessageDetails = async () => {
+      await page.getByRole("button", { name: "关闭详情面板", exact: true }).click();
+      await page.getByRole("heading", { name: "回复详情", exact: true }).waitFor({ state: "hidden" });
+    };
+    const sentDetails = await openMessageDetails(sent);
+    const detailedSentCard = sentDetails.locator(".handoff-card");
+    await detailedSentCard.waitFor();
+    await assertTask(detailedSentCard.locator(".handoff-task"));
+    await assertNotes(detailedSentCard.locator(".task-context"));
+    await assertNotes(sentDetails.locator('.task-context[data-kind="saved"]'));
+    await closeMessageDetails();
+
+    const receivedDetails = await openMessageDetails(received);
+    const detailedReceivedCard = receivedDetails.locator(".handoff-from");
+    await detailedReceivedCard.waitFor();
+    await assertTask(detailedReceivedCard.locator(".handoff-task"));
+    await assertNotes(detailedReceivedCard.locator(".task-context"));
+    await assertNotes(receivedDetails.locator('.task-context[data-kind="saved"]'));
+    await closeMessageDetails();
+
+    await page.getByRole("button", { name: "展开详情面板", exact: true }).click();
+    await page.getByRole("tab", { name: "详情", exact: true }).click();
+    const compactSwitch = page.getByRole("switch", { name: "精简视图", exact: true });
+    if (!(await compactSwitch.isChecked())) throw new Error("task context fixture did not start in compact view");
+    await compactSwitch.uncheck();
+    await page.waitForFunction(
+      (ids: string[]) =>
+        ids.every((id) => document.querySelector(`[data-message-id="${id}"]`)?.getAttribute("data-compact") === null),
+      [sent.id, received.id],
+    );
+    await page.getByRole("button", { name: "关闭详情面板", exact: true }).click();
+    await page.getByRole("heading", { name: "会话信息", exact: true }).waitFor({ state: "hidden" });
+
     const sentCard = row(sent.id).locator(".handoff-card");
     const receivedCard = row(received.id).locator(".handoff-from");
+    if (
+      (await row(sent.id).getAttribute("data-compact")) !== null ||
+      (await row(received.id).getAttribute("data-compact")) !== null
+    )
+      throw new Error("full-view toggle left successful handoff replies compact");
     for (const card of [sentCard, receivedCard]) {
       await card.waitFor();
       await assertTask(card.locator(".handoff-task"));

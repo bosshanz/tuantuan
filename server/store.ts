@@ -673,18 +673,29 @@ export class Store {
     m: Omit<Message, "id" | "seq" | "createdAt" | "timeline" | "error" | "quote"> & {
       id?: string;
       replyToId?: string | null;
+      replyToPartIndex?: number;
     },
   ): Message {
     const id = m.id ?? crypto.randomUUID();
     this.db.transaction(() => {
       let quote: MessageQuote | null = null;
+      if (
+        m.replyToPartIndex !== undefined &&
+        (!Number.isSafeInteger(m.replyToPartIndex) || m.replyToPartIndex < 0 || !m.replyToId)
+      )
+        throw new ValidationError("引用阶段必须是非负安全整数，并指定引用消息");
       if (m.replyToId) {
         // Human quotes are also created by retry, which must reference the original request in a DM too.
         if (m.senderKind !== "human") throw new ValidationError("只有用户消息可以引用回复");
         const original = this.getMessage(m.replyToId);
         if (!original || original.roomId !== m.roomId) throw new ValidationError("引用消息不存在或不在当前会话");
-        quote = messageQuote(original);
-        if (!quote) throw new ValidationError("只能引用已完成的用户或 Agent 消息");
+        quote = messageQuote(original, m.replyToPartIndex);
+        if (!quote)
+          throw new ValidationError(
+            m.replyToPartIndex === undefined
+              ? "只能引用已完成的用户或 Agent 消息"
+              : "只能引用已完成 Agent 消息的有效正文阶段",
+          );
       }
       const { next } = this.db
         .query("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM messages WHERE room_id = ?")

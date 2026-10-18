@@ -4,13 +4,14 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { chromium, type Page } from "playwright-core";
+import { chromium, type Locator, type Page } from "playwright-core";
 import { serve } from "../server/app";
 import { setSkillLinked } from "../server/skills";
 import { mockRegistry } from "../tests/fixtures/mock-registry";
 import { chatHistorySmoke } from "./e2e-chat-history";
 import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { chatToolsSmoke } from "./e2e-chat-tools";
+import { quoteReturnSmoke } from "./e2e-quote-return";
 import { registryAuthSmoke } from "./e2e-registry-auth";
 import { registryUsageSmoke } from "./e2e-registry-usage";
 import { repliesSmoke } from "./e2e-replies";
@@ -496,6 +497,15 @@ try {
 
   // Group: no @ -> the main agent (Bob) answers; @Alice -> Alice.
   const input = page.getByLabel("消息输入框");
+  const showReplyDetails = async (row: Locator) => {
+    await row.hover();
+    await row.getByRole("button", { name: "更多消息操作", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "消息操作", exact: true })
+      .getByRole("button", { name: "查看详情", exact: true })
+      .click();
+    await page.getByRole("heading", { name: "回复详情", exact: true }).waitFor();
+  };
   await input.fill("大家好");
   await input.press("Enter");
   await page.locator(".msg-group", { hasText: "Bob" }).getByText("收到：「大家好」").waitFor();
@@ -505,12 +515,32 @@ try {
   // Hand-off through Tuantuan's MCP tool: Bob (main agent) hands the task to Alice.
   await input.fill("/handoff Alice 写一份需求文档");
   await input.press("Enter");
-  await page.locator(".handoff-card", { hasText: "交接给 @Alice" }).waitFor();
-  await page.locator(".handoff-from", { hasText: "接 @Bob 的交接：写一份需求文档" }).waitFor();
-  await page.locator(".messages").getByText("接手 @Bob 的任务「写一份需求文档」").waitFor();
+  await page
+    .locator(".messages")
+    .getByText(/^接手 @Bob 的任务「写一份需求文档」/)
+    .waitFor();
+  if (await page.locator(".messages .handoff-card, .messages .handoff-from").count())
+    throw new Error("compact conversation exposed internal handoff records");
+  const handoffReplies = app.store.recentMessages(group.id, 30);
+  const handoffSource = handoffReplies.findLast((message) => message.timeline?.handoffs?.length);
+  const handoffReceiver = handoffReplies.findLast((message) => message.timeline?.handoffFrom);
+  if (!handoffSource || !handoffReceiver) throw new Error("handoff replies missing");
+  await showReplyDetails(page.locator(`[data-message-id="${handoffSource.id}"]`));
+  await page.locator(".details .handoff-card", { hasText: "交接给 @Alice" }).waitFor();
+  await page.getByRole("button", { name: "关闭详情面板" }).click();
+  await showReplyDetails(page.locator(`[data-message-id="${handoffReceiver.id}"]`));
+  await page.locator(".details .handoff-from", { hasText: "接 @Bob 的交接：写一份需求文档" }).waitFor();
+  await page.getByRole("button", { name: "关闭详情面板" }).click();
   await shot("conversation-handoff");
   await taskContextSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
   await chatToolsSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
+  await quoteReturnSmoke(
+    browser,
+    `http://localhost:${server.port}`,
+    app.store,
+    (message) => server.publish(`room:${message.roomId}`, JSON.stringify({ type: "message", message })),
+    shotsDir,
+  );
   await terminalSmoke(browser, `http://localhost:${server.port}`, group.id, project.id, cwd, shotsDir);
   await registryUsageSmoke(browser, `http://localhost:${server.port}`, shotsDir);
   await repliesSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
@@ -693,8 +723,15 @@ try {
   await page.locator(".slash-pop").getByText("/plan").waitFor();
   await input.press("Tab");
   await input.press("Enter");
-  await page.locator(".plan-item[data-status=completed]", { hasText: "跑测试" }).waitFor();
-  await page.locator(".thought").first().waitFor();
+  // Compact view keeps the Agent's words; internal plans and thoughts remain available in details.
+  const planRow = page.locator(".message-row[data-sender=agent]", { hasText: "收到：「/plan」" }).last();
+  await planRow.waitFor();
+  if (await planRow.locator(".compact-process, .plan-item, .thought").count())
+    throw new Error("compact reply exposed the internal plan or thoughts");
+  await showReplyDetails(planRow);
+  await page.locator(".details .plan-item[data-status=completed]", { hasText: "跑测试" }).waitFor();
+  await page.locator(".details .thought").first().waitFor();
+  await page.getByRole("button", { name: "关闭详情面板" }).click();
 
   await input.fill("/edit");
   await input.press("Enter");
@@ -744,14 +781,90 @@ try {
   await input.press("Enter");
   await page.locator(".messages").getByText("命令跑完了。").waitFor();
   {
-    // Tool calls are one collapsed row; the output opens on click.
-    const card = page.locator("details.tool", { hasText: "echo hello" }).last();
+    // Tool calls live in details; the tool row itself still starts collapsed.
+    const runRow = page.locator(".message-row[data-sender=agent]", { hasText: "命令跑完了。" }).last();
+    if (await runRow.locator(".tool, .compact-process").count()) throw new Error("compact reply exposed tool logs");
+    await showReplyDetails(runRow);
+    const card = page.locator(".details details.tool", { hasText: "echo hello" }).last();
     if (await card.evaluate((d) => (d as HTMLDetailsElement).open)) throw new Error("tool card should start collapsed");
     if (await page.locator("pre.term:not(.term-wrap pre)", { hasText: "终端输出不可用" }).count())
       throw new Error("empty terminal box rendered");
     await card.locator("summary").click();
     await card.locator(".term", { hasText: "hello from terminal" }).waitFor();
     await card.locator("summary").click();
+    await page.getByRole("button", { name: "关闭详情面板" }).click();
+  }
+
+  // Density is a local display preference in conversation settings, not a chat toolbar action.
+  if (
+    await page
+      .locator(".chat-head")
+      .getByRole("button", { name: /精简视图/ })
+      .count()
+  )
+    throw new Error("density preference still clutters the conversation toolbar");
+  await page.getByRole("button", { name: "展开详情面板" }).click();
+  await page.getByRole("tab", { name: "详情", exact: true }).click();
+  const compactSwitch = page.getByRole("switch", { name: "精简视图", exact: true });
+  await compactSwitch.dblclick({ delay: 35 });
+  if (!(await compactSwitch.isChecked()) || !(await compactSwitch.evaluate((el) => el === document.activeElement)))
+    throw new Error("rapid density reversal lost a click or keyboard focus");
+  await compactSwitch.uncheck();
+  await page.locator(".plan-item[data-status=completed]", { hasText: "跑测试" }).waitFor();
+  await page.locator(".thought").first().waitFor();
+  if (await page.locator(".compact-process").count()) throw new Error("compact summary rendered while compact is off");
+  await compactSwitch.dblclick({ delay: 35 });
+  if (await compactSwitch.isChecked()) throw new Error("rapid density reversal failed from full view");
+  await compactSwitch.check();
+  await planRow.locator(".compact-reply").waitFor();
+  if (await page.locator(".messages .plan-item, .messages .thought, .messages .tool, .compact-process").count())
+    throw new Error("returning to compact view left process details in the transcript");
+  await page.getByRole("button", { name: "关闭详情面板" }).click();
+
+  {
+    // The details panel carries the full timeline, so nothing is only-visible-in-chat.
+    const runRow = page.locator(".message-row", { hasText: "命令跑完了。" }).last();
+    await runRow.hover();
+    await runRow.getByRole("button", { name: "更多消息操作", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "消息操作", exact: true })
+      .getByRole("button", { name: "查看详情", exact: true })
+      .click();
+    await page.getByRole("heading", { name: "回复详情" }).waitFor();
+    await page.locator(".details .timeline details.tool", { hasText: "echo hello" }).waitFor();
+    await page.getByRole("button", { name: "关闭详情面板" }).click();
+  }
+  // Narrow screens retain key replies and a reachable details entry.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await showReplyDetails(page.locator(".message-row[data-sender=agent]", { hasText: "命令跑完了。" }).last());
+  await page.locator(".details details.tool", { hasText: "echo hello" }).last().waitFor();
+  await page.getByRole("button", { name: "关闭详情面板" }).click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  {
+    // Opening and closing the details panel keeps the reader's message anchored.
+    const list = page.locator(".messages");
+    await list.evaluate((el) => (el.scrollTop = el.scrollHeight * 0.4));
+    await page.waitForTimeout(150);
+    const firstVisible = () =>
+      page.evaluate(() => {
+        const box = document.querySelector(".messages") as HTMLElement | null;
+        if (!box) return null;
+        const top = box.getBoundingClientRect().top;
+        const row = [...box.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+          (m) => m.getBoundingClientRect().bottom > top,
+        );
+        return row?.dataset.messageId ?? null;
+      });
+    const before = await firstVisible();
+    await page.getByRole("button", { name: "展开详情面板" }).click();
+    await page.waitForTimeout(450);
+    const during = await firstVisible();
+    await page.getByRole("button", { name: "关闭详情面板" }).click();
+    await page.waitForTimeout(450);
+    const after = await firstVisible();
+    if (!before || before !== during || before !== after)
+      throw new Error(`reading anchor moved across the details panel: ${before} → ${during} → ${after}`);
   }
 
   // Already switched to Mock Smart via the composer picker above; sending confirms the preference stuck.
@@ -807,8 +920,6 @@ try {
     .getByRole("button", { name: "查看详情", exact: true })
     .click();
   await page.getByRole("heading", { name: "回复详情" }).waitFor();
-
-  // Let enter/exit animations finish so geometry is measured at rest.
   const settle = () =>
     page.evaluate(() =>
       Promise.all(
@@ -933,9 +1044,11 @@ try {
     await input.press("Enter");
     const body = text.replace(/^@\S+\s/, "");
     await page.locator(".msg", { hasText: body }).first().waitFor({ timeout: 5000 });
-    await page.locator(".msg", { hasText: reply }).last().waitFor({ timeout: 8000 });
+    const agentReply = page.locator('.message-row[data-sender="agent"] .msg', { hasText: reply }).last();
+    await agentReply.waitFor({ timeout: 8000 });
     await page.waitForTimeout(900); // let the slow snapshot land, then make sure nothing vanished
     if ((await page.locator(".msg", { hasText: body }).count()) === 0) throw new Error(`message vanished: ${text}`);
+    if (!(await agentReply.isVisible())) throw new Error(`reply vanished after delayed history: ${text}`);
   };
   const navs = await page.evaluate(() => performance.getEntriesByType("navigation").length);
   await nav("Agents");
@@ -944,7 +1057,7 @@ try {
   await live("Bob", "直播-1", /收到：「直播-1」/);
   await toRooms();
   await page.locator(".li-title", { hasText: "冒烟会话" }).click();
-  await live("冒烟会话", "@Bob 会话直播-2", /\[我\]: @Bob 会话直播-2/);
+  await live("冒烟会话", "@Bob 会话直播-2", /收到：「@Bob 会话直播-2」/);
   await page.locator(".li-title", { hasText: "与 Bob" }).click();
   await live("与 Bob", "切换后-3", /收到：「切换后-3」/);
   await page.unroute(/\/api\/rooms\/[^/]+\/messages\?/);
@@ -1334,7 +1447,7 @@ for await (const line of createInterface({input:process.stdin})) {
   if (shotsDir) await page.locator(".side").screenshot({ path: join(shotsDir, "sidebar-collapse-60ms.png") });
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // Chat: soft fade edges never take clicks; long tool output stays collapsed.
+  // Chat: soft fade edges never take clicks and reflect the actual scroll range.
   {
     const dm = app.store.listRooms().find((r) => r.agentIds.length === 1 && r.name.includes("Bob"));
     if (!dm) throw new Error("no Bob DM");
@@ -1345,7 +1458,7 @@ for await (const line of createInterface({input:process.stdin})) {
     await page.locator(".messages").evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
     await page.locator(".messages").evaluate((el) => el.scrollTo({ top: 0 }));
     await page.locator(".messages-wrap[data-more-below]").waitFor();
-    await page.locator(".messages").evaluate((el) => el.scrollTo({ top: el.scrollHeight / 2 }));
+    await page.locator(".messages").evaluate((el) => el.scrollTo({ top: (el.scrollHeight - el.clientHeight) / 2 }));
     await page.locator(".messages-wrap[data-scrolled][data-more-below]").waitFor();
     await page.waitForTimeout(200);
     await shot("chat-fade");

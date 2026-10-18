@@ -1,5 +1,5 @@
-import { AlertTriangle, CircleHelp, Send, X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { ChevronRight } from "lucide-react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import {
   type ElicitationField,
   type ElicitationIssue,
@@ -10,6 +10,9 @@ import {
 } from "../../shared/elicitation";
 import type { ElicitationAsk } from "./api";
 import { translateError, useI18n } from "./i18n";
+import "./ElicitationDialog.css";
+
+const controlSelector = "input:not(:disabled), select:not(:disabled), textarea:not(:disabled)";
 
 function initialValues(fields: ElicitationField[]): ElicitationValues {
   const values: ElicitationValues = {};
@@ -66,10 +69,7 @@ function issueText(tr: (source: string, params?: Record<string, string | number>
   }
 }
 
-/**
- * One ACP form elicitation. Closing (button or Escape) always answers cancel, so a user who does
- * not want to answer can never leave the harness waiting; a failed accept keeps the form open.
- */
+/** A pending ACP form stays mounted while collapsed, preserving answers and validation feedback. */
 export function ElicitationDialog(props: {
   ask: ElicitationAsk;
   agentName: string;
@@ -82,12 +82,19 @@ export function ElicitationDialog(props: {
   const { ask } = props;
   const [values, setValues] = useState<ElicitationValues>(() => initialValues(ask.fields));
   const [issues, setIssues] = useState<ElicitationIssues>({});
+  const [expanded, setExpanded] = useState(false);
+  const card = useRef<HTMLDetailsElement>(null);
   const form = useRef<HTMLFormElement>(null);
+  const summary = useRef<HTMLElement>(null);
+  const titleId = useId();
   const unsupported = ask.fields.filter((field) => field.kind === "unsupported");
-  useEffect(() => {
-    form.current
-      ?.querySelector<HTMLElement>("input:not(:disabled), select:not(:disabled), textarea:not(:disabled)")
-      ?.focus();
+  useLayoutEffect(() => {
+    const element = card.current;
+    return () => {
+      if (element?.contains(document.activeElement)) {
+        element.closest(".composer")?.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });
+      }
+    };
   }, []);
 
   const update = (name: string, value: ElicitationValue) => {
@@ -103,57 +110,83 @@ export function ElicitationDialog(props: {
   const submit = () => {
     const result = validateElicitation(ask.fields, values);
     setIssues(result.issues);
-    if (result.blocked || Object.keys(result.issues).length) return;
+    const invalidNames = Object.keys(result.issues);
+    if (result.blocked || invalidNames.length) {
+      requestAnimationFrame(() => {
+        // A user can collapse or leave the card before this scheduled validation focus runs.
+        if (!card.current?.open || form.current?.inert || !card.current.contains(document.activeElement)) return;
+        const field = Array.from(form.current?.querySelectorAll<HTMLElement>("[data-elicit-field]") ?? []).find(
+          (element) => element.dataset.elicitField === invalidNames[0],
+        );
+        field?.querySelector<HTMLElement>(controlSelector)?.focus();
+      });
+      return;
+    }
+    if (form.current?.contains(document.activeElement)) summary.current?.focus({ preventScroll: true });
     props.onAccept(result.content);
   };
 
   return (
-    <div className="overlay perm-overlay">
-      <div
-        className="palette perm elicit"
-        role="alertdialog"
-        aria-modal="true"
-        aria-label={tr("{name} 想请你回答", { name: props.agentName })}
-        aria-busy={props.pending}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && !props.pending) {
-            event.preventDefault();
-            props.onCancel();
-          }
+    <details
+      ref={card}
+      className="elicit"
+      open={expanded}
+      aria-busy={props.pending}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && event.currentTarget.open) {
+          event.preventDefault();
+          event.stopPropagation();
+          setExpanded(false);
+          summary.current?.focus({ preventScroll: true });
+        }
+      }}
+    >
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: native summary activation toggles open and inert together */}
+      <summary
+        ref={summary}
+        className="elicit-summary"
+        onClick={(event) => {
+          event.preventDefault();
+          setExpanded((current) => !current);
         }}
       >
-        {/* JSON Schema patterns match substrings; native HTML constraints use different rules. */}
-        <form
-          ref={form}
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!props.pending) submit();
-          }}
-        >
-          <div className="perm-head">
-            <CircleHelp size={18} />
-            <div>
-              <strong>{tr("{name} 想请你回答", { name: props.agentName })}</strong>
-              <p className="elicit-message">{ask.message}</p>
-            </div>
-            <button
-              type="button"
-              className="btn ghost icon elicit-close"
-              aria-label={tr("关闭并取消提问")}
-              title={tr("关闭并取消提问")}
-              disabled={props.pending}
-              onClick={props.onCancel}
-            >
-              <X size={16} />
-            </button>
-          </div>
-          <div className="perm-body elicit-fields">
+        <span className="elicit-intro">
+          <span className="elicit-agent">{tr("{name} 想请你回答", { name: props.agentName })}</span>
+          <span className="elicit-message" id={titleId}>
+            {ask.message}
+          </span>
+        </span>
+        <span className="elicit-summary-actions">
+          {(props.pending || props.error) && (
+            <span className={`elicit-status${props.error ? " failed" : ""}`} role="status">
+              {props.pending ? tr("提交中…") : tr("提交失败")}
+            </span>
+          )}
+          <span className="elicit-disclosure">
+            <span className="elicit-open-label">{tr("展开提问")}</span>
+            <span className="elicit-close-label">{tr("收起提问")}</span>
+            <ChevronRight size={16} aria-hidden />
+          </span>
+        </span>
+      </summary>
+      {/* JSON Schema patterns match substrings; native HTML constraints use different rules. */}
+      <form
+        ref={form}
+        inert={!expanded}
+        noValidate
+        aria-labelledby={titleId}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!props.pending && expanded) submit();
+        }}
+      >
+        <div className="elicit-content">
+          <p className="elicit-prompt">{ask.message}</p>
+          <div className="elicit-fields">
             {unsupported.length > 0 && (
-              <div className="form-error" role="alert">
-                <AlertTriangle size={14} />
+              <p className="elicit-form-error" role="alert">
                 {tr("这个提问包含当前版本不支持的问题类型，无法提交。请取消本次提问。")}
-              </div>
+              </p>
             )}
             {ask.fields.map((field) => (
               <ElicitationFieldView
@@ -167,13 +200,23 @@ export function ElicitationDialog(props: {
               />
             ))}
           </div>
+        </div>
+        <footer className="elicit-footer">
           {props.error && (
-            <div className="form-error" role="alert">
+            <p className="elicit-form-error" role="alert">
               {tr("回答提交失败：{reason}。请重试。", { reason: translateError(props.error) })}
-            </div>
+            </p>
           )}
-          <div className="perm-actions">
-            <button type="button" className="btn" disabled={props.pending} onClick={props.onCancel}>
+          <div className="elicit-actions">
+            <button
+              type="button"
+              className="btn"
+              disabled={props.pending}
+              onClick={() => {
+                if (form.current?.contains(document.activeElement)) summary.current?.focus({ preventScroll: true });
+                props.onCancel();
+              }}
+            >
               {tr("取消提问")}
             </button>
             <button
@@ -182,13 +225,12 @@ export function ElicitationDialog(props: {
               disabled={props.pending || unsupported.length > 0}
               aria-busy={props.pending}
             >
-              <Send size={14} />
               {props.pending ? tr("提交中…") : tr("提交回答")}
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+        </footer>
+      </form>
+    </details>
   );
 }
 
@@ -202,9 +244,11 @@ function ElicitationFieldView(props: {
 }) {
   const { field, tr } = props;
   const id = useId();
+  const helpId = `${id}-help`;
   const errorId = `${id}-error`;
+  const describedBy = [field.description && helpId, props.issue && errorId].filter(Boolean).join(" ") || undefined;
   const label = (
-    <label className="label" htmlFor={id}>
+    <label className="elicit-label" htmlFor={id}>
       {field.title}
       {field.required && (
         <span className="elicit-required" aria-hidden>
@@ -213,7 +257,11 @@ function ElicitationFieldView(props: {
       )}
     </label>
   );
-  const help = field.description && <p className="help">{field.description}</p>;
+  const help = field.description && (
+    <p className="elicit-help" id={helpId}>
+      {field.description}
+    </p>
+  );
   const error = props.issue && (
     <p className="elicit-error" id={errorId} role="alert">
       {issueText(tr, props.issue)}
@@ -223,21 +271,21 @@ function ElicitationFieldView(props: {
     id,
     disabled: props.disabled,
     "aria-invalid": props.issue ? true : undefined,
-    "aria-describedby": props.issue ? errorId : undefined,
+    "aria-describedby": describedBy,
   };
   if (field.kind === "unsupported")
     return (
-      <div className="field elicit-unsupported" data-kind="unsupported">
+      <div className="elicit-field elicit-unsupported" data-kind="unsupported" data-elicit-field={field.name}>
         {label}
+        <input {...common} className="input" value={tr("不支持的问题类型")} disabled readOnly />
         {help}
-        <input className="input" value={tr("不支持的问题类型")} disabled readOnly />
         {error}
       </div>
     );
   if (field.kind === "boolean")
     return (
-      <div className="field elicit-boolean">
-        <label className="elicit-check">
+      <div className="elicit-field elicit-boolean" data-elicit-field={field.name}>
+        <label className="elicit-choice">
           <input
             {...common}
             type="checkbox"
@@ -262,11 +310,13 @@ function ElicitationFieldView(props: {
     const limitReached = field.maxItems != null && selected.length >= field.maxItems;
     return (
       <fieldset
-        className="field elicit-multi"
+        className="elicit-field elicit-group"
+        data-elicit-field={field.name}
         disabled={props.disabled}
-        aria-describedby={props.issue ? errorId : undefined}
+        aria-invalid={props.issue ? true : undefined}
+        aria-describedby={describedBy}
       >
-        <legend className="label">
+        <legend className="elicit-label">
           {field.title}
           {field.required && (
             <span className="elicit-required" aria-hidden>
@@ -274,39 +324,80 @@ function ElicitationFieldView(props: {
             </span>
           )}
         </legend>
+        <div className="elicit-options">
+          {field.options.map((option) => {
+            const checked = selected.includes(option.value);
+            return (
+              <label className="elicit-choice" key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={props.disabled || (limitReached && !checked)}
+                  onChange={(event) =>
+                    props.onChange(
+                      event.target.checked
+                        ? [...selected, option.value]
+                        : selected.filter((value) => value !== option.value),
+                    )
+                  }
+                />
+                <span>
+                  {option.label}
+                  {option.description && <small>{option.description}</small>}
+                </span>
+              </label>
+            );
+          })}
+        </div>
         {help}
-        {field.options.map((option) => {
-          const checked = selected.includes(option.value);
-          return (
-            <label className="elicit-check" key={option.value}>
+        {error}
+      </fieldset>
+    );
+  }
+  if (field.kind === "string" && field.options && field.options.length <= 4) {
+    const options = field.required ? field.options : [{ value: "", label: tr("不填写") }, ...field.options];
+    return (
+      <fieldset
+        className="elicit-field elicit-group"
+        data-elicit-field={field.name}
+        disabled={props.disabled}
+        aria-invalid={props.issue ? true : undefined}
+        aria-describedby={describedBy}
+      >
+        <legend className="elicit-label">
+          {field.title}
+          {field.required && (
+            <span className="elicit-required" aria-hidden>
+              *
+            </span>
+          )}
+        </legend>
+        <div className="elicit-options">
+          {options.map((option) => (
+            <label className="elicit-choice" key={option.value}>
               <input
-                type="checkbox"
-                checked={checked}
-                disabled={props.disabled || (limitReached && !checked)}
-                onChange={(event) =>
-                  props.onChange(
-                    event.target.checked
-                      ? [...selected, option.value]
-                      : selected.filter((value) => value !== option.value),
-                  )
-                }
+                type="radio"
+                name={id}
+                value={option.value}
+                checked={String(props.value ?? "") === option.value}
+                onChange={() => props.onChange(option.value)}
               />
               <span>
                 {option.label}
                 {option.description && <small>{option.description}</small>}
               </span>
             </label>
-          );
-        })}
+          ))}
+        </div>
+        {help}
         {error}
       </fieldset>
     );
   }
   if (field.kind === "string" && field.options)
     return (
-      <div className="field">
+      <div className="elicit-field" data-elicit-field={field.name}>
         {label}
-        {help}
         <select
           {...common}
           className="input"
@@ -320,6 +411,7 @@ function ElicitationFieldView(props: {
             </option>
           ))}
         </select>
+        {help}
         {error}
       </div>
     );
@@ -328,9 +420,8 @@ function ElicitationFieldView(props: {
     const type =
       field.format === "email" ? "email" : field.format === "uri" ? "url" : field.format === "date" ? "date" : "text";
     return (
-      <div className="field">
+      <div className="elicit-field" data-elicit-field={field.name}>
         {label}
-        {help}
         <input
           {...common}
           className="input"
@@ -338,14 +429,14 @@ function ElicitationFieldView(props: {
           value={String(props.value ?? "")}
           onChange={(event) => props.onChange(event.target.value)}
         />
+        {help}
         {error}
       </div>
     );
   }
   return (
-    <div className="field">
+    <div className="elicit-field" data-elicit-field={field.name}>
       {label}
-      {help}
       <input
         {...common}
         className="input"
@@ -356,6 +447,7 @@ function ElicitationFieldView(props: {
         max={field.maximum ?? undefined}
         onChange={(event) => props.onChange(event.target.value)}
       />
+      {help}
       {error}
     </div>
   );

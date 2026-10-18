@@ -80,6 +80,16 @@ macOS 本机构建：在 Mac 上执行上面的依赖安装和 `desktop:build` �
 
 自动更新默认关闭，打包时设 `TUANTUAN_PUBLISH=github` 和 `GH_TOKEN` 才会写入 GitHub Releases 更新源。GitHub Actions 的 Desktop 工作流（打 `v*` 标签或手动触发）默认只上传三个平台的构建产物；安装包由维护者上传到对应的 Release。
 
+## 发布版本时同步 Homebrew
+
+发布 **0.2.0** 及后续版本时，GitHub Release 与 [bosshanz/homebrew-tap](https://github.com/bosshanz/homebrew-tap) 的安装版本需要一起更新：
+
+1. 先发布正式安装包与 `SHA256SUMS.txt`，确认 macOS arm64 / x64 的 `.dmg` 均可下载。
+2. 更新 tap 仓库的 `Casks/tuantuan.rb`：将 `version` 改为本次版本，并从该 Release 的 `SHA256SUMS.txt` 同步两个架构的 `sha256`；核对下载 URL 与实际标签、文件名一致。
+3. 提交并合并 tap 更新，确认 `brew info --cask bosshanz/tap/tuantuan` 显示新版本，按对应架构验证下载与安装，确保现有用户能通过 `brew upgrade --cask tuantuan` 升级。
+
+正式安装包可用后再更新 cask，避免 Homebrew 指向尚未发布的文件。本轮仅登记 0.2.0 发布步骤，不提前更改当前稳定版安装入口。
+
 ---
 
 [← 返回 README](../README.md) · [文档索引](README.md)

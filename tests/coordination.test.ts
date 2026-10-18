@@ -83,6 +83,7 @@ describe("unmentioned group requests are coordinated by their frozen leader", ()
     const root = f.task("Lead", run.id);
     expect(root).toMatchObject({ parentTaskId: null, coordination: "lead" });
     expect(f.host.text(0)).toContain('<tuantuan-coordination mode="leader" phase="initial">');
+    expect(f.host.text(0)).toContain("<tuantuan-task>\n[用户]: 实现并验证这个功能\n</tuantuan-task>");
     await f.handoff("Dev", "实现功能");
     await f.handoff("Test", "验证功能");
     expect(f.host.calls).toHaveLength(1);
@@ -107,6 +108,12 @@ describe("unmentioned group requests are coordinated by their frozen leader", ()
     expect(f.task("Lead", run.id)).toMatchObject({ parentTaskId: root?.id, coordination: "review" });
     const review = f.host.text(3);
     expect(review).toContain('<tuantuan-coordination mode="leader" phase="review">');
+    // The same communication guidance accompanies the leader, both members and the follow-up,
+    // without replacing their individual coordination or checkpoint requirements.
+    for (let i = 0; i < 4; i++) {
+      expect(f.host.text(i)).toContain("<tuantuan-response>");
+      expect(f.host.text(i)).toContain("用 save_context(goal, decisions, pending) 保存完整任务快照");
+    }
     for (const text of ["Dev", "Test", "实现功能", "验证功能", "实现完成", "验证通过"]) expect(review).toContain(text);
     for (const reply of f.replies(run.id).filter((m) => m.senderId !== f.agent("Lead").id))
       expect(review).toContain(reply.id);
@@ -241,7 +248,8 @@ describe("unmentioned group requests are coordinated by their frozen leader", ()
     expect(f.task("Lead", dm.id)?.status).toBe("queued");
     f.host.finish(2, "汇总成员已取消及部分证据");
     await until(() => f.host.calls.length === 4);
-    expect(f.host.text(3)).toBe("接下来的单聊请求");
+    expect(f.host.calls[3]?.blocks[0]).toEqual({ type: "text", text: "接下来的单聊请求" });
+    expect(f.host.text(3)).toContain("<tuantuan-response>");
     expect(f.scheduler.tools(f.context("Lead"))).toEqual([]);
     await expect(f.call("Lead", "read_result", { messageId: cancelled?.id })).rejects.toThrow();
     f.host.finish(3);
@@ -402,6 +410,7 @@ describe("direct routing stays direct", () => {
       const run = f.say(text);
       for (let i = 0; i < f.host.calls.length; i++) {
         expect(f.host.text(i)).toContain('<tuantuan-coordination mode="direct" phase="initial">');
+        expect(f.host.text(i)).toContain("<tuantuan-response>");
         f.host.finish(i);
       }
       await f.scheduler.idle(f.room.id);
@@ -423,14 +432,73 @@ describe("direct routing stays direct", () => {
     expect(f.host.calls.map((c) => c.agent.name)).toEqual(["Lead", "Dev", "Test"]);
   });
 
-  test("DM prompts and tools are unchanged", async () => {
+  test("DM requests and images stay intact alongside response guidance on every turn", async () => {
     const f = fixture(["Lead"]);
-    f.say("保持单聊");
-    expect(f.host.text(0)).toBe("保持单聊");
+    const image = { mimeType: "image/png", data: "original-image" };
+    f.scheduler.postHumanMessage(f.room.id, "用户", "保持单聊", [image]);
+    expect(f.host.calls[0]?.blocks.slice(0, 2)).toEqual([
+      { type: "text", text: "保持单聊" },
+      { type: "image", ...image },
+    ]);
+    expect(f.host.text(0)).toContain("<tuantuan-response>");
+    expect(f.host.text(0)).not.toContain("<tuantuan-coordination");
     expect(f.scheduler.tools(f.context("Lead"))).toEqual([]);
     f.host.finish(0);
     await f.scheduler.idle(f.room.id);
-    expect(f.host.calls).toHaveLength(1);
+    f.say("继续，详细说明");
+    expect(f.host.calls[1]?.blocks[0]).toEqual({ type: "text", text: "继续，详细说明" });
+    expect(f.host.text(1)).toContain("<tuantuan-response>");
+    expect(f.host.text(1)).toContain("用户明确要求详细时按其要求");
+    f.host.finish(1);
+    await f.scheduler.idle(f.room.id);
+    expect(f.host.calls).toHaveLength(2);
+  });
+
+  test("native DM commands reach the host as one original text block", async () => {
+    const f = fixture(["Lead"]);
+    for (const command of ["/usage", "/mcp reconnect example", "/not-yet-declared argument"]) {
+      const index = f.host.calls.length;
+      f.say(command);
+      expect(f.host.calls[index]?.blocks).toEqual([{ type: "text", text: command }]);
+      f.host.finish(index);
+      await f.scheduler.idle(f.room.id);
+    }
+    f.say("继续普通任务");
+    expect(f.host.calls[3]?.blocks[0]).toEqual({ type: "text", text: "继续普通任务" });
+    expect(f.host.text(3)).toContain("<tuantuan-response>");
+    f.host.finish(3);
+    await f.scheduler.idle(f.room.id);
+  });
+
+  test("slash detection preserves image blocks and treats quoted slash text as a model request", async () => {
+    const f = fixture(["Lead"]);
+    const image = { type: "image" as const, mimeType: "image/png", data: "command-image" };
+    const first = f.scheduler.postHumanMessage(f.room.id, "用户", "/usage", [image]);
+    expect(f.host.calls[0]?.blocks).toEqual([{ type: "text", text: "/usage" }, image]);
+    f.host.finish(0);
+    await f.scheduler.idle(f.room.id);
+    f.scheduler.postHumanMessage(f.room.id, "用户", "/usage", [], first.id);
+    expect(f.host.text(1)).toContain("以下是用户本次引用的历史消息摘录");
+    expect(f.host.text(1)).toContain("<tuantuan-response>");
+    f.host.finish(1);
+    await f.scheduler.idle(f.room.id);
+  });
+
+  test("wrapped group slash requests and BYOK slash text still receive response guidance", async () => {
+    const group = fixture();
+    group.say("/usage");
+    expect(group.host.text(0)).toContain("<tuantuan-task>\n[用户]: /usage\n</tuantuan-task>");
+    expect(group.host.text(0)).toContain("<tuantuan-response>");
+    group.host.finish(0);
+    await group.scheduler.idle(group.room.id);
+
+    const dm = fixture(["Lead"]);
+    dm.store.updateAgent(dm.agent("Lead").id, agentInput("Lead", { harness: "custom" }));
+    dm.say("/usage");
+    expect(dm.host.calls[0]?.blocks[0]).toEqual({ type: "text", text: "/usage" });
+    expect(dm.host.text(0)).toContain("<tuantuan-response>");
+    dm.host.finish(0);
+    await dm.scheduler.idle(dm.room.id);
   });
 });
 

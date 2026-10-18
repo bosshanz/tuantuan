@@ -51,7 +51,7 @@
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
 | `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
-| `web/src/useChatScroll.ts` | 聊天自动跟随意图；上滑立即暂停，消息增量和布局变化保持阅读位置，回到底部或点击「回到最新」恢复 |
+| `web/src/useChatScroll.ts` | 聊天自动跟随意图与阅读锚点；上滑立即暂停，消息增量和布局变化保持阅读位置，引用导航保存并恢复消息位置，回到底部或点击「回到最新」恢复跟随 |
 | `web/src/ui.tsx` / `MermaidBlock.tsx` / `mermaidRendering.ts` | 稳定的 Markdown renderer；显式 Mermaid 围栏按需加载，串行渲染、资源语法校验、主题重绘与源码回退，见下方「消息渲染」 |
 | `web/src/ImagePreview.tsx` | 图表和各类消息图片共用缩略图、原生模态 dialog、适应窗口 / 原图与键盘焦点管理 |
 | `shared/roomPreview.ts` / `web/src/roomListState.ts` | 列表快照和全局 `room.preview` 共用摘要规则；按消息 seq 与状态防回退，列表加载期间重放全局事件，重连刷新 |
@@ -163,17 +163,20 @@ Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建�
 
 额度刷新、Harness 检测与登录请求在入口校验后关闭 HTTP 的默认空闲超时，实际等待仍受各 ACP 操作的超时限制。`process-tree.ts` 统一隔离进程清理错误：进程组信号失败保留日志，仅对尚未退出的原始子进程尝试回退；延迟强制终止同样不抛出未捕获异常，显式强制终止会撤销旧计时器。主进程先退出时仍回收其组内后代；清理失败不能覆盖查询结果或终止团团服务。
 
-人类消息的引用由 `POST messages` 的 `replyToId` 指定；`Store.insertMessage` 在写入事务中校验同房间及完成态，再生成最多 400 字符的快照。界面引用操作用于群聊，单聊中断重试也可生成引用。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
+人类消息的引用由 `POST messages` 的 `replyToId` 指定；阶段气泡另传 `replyToPartIndex`，使用原始 timeline parts 中的阶段起点。前端展示与服务端选段共用 `timelineBodyPhases`，连续正文和图片同段，思考或工具记录分隔阶段。`Store.insertMessage` 在写入事务中校验同房间、完成态及真实阶段起点，只从选定原文生成最多 400 字符的快照；无效索引、跨房间或未完成来源原子拒绝，不回退为整轮引用。可选 `partIndex` 与文本一起保存到既有 quote JSON，刷新保留选段，不需要数据库迁移；不传片段索引的既有请求仍引用整条消息。界面引用操作用于群聊，单聊中断重试也可生成引用。前端不能提供引用正文；原消息不在近期历史时仍能向本轮 prompt 提供引用。`content` 只含用户的新文本，引用不会进入 @ 路由解析，也不递归复制被引用消息的引用。
 
 ACP 表单提问仅声明 `elicitation.form`。`HarnessHost` 按 ask ID 与活动 slot 保存待办，`shared/elicitation.ts` 规范化字段并供前后端共同校验，`POST /api/elicitations/:id` 成功时先移除待办再应答。待办通过 `elicitation` 事件和消息快照同步，刷新恢复，任务取消、进程退出或 slot 释放时返回 cancel。`ChatView` 在切换会话或离开聊天页面时取消该视图持有的提问；刷新不走组件卸载清理。`ElicitationDialog` 使用共同校验而非 HTML 原生约束，避免正则匹配和字符长度规则不同；日期时间保留时区，未知字段阻止提交。
 
 消息分页沿用 `messages.seq` 和 `Store.recentMessages(roomId, limit, beforeSeq)`；`GET /api/rooms/:id/messages` 接受正整数 `limit`（默认 100，最多 500）与可选的排他游标 `beforeSeq`，返回按序排列的消息和 `nextBeforeSeq`（`null` 表示没有更早记录）。前端初始页为 200 条，历史页只合并消息与分页进度，不应用响应里的任务、会话或权限快照。消息按 id 去重、按 seq 排序，历史请求与最新快照分别标识和隔离；分页提交前记录当前可见消息的偏移，布局更新后恢复阅读位置。
 
-结论卡从成功根任务或 `reviewOf` 跟进消息的 `timeline.taskContext` 派生，服务端快照不受当前历史页限制，前端以 seq 合并快照与实时结果；无新笔记时保留上一份，不另存结论或生成摘要。来源跳转按需加载旧页，失败停止自动追读，保留错误和手动重试入口。`POST /api/rooms/:id/messages/:messageId/retry` 仅接受同房间的 interrupted Agent 消息，从 runId 找到原人类请求，将正文、图片与原请求引用交给普通消息路由，创建新 run；不恢复旧任务队列或 Harness 内部执行断点。
+结论卡从成功根任务或 `reviewOf` 跟进消息的 `timeline.taskContext` 派生，服务端快照不受当前历史页限制，前端以 seq 合并快照与实时结果；无新笔记时保留上一份，不另存结论或生成摘要。来源跳转按需加载旧页，失败停止自动追读，保留错误和手动重试入口。引用导航复用该通路并携带已保存的 `partIndex`，以原始时间线阶段位置定位和高亮正文；完整视图仅在渲染时隐藏重复交接工具，保留原始索引。带阶段位置的引用不能回退到整条消息，连续定位会清除旧高亮；旧引用仍按原消息定位。`ChatView` 在首次来源导航时保存 `useChatScroll` 的消息 ID 与视口偏移锚点，连续查看来源保留最初的锚点；返回按当前布局还原位置，取消待完成定位并清除高亮，迟到历史页仍正常合并。显式回到最新或切换会话清除返回点，返回按钮消失后焦点落在消息阅读区域。`POST /api/rooms/:id/messages/:messageId/retry` 仅接受同房间的 interrupted Agent 消息，从 runId 找到原人类请求，将正文、图片与原请求引用交给普通消息路由，创建新 run；不恢复旧任务队列或 Harness 内部执行断点。
 
 1. 人类消息写库后立即路由成独立的根任务：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 群主负责统筹。只有最后一种 run 保存 coordinatorId 和 rootTaskId，其余是直接对话。更换群主只影响新 run。同一房间不同 Agent 并行，同一 Agent 按入队顺序执行；新消息不取消旧任务，不同房间互不阻塞。
 2. `RoomState.tasks` 提供 taskId、runId、parentTaskId、agentId、messageId、请求文本与 queued / running / cancelling / waiting 状态；协调任务另带 coordination（lead / work / review）。已完成但仍有活动后代的任务显示为 waiting，保留停止剩余工作的入口。`activeRunId` 仅保留为兼容的忙碌标志，`queued` 计数任务；界面不从单个 runId 推断全部运行状态。`idle(roomId)` 等到队列、衍生交接和自动跟进全部结束。
 3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session。群聊转述取原始请求及之前的最近 30 条记录作为候选；交接通过 `Store.runMessages` 单独查询同一请求已完成的 Agent 回复，不先对全房间取 30 条再过滤。候选中取该 Agent 上次成功发言之后的内容，长正文保留首尾与省略标记，附消息 ID 和原长；单条约 2000 字符、整体约 8000 字符，优先较新消息，目录与完整原文可经 `read_context` 追读。`<tuantuan-task>` 独立保留原始消息全文与引用快照，`<tuantuan-context>` 独立保留结构化笔记；排队期间的新消息不能替换它们。每轮另附 `<tuantuan-coordination>` 指定 leader / member / direct 职责及 initial / review 阶段，不把群主职责写死在可能缓存的身份文档中。单 Agent 的新请求直接收到用户消息（含图片）；群聊缩为单人时，已有协调 run 保留职责与结果上下文直至收尾。身份文档按 Harness 传递（见 [Harness 文档](harness.md)）；不支持的 Harness 附加在新会话首条普通 prompt 前的 `<tuantuan-identity>` 中。
+
+普通模型请求的 `runAgentTurn` 另附 `<tuantuan-response>` 沟通约定，覆盖单聊、直达、群主、成员及跟进轮，确保恢复的 Harness session 也接收当前约定。原生 Harness 的前导斜杠命令按 Host 相同规则识别，不追加该块，保留命令处理所需的原始块数量、内容和顺序；自定义模型以及带引用或群聊包装的请求仍按模型任务处理。约定引导少量面向用户的关键消息，不改变原始请求、协调职责、权限、上下文保存或原生 Harness 规则；前端的本机精简偏好不传入编排。消息仍使用原 ACP 正文/思考/工具事件，没有新增阶段协议或摘要调用；原生历史回放剥离该内部提示块。
+
 4. `session/update` 按 messageId 实时推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。取消或删除后的迟到更新不能继续写入回复。
 5. `POST /api/rooms/:id/cancel {taskId}` 只取消该任务及 parentTaskId 可追溯的后代，保留独立根任务和兄弟任务。排队任务直接移除；运行任务变为 cancelling，待 Harness 结束才放行同一 Agent 下一项。群聊缺 taskId 返回 400；DM 空请求兼容为停止当前任务，保留后续队列。删除房间、修改项目目录 / 归属或停机使用 `cancelAll`；移除 Agent 使用 `cancelAgent`，只传播到其交接后代。
 6. Host 取消：prompt 先检查 AbortSignal；初始化等待可被取消，取消后不发送 prompt，同一 slot 的预热可供后续请求复用。已发出的 prompt 先发 `session/cancel`、解决挂起权限；默认 4 秒仍未返回则销毁该「房间 + Agent」的 Harness 与 ACP 终端进程组，保留部分回复并标为 cancelled，其他房间和 Agent 继续执行。同一 room / Agent 的重入 prompt 与活动期间切换历史会话返回 409。

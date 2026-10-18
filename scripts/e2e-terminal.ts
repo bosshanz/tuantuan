@@ -235,6 +235,15 @@ export async function terminalSmoke(
       await waitSettled(true);
       if (Math.abs((await messages.evaluate((el) => el.scrollTop)) - readingTop) > 2)
         throw new Error("terminal toggle moved a reader's history position");
+      // Returning to latest while the larger viewport is open must revoke the saved reading position,
+      // including when closing the terminal makes the entire transcript fit without scrolling.
+      await page.keyboard.press("Control+Backquote");
+      await waitSettled(false);
+      await page.getByRole("button", { name: "回到最新消息", exact: true }).click();
+      await page.keyboard.press("Control+Backquote");
+      await waitSettled(true);
+      if (await messages.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop > 2))
+        throw new Error("terminal toggle restored history after the reader returned to latest");
     }
     await page.keyboard.press("Control+Backquote");
     await waitSettled(false);

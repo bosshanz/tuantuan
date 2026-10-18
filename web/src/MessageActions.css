@@ -8,7 +8,9 @@
 .message-row[data-sender="human"] .message-actions { left: auto; right: calc(100% + 6px); }
 .message-actions::before { content: ""; position: absolute; top: -4px; bottom: -4px; left: -8px; width: 8px; }
 .message-row[data-sender="human"] .message-actions::before { left: auto; right: -8px; }
-.message-row:hover .message-actions, .message-row:focus-within .message-actions, .message-actions[data-open] { opacity: 1; pointer-events: auto; }
+.message-row:hover > .message-actions, .message-row:focus-within > .message-actions,
+.compact-phase-row:hover > .message-actions, .compact-phase-row:focus-within > .message-actions,
+.message-actions[data-open] { opacity: 1; pointer-events: auto; }
 .message-action-btn { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .message-action-btn:hover, .message-action-btn:active, .message-action-btn[aria-expanded="true"] { color: var(--text); background: var(--surface-hover); }
 .message-action-btn:disabled { opacity: 0.35; cursor: default; }
