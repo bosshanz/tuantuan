@@ -1,17 +1,22 @@
+import { attachmentError, type FileAttachment } from "../../shared/attachments";
 import {
   DESKTOP_CHECKPOINT_MAX_BYTES,
   type DesktopChatWorkspace,
   type DesktopUpdateBridge,
   type DesktopUpdateCheckpoint,
 } from "../../shared/desktopUpdate";
+import { readComposerAttachment, selectedAttachmentError, splitComposerAttachments } from "./composerAttachments";
 
 export type ChatWorkspace = DesktopChatWorkspace;
+type LoadedChatWorkspace = DesktopChatWorkspace & { files: FileAttachment[] };
 export type ImageAttachment = ChatWorkspace["images"][number];
 
 interface WorkspaceSnapshot {
-  data: ChatWorkspace;
+  data: LoadedChatWorkspace;
   loaded: boolean;
   error: string | null;
+  pendingAttachments: number;
+  attachmentError: string | null;
 }
 
 export interface WorkspaceStorage {
@@ -94,6 +99,11 @@ interface RoomEntry {
   loading?: Promise<void>;
   writing?: Promise<void>;
   timer?: ReturnType<typeof setTimeout>;
+  adding?: Promise<void>;
+}
+
+function loadedWorkspace(data: ChatWorkspace): LoadedChatWorkspace {
+  return { ...data, files: data.files ?? [] };
 }
 
 /** Only local composer state and reading positions; server chat state remains in chatReducer. */
@@ -111,7 +121,13 @@ export class ChatWorkspaceStore {
     let entry = this.rooms.get(id);
     if (!entry) {
       entry = {
-        snapshot: { data: { draft: "", images: [], quote: null, reading: null }, loaded: false, error: null },
+        snapshot: {
+          data: { draft: "", images: [], files: [], quote: null, reading: null },
+          loaded: false,
+          error: null,
+          pendingAttachments: 0,
+          attachmentError: null,
+        },
         revision: 0,
         saved: 0,
       };
@@ -139,7 +155,12 @@ export class ChatWorkspaceStore {
     entry.loading = (async () => {
       try {
         const data = await this.storage.read(id);
-        entry.snapshot = { data: data ?? entry.snapshot.data, loaded: true, error: null };
+        entry.snapshot = {
+          ...entry.snapshot,
+          data: loadedWorkspace(data ?? entry.snapshot.data),
+          loaded: true,
+          error: null,
+        };
       } catch (error) {
         entry.snapshot = { ...entry.snapshot, error: (error as Error).message };
         throw error;
@@ -155,11 +176,59 @@ export class ChatWorkspaceStore {
     const entry = this.entry(id);
     // A failed read must never overwrite an unread draft with an empty composer.
     if (!entry.snapshot.loaded) return;
-    entry.snapshot = { ...entry.snapshot, data: { ...entry.snapshot.data, ...patch } };
+    entry.snapshot = { ...entry.snapshot, data: loadedWorkspace({ ...entry.snapshot.data, ...patch }) };
     ++entry.revision;
     if (!silent) this.notify();
     clearTimeout(entry.timer);
-    entry.timer = setTimeout(() => void this.save(id).catch(() => {}), 250);
+    // File selections and removals must reach IndexedDB before a quick refresh or room switch.
+    if (patch.images !== undefined || patch.files !== undefined) void this.save(id).catch(() => {});
+    else entry.timer = setTimeout(() => void this.save(id).catch(() => {}), 250);
+  }
+
+  /** Each room owns its reads; completion merges with current attachments, including removals made while reading. */
+  addAttachments(id: string, selected: Iterable<File>, read = readComposerAttachment): Promise<void> {
+    const files = [...selected];
+    const entry = this.entry(id);
+    if (!files.length || !entry.snapshot.loaded) return Promise.resolve();
+    entry.snapshot = {
+      ...entry.snapshot,
+      pendingAttachments: entry.snapshot.pendingAttachments + files.length,
+      attachmentError: null,
+    };
+    this.notify();
+    const operation = (async () => {
+      await entry.adding;
+      try {
+        const selectedError = selectedAttachmentError(entry.snapshot.data, files);
+        if (selectedError) throw new Error(selectedError);
+        const additions = splitComposerAttachments(await Promise.all(files.map((file) => read(file))));
+        const current = entry.snapshot.data;
+        const next = {
+          images: [...current.images, ...additions.images],
+          files: [...current.files, ...additions.files],
+        };
+        const error = attachmentError(next.images, next.files);
+        if (error) throw new Error(error);
+        this.update(id, next);
+        // A ready attachment is durable; keeping this operation pending also blocks sending until the commit.
+        await this.save(id);
+      } catch (error) {
+        entry.snapshot = { ...entry.snapshot, attachmentError: (error as Error).message };
+      } finally {
+        entry.snapshot = { ...entry.snapshot, pendingAttachments: entry.snapshot.pendingAttachments - files.length };
+        this.notify();
+      }
+    })();
+    entry.adding = operation;
+    // Expected read errors are handled above, so saving can still preserve the existing draft after a failure.
+    return this.track(operation);
+  }
+
+  clearAttachmentError(id: string) {
+    const entry = this.entry(id);
+    if (!entry.snapshot.attachmentError) return;
+    entry.snapshot = { ...entry.snapshot, attachmentError: null };
+    this.notify();
   }
 
   async save(id: string): Promise<void> {
@@ -209,7 +278,7 @@ export class ChatWorkspaceStore {
     const rooms = await this.storage.all();
     const checkpoint: DesktopUpdateCheckpoint = { schema: 1, id: requestId ?? crypto.randomUUID(), route, rooms };
     if (new Blob([JSON.stringify(checkpoint)]).size > DESKTOP_CHECKPOINT_MAX_BYTES)
-      throw new Error("聊天草稿中的图片过大，无法保存更新前的工作。请减少图片后重试。");
+      throw new Error("聊天草稿中的附件过大，无法保存更新前的工作。请减少附件后重试。");
     await desktop.saveUpdateCheckpoint(checkpoint, requestId);
   }
 
@@ -221,7 +290,7 @@ export class ChatWorkspaceStore {
         await this.storage.import(checkpoint.rooms);
         for (const [id, data] of Object.entries(checkpoint.rooms)) {
           const entry = this.entry(id);
-          entry.snapshot = { data, loaded: true, error: null };
+          entry.snapshot = { ...entry.snapshot, data: loadedWorkspace(data), loaded: true, error: null };
           entry.saved = entry.revision;
         }
         this.notify();

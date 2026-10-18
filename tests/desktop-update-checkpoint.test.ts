@@ -181,3 +181,32 @@ test("abandoning an in-flight update invalidates it before a quit takes ownershi
   await quit;
   expect(store.read()?.id).toBe(current.id);
 });
+
+test("file attachments survive a private checkpoint, with legacy rooms still accepted", () => {
+  const { store } = file();
+  const value = checkpoint();
+  const room = value.rooms["room-1"];
+  if (!room) throw new Error("Missing room");
+  room.files = [{ name: "notes.md", mimeType: "text/markdown", data: "aGVsbG8=" }];
+  store.save(value);
+  expect(store.read()?.rooms["room-1"]?.files).toEqual(room.files);
+  store.save(checkpoint("legacy"));
+  expect(store.read()?.rooms["room-1"]?.files).toBeUndefined();
+});
+
+test("invalid file payloads cannot replace the durable checkpoint", () => {
+  const { store } = file();
+  store.save(checkpoint());
+  for (const files of [
+    null,
+    [{ name: "../secret", mimeType: "text/plain", data: "aGVsbG8=" }],
+    [{ name: "notes.md", mimeType: "text/plain", data: "not-base64" }],
+    [{ name: "notes.md", mimeType: "invalid", data: "aGVsbG8=" }],
+  ]) {
+    const value = checkpoint("invalid");
+    const room = value.rooms["room-1"];
+    if (!room) throw new Error("Missing room");
+    expect(() => store.save({ ...value, rooms: { "room-1": { ...room, files } } })).toThrow();
+    expect(store.read()?.id).toBe("checkpoint-1");
+  }
+});

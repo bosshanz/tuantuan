@@ -180,3 +180,137 @@ test("the renderer binds its complete workspace to the current host quit request
   expect(saved?.rooms.visited?.reading?.id).toBe("visible");
   expect(saved?.rooms.unvisited?.draft).toBe("other room");
 });
+
+test("legacy drafts restore empty file arrays while file drafts survive refresh and desktop handoff", async () => {
+  const { store, rooms, storage, desktop } = fixture();
+  rooms.set("legacy", { draft: "old draft", images: [], quote: null, reading: null });
+  await store.load("legacy");
+  expect(store.snapshot("legacy").data.files).toEqual([]);
+  const file = { name: "draft.md", mimeType: "text/markdown", data: "aGVsbG8=" };
+  store.update("legacy", { files: [file] });
+  await store.flush();
+  const refreshed = new ChatWorkspaceStore(storage);
+  await refreshed.load("legacy");
+  expect(refreshed.snapshot("legacy").data.files).toEqual([file]);
+  await store.prepareUpdate("#/c/legacy", desktop);
+  const restored = fixture().store;
+  await restored.restoreCheckpoint(desktop);
+  expect(restored.snapshot("legacy").data.files).toEqual([file]);
+});
+
+test("concurrent attachment reads merge with removals and stay in their original room", async () => {
+  const { store } = fixture();
+  await store.load("first");
+  await store.load("second");
+  const existing = { name: "remove.txt", mimeType: "text/plain", data: "b2xk" };
+  store.update("first", { files: [existing] });
+  let finish!: (value: typeof existing) => void;
+  const reading = store.addAttachments(
+    "first",
+    [new File(["one"], "one.txt")],
+    async () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const queued = store.addAttachments("first", [new File(["two"], "two.txt")], async () => ({
+    name: "two.txt",
+    mimeType: "text/plain",
+    data: "dHdv",
+  }));
+  await Bun.sleep(1);
+  expect(store.snapshot("first").pendingAttachments).toBe(2);
+  store.update("first", { files: [], draft: "edited while reading" });
+  await store.addAttachments("second", [new File(["other"], "other.txt")], async () => ({
+    name: "other.txt",
+    mimeType: "text/plain",
+    data: "b3RoZXI=",
+  }));
+  finish({ name: "one.txt", mimeType: "text/plain", data: "b25l" });
+  await Promise.all([reading, queued]);
+  expect(store.snapshot("first").data.files.map((file) => file.name)).toEqual(["one.txt", "two.txt"]);
+  expect(store.snapshot("first").data.draft).toBe("edited while reading");
+  expect(store.snapshot("second").data.files.map((file) => file.name)).toEqual(["other.txt"]);
+  expect(store.snapshot("first").pendingAttachments).toBe(0);
+  await store.flush();
+});
+
+test("a failed attachment batch preserves existing work and does not poison later reads or quit saves", async () => {
+  const { store, desktop } = fixture();
+  await store.load("room");
+  const existing = { name: "keep.txt", mimeType: "text/plain", data: "a2VlcA==" };
+  store.update("room", { draft: "keep this", files: [existing] });
+  await store.addAttachments("room", [new File(["a"], "a.txt"), new File(["b"], "b.txt")], async (file) => {
+    if (file.name === "b.txt") throw new Error("file read failed");
+    return { name: file.name, mimeType: "text/plain", data: "YQ==" };
+  });
+  expect(store.snapshot("room").data.files).toEqual([existing]);
+  expect(store.snapshot("room").attachmentError).toBe("file read failed");
+  expect(store.snapshot("room").pendingAttachments).toBe(0);
+  await store.prepareUpdate("#/c/room", desktop);
+  await store.addAttachments("room", [new File(["c"], "c.txt")], async () => ({
+    name: "c.txt",
+    mimeType: "text/plain",
+    data: "Yw==",
+  }));
+  expect(store.snapshot("room").attachmentError).toBeNull();
+  expect(store.snapshot("room").data.files.map((file) => file.name)).toEqual(["keep.txt", "c.txt"]);
+  await store.flush();
+});
+
+test("queued selections enforce the count against the latest attachments and never truncate", async () => {
+  const { store } = fixture();
+  await store.load("room");
+  let reads = 0;
+  const read = async (file: File) => {
+    ++reads;
+    return { name: file.name, mimeType: "text/plain", data: "" };
+  };
+  const first = store.addAttachments(
+    "room",
+    Array.from({ length: 7 }, (_, i) => new File([], `${i}.txt`)),
+    read,
+  );
+  const second = store.addAttachments("room", [new File([], "8.txt"), new File([], "9.txt")], read);
+  await Promise.all([first, second]);
+  expect(reads).toBe(7);
+  expect(store.snapshot("room").data.files).toHaveLength(7);
+  expect(store.snapshot("room").attachmentError).toContain("8");
+  expect(store.snapshot("room").pendingAttachments).toBe(0);
+  await store.flush();
+});
+
+test("attachment readiness waits for the durable write and removals start saving without the typing debounce", async () => {
+  const { store, rooms, storage } = fixture();
+  await store.load("room");
+  const originalWrite = storage.write;
+  let commit!: () => void;
+  let writes = 0;
+  storage.write = async (id, data) => {
+    ++writes;
+    if (writes === 1)
+      await new Promise<void>((resolve) => {
+        commit = resolve;
+      });
+    await originalWrite(id, data);
+  };
+  const adding = store.addAttachments("room", [new File(["hello"], "notes.txt")], async () => ({
+    name: "notes.txt",
+    mimeType: "text/plain",
+    data: "aGVsbG8=",
+  }));
+  await Bun.sleep(1);
+  expect(writes).toBe(1);
+  expect(store.snapshot("room").data.files).toHaveLength(1);
+  expect(store.snapshot("room").pendingAttachments).toBe(1);
+  expect(rooms.get("room")).toBeUndefined();
+  commit();
+  await adding;
+  expect(store.snapshot("room").pendingAttachments).toBe(0);
+  expect(rooms.get("room")?.files?.[0]?.name).toBe("notes.txt");
+  store.update("room", { files: [] });
+  await Bun.sleep(1);
+  expect(writes).toBe(2);
+  expect(rooms.get("room")?.files).toEqual([]);
+  await store.flush();
+});

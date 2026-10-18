@@ -887,10 +887,10 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .ctx-bar i { display: block; height: 100%; background: var(--accent); }
 .slash-pop { min-width: 300px; }
 .slash-name { font-family: var(--mono); font-size: 12px; color: var(--text); flex-shrink: 0; }
-.attach-row { display: flex; gap: 6px; padding: 8px 10px 0; flex-wrap: wrap; }
-.attach { position: relative; }
+.attach-row { display: flex; gap: 12px; padding: 16px 20px 0; flex-wrap: wrap; }
+.attach { position: relative; flex: none; }
 .attach img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); display: block; }
-.attach button { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: none; background: var(--text); color: var(--surface); display: grid; place-items: center; padding: 0; }
+.attach button { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; border: none; background: var(--text); color: var(--surface); display: grid; place-items: center; padding: 0; }
 .session-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 240px; overflow: auto; }
 .session-list .pop-item[aria-current="true"] { background: var(--accent-soft); }
 
@@ -1936,3 +1936,20 @@ html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region:
 .msg[data-sender="human"] .mention { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 2px; }
 .profile-input { max-width: 360px; }
 .page-inner.profile .profile-grid { grid-template-columns: 64px minmax(0, 1fr); }
+
+/* Composer attachments share the input's content edge and retain a compact removal target. */
+.attach-image { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.attach-file { display: flex; align-items: center; gap: 8px; min-height: 56px; max-width: min(280px, 100%); padding: 8px 14px 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.attach-file > svg { flex: none; color: var(--text-2); }
+.attachment-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.attachment-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.attachment-size { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.attachment-note { display: flex; align-items: flex-start; gap: 6px; padding: 0 20px 8px; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+.attachment-note > svg { flex: none; margin-top: 2px; }
+.attachment-note.error-text { color: var(--danger); }
+.message-file { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 360px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin: 6px 0; background: var(--surface-2); color: var(--text); }
+.message-file > svg { flex: none; color: var(--text-2); }
+.message-file .attachment-info { flex: 1; }
+.attachment-download { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 6px; color: inherit; }
+.attachment-download:hover { background: var(--border); }
+.attachment-download[aria-disabled] { pointer-events: none; opacity: 0.5; }

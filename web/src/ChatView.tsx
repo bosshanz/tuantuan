@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleSlash,
   Clock3,
+  FileText,
   History,
   Loader2,
   PanelRight,
@@ -34,6 +35,8 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
+import { mentionsEveryone, parseMentions } from "../../server/mentions";
+import { attachmentBytes, type FileAttachment } from "../../shared/attachments";
 import { canQuoteMessage, type MessageQuote, messageQuote } from "../../shared/messageQuote";
 import { intlLocale, translateError, useI18n } from "./i18n";
 import "./messageQuote.css";
@@ -57,6 +60,7 @@ import { agentActivity, messageExpression } from "./avatarState";
 import { SessionChips } from "./ConfigChips";
 import { type ChatSnapshot, chatReducer, emptyChat, historyCursor, type MessagePage } from "./chatState";
 import { chatWorkspace, type ImageAttachment } from "./chatWorkspace";
+import { formatAttachmentSize } from "./composerAttachments";
 import type { Opt } from "./config";
 import { ElicitationDialog, forgetElicitationDraft } from "./ElicitationDialog";
 import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
@@ -81,15 +85,6 @@ function terminalWasOpen(projectId: string | null) {
   } catch {
     return false;
   }
-}
-
-function readImage(f: File): Promise<ImageAttachment> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve({ mimeType: f.type, data: String(r.result).replace(/^data:[^,]*,/, "") });
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(f);
-  });
 }
 
 export function ChatView(props: {
@@ -123,12 +118,11 @@ export function ChatView(props: {
   const [jumpError, setJumpError] = useState<{ source: string; reason?: string } | null>(null);
   const [replay, setReplay] = useState<ReplayTurn[]>([]);
   const workspace = useChatWorkspace(room.id);
-  const { draft, images, quote } = workspace.data;
+  const { draft, images, files, quote } = workspace.data;
   const setDraft = (value: string | ((previous: string) => string)) =>
     workspace.update({
       draft: typeof value === "function" ? value(chatWorkspace.snapshot(room.id).data.draft) : value,
     });
-  const setImages = (value: ImageAttachment[]) => workspace.update({ images: value });
   const setQuote = (value: MessageQuote | null) => workspace.update({ quote: value });
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
@@ -242,6 +236,30 @@ export function ChatView(props: {
   // The agent the composer talks to by default: the DM partner, or the group's main agent.
   const primary = members.find((a) => a.id === room.mainAgentId) ?? members[0];
   const primaryView = primary ? sessions[primary.id] : undefined;
+  const mentioned = room.kind === "group" ? parseMentions(draft, members) : [];
+  const recipients =
+    room.kind === "dm"
+      ? members.slice(0, 1)
+      : mentionsEveryone(draft)
+        ? members
+        : mentioned.length
+          ? members.filter((member) => mentioned.includes(member.id))
+          : primary
+            ? [primary]
+            : [];
+  const unsupportedImages = recipients.filter((member) => sessions[member.id]?.capabilities.image === false);
+  const imageBlocked = images.length > 0 && unsupportedImages.length > 0;
+  const imageNote = unsupportedImages.length
+    ? tr(images.length ? "{names} 不支持图片，请移除图片或更换接收成员。" : "{names} 不支持图片，仍可添加文件。", {
+        names: unsupportedImages.map((member) => member.name).join("、"),
+      })
+    : images.length > 0 && recipients.some((member) => !sessions[member.id])
+      ? tr("图片能力尚未确认，发送时将按接收成员的实际能力处理。")
+      : null;
+  const fileNote =
+    files.length > 0 && recipients.some((member) => member.harness === "custom")
+      ? tr("BYOK 仅支持文本文件，不支持的文件会明确报错。")
+      : null;
 
   useEffect(() => {
     let alive = true;
@@ -418,27 +436,43 @@ export function ChatView(props: {
 
   const send = async () => {
     const content = draft.trim();
-    if (!workspace.loaded || sendingRef.current || (!content && images.length === 0)) return;
+    if (
+      !workspace.loaded ||
+      sendingRef.current ||
+      workspace.pendingAttachments ||
+      imageBlocked ||
+      (!content && images.length === 0 && files.length === 0)
+    )
+      return;
     // Sending resumes the tail now; a later upward gesture can revoke it before the HTTP reply arrives.
     followLatest();
     sendingRef.current = true;
     setSending(true);
     setSendError(null);
     const imgs = images;
+    const attachedFiles = files;
     try {
       const sent = await chatWorkspace.track(
         api<Message>("POST", `/api/rooms/${room.id}/messages`, {
           senderName: props.userName,
           content,
           images: imgs,
+          files: attachedFiles,
           replyToId: quote?.messageId,
           replyToPartIndex: quote?.partIndex,
         }),
       );
       // Returning to this room can create a newer draft before the old HTTP request finishes.
       const current = chatWorkspace.snapshot(room.id).data;
-      if (current.draft === draft && current.images === imgs && current.quote === quote)
-        workspace.update({ draft: "", images: [], quote: null, reading: null });
+      if (
+        current.draft === draft &&
+        current.images === imgs &&
+        current.files === attachedFiles &&
+        current.quote === quote
+      ) {
+        workspace.update({ draft: "", images: [], files: [], quote: null, reading: null });
+        chatWorkspace.clearAttachmentError(room.id);
+      }
       // The server's reply is authoritative: show it now even if the socket is slow, reconnecting or raced.
       dispatch({ type: "event", event: { type: "message", message: sent } });
     } catch (e) {
@@ -864,6 +898,7 @@ export function ChatView(props: {
               </div>
             )}
             <Composer
+              roomId={room.id}
               value={draft}
               quote={quote}
               onCancelQuote={() => setQuote(null)}
@@ -880,8 +915,22 @@ export function ChatView(props: {
               commands={primaryView?.commands ?? []}
               skills={primaryView?.skills ?? []}
               images={images}
-              onImages={setImages}
-              imageNote={primaryView && !primaryView.capabilities.image ? null : ""}
+              files={files}
+              onRemoveImage={(image) =>
+                workspace.update({
+                  images: chatWorkspace.snapshot(room.id).data.images.filter((current) => current !== image),
+                })
+              }
+              onRemoveFile={(file) =>
+                workspace.update({
+                  files: chatWorkspace.snapshot(room.id).data.files.filter((current) => current !== file),
+                })
+              }
+              pendingAttachments={workspace.pendingAttachments}
+              attachmentError={workspace.attachmentError}
+              imageNote={imageNote}
+              fileNote={fileNote}
+              imageBlocked={imageBlocked}
               stopTask={stopTask}
               stopPending={!!stopTask && (cancellations[stopTask.id]?.pending || stopTask.status === "cancelling")}
               queued={state.queued}
@@ -2261,6 +2310,7 @@ function RoomInfo(props: {
 const EVERYONE = { id: "__everyone", name: "所有人" } as const;
 
 function Composer(props: {
+  roomId: string;
   value: string;
   quote: MessageQuote | null;
   onCancelQuote: () => void;
@@ -2273,9 +2323,14 @@ function Composer(props: {
   commands: { name: string; description: string }[];
   skills: { name: string; description: string }[];
   images: ImageAttachment[];
-  onImages: (imgs: ImageAttachment[]) => void;
-  /** null = the harness does not take images (button hidden). */
+  files: FileAttachment[];
+  onRemoveImage: (image: ImageAttachment) => void;
+  onRemoveFile: (file: FileAttachment) => void;
+  pendingAttachments: number;
+  attachmentError: string | null;
   imageNote: string | null;
+  fileNote: string | null;
+  imageBlocked: boolean;
   modelPicker?: React.ReactNode;
   usage?: React.ReactNode;
   /** A shortcut is safe only when there is exactly one task to cancel. */
@@ -2286,15 +2341,9 @@ function Composer(props: {
 }) {
   const { t: tr } = useI18n();
   const fileRef = useRef<HTMLInputElement>(null);
-  const addFiles = async (files: Iterable<File>) => {
+  const addFiles = (files: Iterable<File>) => {
     if (props.sending) return;
-    await chatWorkspace.track(
-      (async () => {
-        const next = [...props.images];
-        for (const f of files) if (f.type.startsWith("image/")) next.push(await readImage(f));
-        props.onImages(next.slice(0, 8));
-      })(),
-    );
+    void chatWorkspace.addAttachments(props.roomId, files);
   };
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -2374,14 +2423,16 @@ function Composer(props: {
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: dropping images is a shortcut; the image button is the accessible path
+    // biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; the attachment button is the accessible path
     <div
       className="composer-box"
-      onDragOver={(e) => props.imageNote !== null && e.preventDefault()}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+      }}
       onDrop={(e) => {
-        if (props.imageNote === null) return;
+        if (!e.dataTransfer.files.length) return;
         e.preventDefault();
-        void addFiles(e.dataTransfer.files);
+        addFiles(e.dataTransfer.files);
       }}
     >
       {picker && (
@@ -2416,23 +2467,44 @@ function Composer(props: {
           ))}
         </div>
       )}
-      {props.images.length > 0 && (
-        <div className="attach-row">
+      {(props.images.length > 0 || props.files.length > 0) && (
+        <section className="attach-row" aria-label={tr("待发送附件")}>
           {props.images.map((img, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: attachments are a short local list
-            <span key={i} className="attach">
+            <span key={i} className="attach attach-image">
               <img src={`data:${img.mimeType};base64,${img.data}`} alt={tr("附件 {count}", { count: i + 1 })} />
+              <span className="attachment-size">{formatAttachmentSize(attachmentBytes(img.data) ?? 0)}</span>
               <button
                 type="button"
                 disabled={props.sending}
                 aria-label={tr("移除图片")}
-                onClick={() => props.onImages(props.images.filter((_, j) => j !== i))}
+                onClick={() => props.onRemoveImage(img)}
               >
                 <X size={11} />
               </button>
             </span>
           ))}
-        </div>
+          {props.files.map((file, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: each selection is a separate removable attachment
+            <span key={i} className="attach attach-file">
+              <FileText size={20} aria-hidden />
+              <span className="attachment-info">
+                <span className="attachment-name" title={file.name}>
+                  {file.name}
+                </span>
+                <span className="attachment-size">{formatAttachmentSize(attachmentBytes(file.data) ?? 0)}</span>
+              </span>
+              <button
+                type="button"
+                disabled={props.sending}
+                aria-label={tr("移除文件 {name}", { name: file.name })}
+                onClick={() => props.onRemoveFile(file)}
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </section>
       )}
       {options.length > 0 && (
         <div className="popover mention-pop" role="listbox" aria-label={tr("选择要 @ 的 Agent")}>
@@ -2497,10 +2569,11 @@ function Composer(props: {
         }}
         onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
         onPaste={(e) => {
-          const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
-          if (files.length > 0 && props.imageNote !== null) {
-            e.preventDefault();
-            void addFiles(files);
+          const files = [...e.clipboardData.files];
+          if (files.length > 0) {
+            // Preserve ordinary pasted text when the clipboard contains both text and files.
+            if (!e.clipboardData.getData("text/plain")) e.preventDefault();
+            addFiles(files);
           }
         }}
         onKeyDown={(e) => {
@@ -2533,10 +2606,27 @@ function Composer(props: {
             setDismissed(true);
           } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            props.onSubmit();
+            if (!props.pendingAttachments && !props.imageBlocked) props.onSubmit();
           }
         }}
       />
+      {props.pendingAttachments > 0 && (
+        <div className="attachment-note" role="status">
+          <Loader2 size={13} className="spin" />
+          {tr("正在读取 {count} 个附件…", { count: props.pendingAttachments })}
+        </div>
+      )}
+      {props.attachmentError && (
+        <div className="attachment-note error-text" role="alert">
+          {tr("添加附件失败：{reason}", { reason: translateError(props.attachmentError) })}
+        </div>
+      )}
+      {props.imageNote && (
+        <div className="attachment-note" role={props.imageBlocked ? "alert" : "status"}>
+          {props.imageNote}
+        </div>
+      )}
+      {props.fileNote && <div className="attachment-note">{props.fileNote}</div>}
       {props.members.length > 0 && props.value.trim() && (
         <div className="composer-recipients">
           <Recipients text={props.value} members={props.members} />
@@ -2544,37 +2634,33 @@ function Composer(props: {
       )}
       <div className="composer-foot">
         <div className="composer-tools">
-          {props.imageNote !== null && (
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                multiple
-                hidden
-                onChange={(e) => {
-                  void addFiles(e.target.files ?? []);
-                  e.target.value = "";
-                }}
-              />
-              <button
-                type="button"
-                className="btn ghost icon sm"
-                disabled={props.sending}
-                aria-label={tr("添加图片")}
-                title={props.imageNote || tr("添加图片")}
-                onClick={() => fileRef.current?.click()}
-              >
-                <Plus size={17} />
-              </button>
-            </>
-          )}
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              addFiles(e.target.files ?? []);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="btn ghost icon sm"
+            disabled={props.sending}
+            aria-label={tr("添加文件或图片")}
+            title={tr("添加文件或图片 · 最多 8 个，单个 5 MiB，合计 20 MiB")}
+            onClick={() => fileRef.current?.click()}
+          >
+            <Plus size={17} />
+          </button>
           {props.modelPicker}
         </div>
         <div className="composer-status">
           {props.usage}
           {(() => {
-            const stop = !!props.stopTask && !props.sending && !props.value.trim() && props.images.length === 0;
+            const empty = !props.value.trim() && props.images.length === 0 && props.files.length === 0;
+            const stop = !!props.stopTask && !props.sending && !props.pendingAttachments && empty;
             const label = stop ? (props.stopTask?.status === "queued" ? tr("取消排队") : tr("停止")) : tr("发送");
             return (
               <button
@@ -2583,7 +2669,7 @@ function Composer(props: {
                 data-mode={stop ? "stop" : "send"}
                 onClick={stop ? props.onStop : props.onSubmit}
                 disabled={
-                  stop ? props.stopPending : props.sending || (!props.value.trim() && props.images.length === 0)
+                  stop ? props.stopPending : props.sending || !!props.pendingAttachments || props.imageBlocked || empty
                 }
                 aria-label={label}
                 title={

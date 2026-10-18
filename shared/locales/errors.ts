@@ -2,6 +2,116 @@ import type { MessageCatalog } from "./types";
 
 /** Application-owned errors only. Placeholder values retain paths, names and third-party details. */
 export const errorMessages: MessageCatalog = {
+  "每条消息最多添加 8 个附件": {
+    "zh-TW": "每則訊息最多新增 8 個附件",
+    en: "Each message can include up to 8 attachments",
+    ja: "1 件のメッセージに添付できるのは 8 個までです",
+  },
+  "每个附件不能超过 5 MiB": {
+    "zh-TW": "每個附件不能超過 5 MiB",
+    en: "Each attachment must be 5 MiB or smaller",
+    ja: "添付ファイルは 1 個あたり 5 MiB 以下にしてください",
+  },
+  "每条消息的附件合计不能超过 20 MiB": {
+    "zh-TW": "每則訊息的附件合計不能超過 20 MiB",
+    en: "Attachments in one message must total 20 MiB or less",
+    ja: "1 件のメッセージの添付ファイルは合計 20 MiB 以下にしてください",
+  },
+  附件名称无效: {
+    "zh-TW": "附件名稱無效",
+    en: "The attachment filename is invalid",
+    ja: "添付ファイル名が無効です",
+  },
+  附件类型无效: {
+    "zh-TW": "附件類型無效",
+    en: "The attachment MIME type is invalid",
+    ja: "添付ファイルの MIME タイプが無効です",
+  },
+  不支持的图片类型: {
+    "zh-TW": "不支援的圖片類型",
+    en: "This image type is unsupported",
+    ja: "この画像形式はサポートされていません",
+  },
+  "附件内容不是有效的 Base64": {
+    "zh-TW": "附件內容不是有效的 Base64",
+    en: "The attachment content is not valid Base64",
+    ja: "添付ファイルの内容が有効な Base64 ではありません",
+  },
+  图片内容为空: {
+    "zh-TW": "圖片內容為空",
+    en: "The image content is empty",
+    ja: "画像の内容が空です",
+  },
+  "自定义 API 仅支持 UTF-8 文本文件，请移除非文本附件或选择原生 Harness": {
+    "zh-TW": "自訂 API 僅支援 UTF-8 文字檔案，請移除非文字附件或選擇原生 Harness",
+    en: "Custom APIs support UTF-8 text files only. Remove non-text files or choose a native Harness",
+    ja: "カスタム API は UTF-8 テキストファイルのみ対応しています。その他のファイルを削除するか、ネイティブ Harness を選択してください",
+  },
+  "自定义 API 仅支持 UTF-8 文本文件，无法读取附件 {name}": {
+    "zh-TW": "自訂 API 僅支援 UTF-8 文字檔案，無法讀取附件 {name}",
+    en: "Custom APIs support UTF-8 text files only and cannot read attachment {name}",
+    ja: "カスタム API は UTF-8 テキストファイルのみ対応しており、添付ファイル {name} は読み取れません",
+  },
+  "当前 Harness 不支持图片，请移除图片或切换 Harness": {
+    "zh-TW": "目前 Harness 不支援圖片，請移除圖片或切換 Harness",
+    en: "This Harness does not support images. Remove the images or switch Harness",
+    ja: "この Harness は画像に対応していません。画像を削除するか、Harness を切り替えてください",
+  },
+  "Agent {name} 的 Harness 不支持图片，请移除图片或切换 Harness": {
+    "zh-TW": "Agent {name} 的 Harness 不支援圖片，請移除圖片或切換 Harness",
+    en: "Agent {name}'s Harness does not support images. Remove the images or switch Harness",
+    ja: "Agent {name} の Harness は画像に対応していません。画像を削除するか、Harness を切り替えてください",
+  },
+  附件不属于当前会话: {
+    "zh-TW": "附件不屬於目前會話",
+    en: "The attachment does not belong to this conversation",
+    ja: "この添付ファイルは現在の会話のものではありません",
+  },
+  附件路径无效: {
+    "zh-TW": "附件路徑無效",
+    en: "The attachment path is invalid",
+    ja: "添付ファイルのパスが無効です",
+  },
+  附件会话无效: {
+    "zh-TW": "附件會話無效",
+    en: "The attachment conversation is invalid",
+    ja: "添付ファイルの会話が無効です",
+  },
+  附件目录不是安全的文件夹: {
+    "zh-TW": "附件目錄不是安全的資料夾",
+    en: "The attachment directory is not a safe folder",
+    ja: "添付ファイルのディレクトリが安全なフォルダーではありません",
+  },
+  附件原件不可用: {
+    "zh-TW": "附件原件無法使用",
+    en: "The original attachment file is unavailable",
+    ja: "添付ファイルの原本を利用できません",
+  },
+  附件原件不是安全的文件: {
+    "zh-TW": "附件原件不是安全的檔案",
+    en: "The original attachment is not a safe file",
+    ja: "添付ファイルの原本が安全なファイルではありません",
+  },
+  附件为只读文件: {
+    "zh-TW": "附件為唯讀檔案",
+    en: "Attachment originals are read-only",
+    ja: "添付ファイルの原本は読み取り専用です",
+  },
+  "本轮对话超过自定义 API 的上下文预算 {chars} 字符，未写入会话上下文": {
+    "zh-TW": "本輪對話超過自訂 API 的上下文預算 {chars} 字元，未寫入會話上下文",
+    en: "This turn exceeds the custom API's {chars}-character context budget and was not saved to conversation context",
+    ja: "今回の会話がカスタム API のコンテキスト上限 {chars} 文字を超えたため、会話のコンテキストに保存しませんでした",
+  },
+  "本轮图片超过自定义 API 的图片上下文预算 20 MiB，未写入会话上下文": {
+    "zh-TW": "本輪圖片超過自訂 API 的圖片上下文預算 20 MiB，未寫入會話上下文",
+    en: "Images in this turn exceed the custom API's 20 MiB image context budget and were not saved to conversation context",
+    ja: "今回の画像がカスタム API の画像コンテキスト上限 20 MiB を超えたため、会話のコンテキストに保存しませんでした",
+  },
+  "本轮图片超过自定义 API 的图片上下文预算 20 MiB；请减少图片或开启新会话": {
+    "zh-TW": "本輪圖片超過自訂 API 的圖片上下文預算 20 MiB；請減少圖片或開啟新會話",
+    en: "Images in this turn exceed the custom API's 20 MiB image context budget. Remove some images or start a new conversation",
+    ja: "今回の画像がカスタム API の画像コンテキスト上限 20 MiB を超えています。画像を減らすか、新しい会話を開始してください",
+  },
   "无法检查更新（HTTP {status}）": {
     "zh-TW": "無法檢查更新（HTTP {status}）",
     en: "Couldn’t check for updates (HTTP {status})",
@@ -92,10 +202,10 @@ export const errorMessages: MessageCatalog = {
     en: "Couldn’t save invalid update recovery data",
     ja: "無効な更新の復元データを保存できませんでした",
   },
-  "草稿及图片超过更新恢复容量，请先发送或移除部分附件": {
-    "zh-TW": "草稿及圖片超過更新恢復容量，請先傳送或移除部分附件",
-    en: "Drafts and images exceed update recovery capacity. Send or remove some attachments first",
-    ja: "下書きと画像が更新の復元容量を超えています。添付ファイルの一部を送信または削除してください",
+  "草稿及附件超过更新恢复容量，请先发送或移除部分附件": {
+    "zh-TW": "草稿及附件超過更新恢復容量，請先傳送或移除部分附件",
+    en: "Drafts and attachments exceed update recovery capacity. Send or remove some attachments first",
+    ja: "下書きと添付ファイルが更新の復元容量を超えています。添付ファイルの一部を送信または削除してください",
   },
   "无法定位 OpenCode，未能探测服务商配置格式": {
     "zh-TW": "無法定位 OpenCode，未能探測服務商設定格式",

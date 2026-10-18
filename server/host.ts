@@ -9,6 +9,7 @@ import {
   validateElicitation,
 } from "../shared/elicitation";
 import { AcpProcess, type TerminalSnapshot, withTimeout } from "./acp";
+import { customFileBlocks, nativeFileBlocks, restoredAttachmentPaths } from "./attachments";
 import { harnessSecretEnv } from "./harness-secrets";
 import { providerReasoningDefaults } from "./provider-reasoning";
 import { prepareProviderRuntime } from "./provider-runtime";
@@ -30,12 +31,15 @@ const CONFIG_TIMEOUT_MS = 20_000;
 import {
   CUSTOM_HARNESS,
   CUSTOM_HISTORY_MAX_CHARS,
+  CUSTOM_HISTORY_MAX_IMAGE_BYTES,
   commitBoundedTurn,
   fitTurns,
   historyChars,
   historyForRequest,
+  historyImageBytes,
   type Item,
   runTurn,
+  turnImageBytes,
 } from "./custom";
 import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./harness";
 import { harnessProcessEnv } from "./harness-env";
@@ -571,6 +575,9 @@ export class HarnessHost {
       if (JSON.stringify(cached.view.skills) !== before) this.events.session(room.id, agent.id, { ...cached.view });
       return { proc, slot: cached };
     }
+    proc.acp.grantAttachmentReads(
+      restoredAttachmentPaths(this.store.humanAttachmentMessages(room.id), this.dataDir, room.id),
+    );
     const view: SessionView = {
       sessionId: null,
       harness: proc.spec.id,
@@ -862,6 +869,16 @@ export class HarnessHost {
   ): Promise<{ stopReason: acp.StopReason }> {
     const { proc, slot } = await waitForSession(this.session(room, agent, identity, { startingTurn: true }), signal);
     signal.throwIfAborted();
+    if (!slot.view.capabilities.image && blocks.some((block) => block.type === "image"))
+      throw new ValidationError("当前 Harness 不支持图片，请移除图片或切换 Harness");
+    const attachments = nativeFileBlocks(
+      blocks,
+      this.dataDir,
+      room.id,
+      !!proc.acp.init?.agentCapabilities?.promptCapabilities?.embeddedContext,
+    );
+    blocks = attachments.blocks;
+    proc.acp.grantAttachmentReads(attachments.readPaths);
     const sessionId = slot.view.sessionId as string;
     const selection = materializeSkills(
       this.dataDir,
@@ -889,7 +906,6 @@ export class HarnessHost {
         slot.identityPending = false;
       }
     }
-    if (!slot.view.capabilities.image) blocks = blocks.filter((b) => b.type !== "image");
     slot.turn = (update) => {
       if (!signal.aborted) onUpdate(update);
     };
@@ -989,7 +1005,7 @@ export class HarnessHost {
             value: this.store.getRoomModel(room.id, agent.id) ?? agent.custom?.model ?? "",
             default: agent.custom?.model ?? "",
           },
-          capabilities: { image: false, loadSession: false, list: false, resume: false },
+          capabilities: { image: true, loadSession: false, list: false, resume: false },
         },
         turn: null,
         turnSignal: null,
@@ -1069,7 +1085,10 @@ export class HarnessHost {
     // deletion) deletes it, so a late completion cannot overwrite the cleared state.
     const slot = this.ensureCustom(room, agent);
     const turns = this.customTurns(room, agent);
-    const userText = blocks
+    const userImages = blocks.flatMap((block) =>
+      block.type === "image" ? [{ mimeType: block.mimeType, data: block.data }] : [],
+    );
+    const userText = customFileBlocks(blocks, room.id)
       .filter((b): b is acp.ContentBlock & { type: "text" } => b.type === "text")
       .map((b) => b.text)
       .join("\n");
@@ -1078,7 +1097,11 @@ export class HarnessHost {
         `当前输入 ${userText.length} 字符，超过自定义 API 的上下文预算 ${CUSTOM_HISTORY_MAX_CHARS} 字符；请缩短输入或开启新会话`,
       );
     // Old turns leave as whole units; runTurn re-measures every request and may drop more.
-    const history = historyForRequest(turns, userText.length);
+    const history = historyForRequest(
+      turns,
+      userText.length,
+      turnImageBytes([{ kind: "user", text: userText, userImages }]),
+    );
     const mat = materializeSkills(
       this.dataDir,
       agent.id,
@@ -1107,6 +1130,7 @@ export class HarnessHost {
       system,
       history,
       userText,
+      userImages,
       tools,
       callTool: async (name, args) => {
         signal.throwIfAborted();
@@ -1132,6 +1156,8 @@ export class HarnessHost {
       throw new ValidationError(
         `本轮对话 ${historyChars([newItems])} 字符，超过自定义 API 的上下文预算 ${CUSTOM_HISTORY_MAX_CHARS} 字符；回复已保留，但没有写入会话上下文，下一轮将从更早的记录继续`,
       );
+    if (historyImageBytes([newItems]) > CUSTOM_HISTORY_MAX_IMAGE_BYTES)
+      throw new ValidationError("本轮图片超过自定义 API 的图片上下文预算 20 MiB，未写入会话上下文");
     this.store.setCustomHistory(room.id, agent.id, commitBoundedTurn(turns, newItems));
     return { stopReason };
   }

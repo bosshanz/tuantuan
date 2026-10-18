@@ -434,7 +434,7 @@ describe("direct routing stays direct", () => {
 
   test("DM requests and images stay intact alongside response guidance on every turn", async () => {
     const f = fixture(["Lead"]);
-    const image = { mimeType: "image/png", data: "original-image" };
+    const image = { mimeType: "image/png", data: Buffer.from("original-image").toString("base64") };
     f.scheduler.postHumanMessage(f.room.id, "用户", "保持单聊", [image]);
     expect(f.host.calls[0]?.blocks.slice(0, 2)).toEqual([
       { type: "text", text: "保持单聊" },
@@ -472,7 +472,11 @@ describe("direct routing stays direct", () => {
 
   test("slash detection preserves image blocks and treats quoted slash text as a model request", async () => {
     const f = fixture(["Lead"]);
-    const image = { type: "image" as const, mimeType: "image/png", data: "command-image" };
+    const image = {
+      type: "image" as const,
+      mimeType: "image/png",
+      data: Buffer.from("command-image").toString("base64"),
+    };
     const first = f.scheduler.postHumanMessage(f.room.id, "用户", "/usage", [image]);
     expect(f.host.calls[0]?.blocks).toEqual([{ type: "text", text: "/usage" }, image]);
     f.host.finish(0);

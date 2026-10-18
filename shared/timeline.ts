@@ -1,4 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
+import type { FileAttachment } from "./attachments";
 
 /**
  * What one agent reply looks like, folded from ACP session/update notifications. The server
@@ -9,7 +10,8 @@ export type TimelinePart =
   | { kind: "text"; text: string }
   | { kind: "thought"; text: string }
   | { kind: "tool"; toolCallId: string }
-  | { kind: "image"; mimeType: string; data: string };
+  | { kind: "image"; mimeType: string; data: string }
+  | ({ kind: "file" } & FileAttachment);
 
 export interface ToolState {
   toolCallId: string;
@@ -125,7 +127,7 @@ export function timelineBodyPhases(t: Timeline | null | undefined): TimelineBody
   for (const [index, part] of (t?.parts ?? []).entries()) {
     if (part.kind === "thought" || part.kind === "tool") {
       current = null;
-    } else if (part.kind === "image" || part.text.trim()) {
+    } else if (part.kind !== "file" && (part.kind === "image" || part.text.trim())) {
       if (!current) {
         current = { start: index, parts: [], text: "" };
         phases.push(current);

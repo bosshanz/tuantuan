@@ -9,10 +9,14 @@
 新建 Agent 时 Harness 选「自定义 API（BYOK）」：接口格式（OpenAI Chat Completions / OpenAI Responses / Anthropic Messages）、Base URL、API Key、模型，可点「测试连接」。
 
 - 团团内置的轻量 harness，只做对话：SSE 流式、身份文档作系统提示、会话转述；多 Agent 时 `handoff` / `save_context` / `read_context` / `list_members` / `read_result` 以原生 function/tool call 提供（与 MCP 走同一处理逻辑），支持[结构化交接笔记与原文追读](conversations.md#跨-agent-交接)。**没有文件读写和终端。**
-- 对话上下文按完整成功轮保存，最多 20 轮；每次请求的序列化字符上限为 65,536，超限先移除完整旧轮，当前任务自身超限会提示错误，不生成语义摘要。重启后继续同一上下文；新会话、成员移除或更换项目目录 / 归属会清空，失败或取消不会写入半轮。聊天记录仍可回看；字符预算不等于模型 token 窗口。
+- 对话上下文按完整成功轮保存，最多 20 轮；每次请求的文本序列化字符上限为 65,536（不计图片 Base64），图片原始字节另限 20 MiB，超限先移除完整旧轮，当前任务自身超限会提示错误，不生成语义摘要。重启后继续同一上下文；新会话、成员移除或更换项目目录 / 归属会清空，失败或取消不会写入半轮。聊天记录仍可回看；字符预算不等于模型 token 窗口。
 - API Key 以明文保存在服务端 SQLite，专用接口只返回掩码（如 `sk-••••abcd`），不写日志；编辑时留空即保持原 Key。服务商 Key、管理 Key 与 Harness `env_var` 登录 Key 也保存在同一数据库；打码不代表磁盘加密。Harness 原生登录态仍由 Harness 管理。普通 Agent 环境变量属于可读写配置，不能视为专用密钥存储。系统钥匙串集成仍未实现。
 
-这里的 20 轮 / 65,536 字符仅适用于直接选择「自定义 API（BYOK）」的 Harness。为 Claude Code、OpenCode、Pi、Codex 选择 DeepSeek 等服务商时，仍沿用各引擎的[原生提示词](harness.md#原生提示词与团团身份)与[上下文压缩、恢复机制](conversations.md#上下文交接与压缩)。
+这里的 20 轮 / 65,536 文本字符仅适用于直接选择「自定义 API（BYOK）」的 Harness。为 Claude Code、OpenCode、Pi、Codex 选择 DeepSeek 等服务商时，仍沿用各引擎的[原生提示词](harness.md#原生提示词与团团身份)与[上下文压缩、恢复机制](conversations.md#上下文交接与压缩)。
+
+### BYOK 附件
+
+OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages 均传递 PNG、JPEG、GIF、WebP 图片；是否能识图取决于所选模型和兼容端点。UTF-8 文本文件内联提供内容，非文本文件明确报错，不发送无法读取的本机路径。图片与文本分别计量上下文预算，淘汰仍按完整成功轮进行，当前轮超限不会静默丢图或截断。选择方式和单条消息限制见[文件与图片附件](conversations.md#文件与图片附件)。
 
 ## 服务商与用量
 

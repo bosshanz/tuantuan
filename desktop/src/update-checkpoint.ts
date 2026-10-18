@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import { attachmentError, type FileAttachment } from "../../shared/attachments";
 import {
   DESKTOP_CHECKPOINT_MAX_BYTES,
   type DesktopCheckpointRequest,
@@ -45,6 +46,19 @@ function validCheckpoint(value: unknown): value is DesktopUpdateCheckpoint {
           image.mimeType.startsWith("image/") &&
           typeof image.data === "string",
       )
+    )
+      return false;
+    if (
+      room.files !== undefined &&
+      (!Array.isArray(room.files) ||
+        !room.files.every(
+          (file) =>
+            record(file) &&
+            typeof file.name === "string" &&
+            typeof file.mimeType === "string" &&
+            typeof file.data === "string",
+        ) ||
+        attachmentError([], room.files as FileAttachment[]) !== null)
     )
       return false;
     const quote = room.quote;
@@ -83,7 +97,7 @@ export class UpdateCheckpointFile {
     if (!validCheckpoint(value)) throw new Error("无法保存无效的更新恢复数据");
     const text = JSON.stringify(value);
     if (Buffer.byteLength(text) > DESKTOP_CHECKPOINT_MAX_BYTES)
-      throw new Error("草稿及图片超过更新恢复容量，请先发送或移除部分附件");
+      throw new Error("草稿及附件超过更新恢复容量，请先发送或移除部分附件");
     mkdirSync(dirname(this.path), { recursive: true });
     const temp = `${this.path}.${crypto.randomUUID()}.tmp`;
     let fd: number | undefined;

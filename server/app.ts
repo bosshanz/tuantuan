@@ -5,6 +5,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import { methods as acpMethods, RequestError } from "@agentclientprotocol/sdk";
 import type { Server, ServerWebSocket } from "bun";
 import { z } from "zod";
+import { IMAGE_MIME_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT } from "../shared/attachments";
 import { missingKeyVar } from "../shared/auth";
 import { translate } from "../shared/i18n";
 import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
@@ -149,8 +150,14 @@ const McpInputSchema = z.object({
 });
 
 const ImageSchema = z.object({
-  mimeType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
-  data: z.string().max(7_000_000, "图片不能超过 5MB"),
+  mimeType: z.enum(IMAGE_MIME_TYPES),
+  data: z.string().max(Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4, "每个附件不能超过 5 MiB"),
+});
+
+const FileSchema = z.object({
+  name: z.string().min(1).max(255),
+  mimeType: z.string().min(1).max(255),
+  data: z.string().max(Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4, "每个附件不能超过 5 MiB"),
 });
 
 export interface AppDeps {
@@ -1636,13 +1643,22 @@ export function createApp(deps: AppDeps) {
           .object({
             senderName: z.string().max(32).default("我"),
             content: z.string().max(100000),
-            images: z.array(ImageSchema).max(8).default([]),
+            images: z.array(ImageSchema).max(MAX_ATTACHMENT_COUNT).default([]),
+            files: z.array(FileSchema).max(MAX_ATTACHMENT_COUNT).default([]),
             replyToId: z.string().min(1).max(200).nullable().optional(),
             replyToPartIndex: z.number().int().nonnegative().safe().optional(),
           })
           .parse(await body());
         return json(
-          orchestrator.postHumanMessage(room.id, m.senderName, m.content, m.images, m.replyToId, m.replyToPartIndex),
+          orchestrator.postHumanMessage(
+            room.id,
+            m.senderName,
+            m.content,
+            m.images,
+            m.replyToId,
+            m.replyToPartIndex,
+            m.files,
+          ),
           201,
         );
       }
@@ -1658,8 +1674,19 @@ export function createApp(deps: AppDeps) {
         const images = (original.timeline?.parts ?? []).flatMap((part) =>
           part.kind === "image" ? [{ mimeType: part.mimeType, data: part.data }] : [],
         );
+        const files = (original.timeline?.parts ?? []).flatMap((part) =>
+          part.kind === "file" ? [{ name: part.name, mimeType: part.mimeType, data: part.data }] : [],
+        );
         return json(
-          orchestrator.postHumanMessage(room.id, original.senderName, original.content, images, original.id),
+          orchestrator.postHumanMessage(
+            room.id,
+            original.senderName,
+            original.content,
+            images,
+            original.id,
+            undefined,
+            files,
+          ),
           201,
         );
       }

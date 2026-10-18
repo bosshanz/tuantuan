@@ -49,6 +49,7 @@ export class AcpProcess {
   private stopping: NodeJS.Signals | null = null;
   private root: string;
   private skillReadRoots: { path: string; real: string; directory: boolean }[] = [];
+  private attachmentReadPaths: { path: string; real: string; directory: false }[] = [];
   init: acp.InitializeResponse | null = null;
   /** Resolves (never rejects) when the process exits. */
   readonly exited: Promise<number>;
@@ -203,13 +204,25 @@ export class AcpProcess {
     });
   }
 
+  /** This process belongs to one room/Agent; attachment grants never authorize writes or neighbours. */
+  grantAttachmentReads(paths: string[]) {
+    for (const path of paths) {
+      const absolute = resolve(path);
+      const stat = lstatSync(absolute);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("附件原件不是安全的文件");
+      const real = realpathSync(absolute);
+      if (!this.attachmentReadPaths.some((entry) => entry.path === absolute))
+        this.attachmentReadPaths.push({ path: absolute, real, directory: false });
+    }
+  }
+
   private readable(path: string): string {
     try {
       return this.inside(path);
     } catch (denied) {
       const requested = resolve(this.launch.cwd, path);
       const within = (candidate: string, root: string) => candidate === root || candidate.startsWith(root + sep);
-      const roots = this.skillReadRoots.filter((root) =>
+      const roots = [...this.skillReadRoots, ...this.attachmentReadPaths].filter((root) =>
         root.directory
           ? within(requested, root.path) || within(requested, root.real)
           : requested === root.path || requested === root.real,
@@ -239,7 +252,11 @@ export class AcpProcess {
   }
 
   private async writeTextFile(p: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> {
-    await Bun.write(this.inside(p.path), p.content);
+    const target = this.inside(p.path);
+    const requested = resolve(this.launch.cwd, p.path);
+    if (this.attachmentReadPaths.some((attachment) => requested === attachment.path || target === attachment.real))
+      throw acp.RequestError.invalidParams({ path: p.path }, "附件为只读文件");
+    await Bun.write(target, p.content);
     return {};
   }
 

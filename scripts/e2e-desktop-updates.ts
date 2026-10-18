@@ -205,9 +205,16 @@ try {
   await page.locator('input[type="file"]').setInputFiles({
     name: "large-draft.png",
     mimeType: "image/png",
-    buffer: Buffer.concat([png, Buffer.alloc(5 * 1024 * 1024)]),
+    buffer: Buffer.concat([png, Buffer.alloc(5 * 1024 * 1024 - png.length)]),
   });
   await page.locator(".attach img").waitFor();
+  const draftFile = { name: "升级草稿.txt", text: "UTF-8 文件草稿恢复\n附件不会随端口变化丢失。" };
+  await page.locator('input[type="file"]').setInputFiles({
+    name: draftFile.name,
+    mimeType: "text/plain",
+    buffer: Buffer.from(draftFile.text),
+  });
+  await page.locator(".attach-row").getByText(draftFile.name, { exact: true }).waitFor();
   await page.locator(`[data-message-id="${messages.at(-1)?.id}"]`).hover();
   await page
     .locator(`[data-message-id="${messages.at(-1)?.id}"]`)
@@ -263,6 +270,7 @@ try {
   const assertDraftAndReading = async () => {
     assert((await input.inputValue()) === "重启前保留的草稿", "draft text was lost");
     assert((await page.locator(".attach img").count()) === 1, "large image was lost");
+    await page.locator(".attach-row").getByText(draftFile.name, { exact: true }).waitFor();
     assert((await page.locator(".composer-quote").count()) === 1, "quote was lost");
     await page.waitForFunction((id) => !!document.querySelector(`[data-message-id="${id}"]`), anchorId);
     await page.waitForFunction(
@@ -284,6 +292,11 @@ try {
   assert(
     await page.evaluate(() => (window as unknown as TestWindow).updateTest.locked),
     "checkpoint did not lock editing",
+  );
+  const savedFile = hostCheckpoint.read()?.rooms[room.id]?.files?.[0];
+  assert(
+    savedFile?.name === draftFile.name && Buffer.from(savedFile.data, "base64").toString() === draftFile.text,
+    "checkpoint did not preserve draft file bytes",
   );
   const oldOrigin = base;
   restarted = serve({ dbPath: join(root, "test.db"), staticDir: "web/dist" }, 0);
@@ -416,7 +429,7 @@ try {
   if (process.env.SHOTS_DIR) await page.screenshot({ path: join(process.env.SHOTS_DIR, "updates-desktop-mobile.png") });
   assert(!errors.length, `page errors: ${errors.join("; ")}`);
   console.log(
-    "desktop update UI: PASS (safe notes, status/actions, busy/unknown guards, manual/browser/development modes, room drafts + 5MB image + quote + paged reading restore, checkpoint lock/failure/retry/route restart across different origins, failed import retains host checkpoint until ack, pending ACP question + typed form survives navigation)",
+    "desktop update UI: PASS (safe notes, status/actions, busy/unknown guards, manual/browser/development modes, room drafts + 5MiB image + UTF-8 file + quote + paged reading restore, checkpoint lock/failure/retry/route restart across different origins, failed import retains host checkpoint until ack, pending ACP question + typed form survives navigation)",
   );
 } finally {
   await browser.close();

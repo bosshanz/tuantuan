@@ -72,3 +72,24 @@ test("failed and cancelled replies update the global preview even though cancell
   expect(previews(room.id).at(-1)?.last.status).toBe("cancelled");
   expect(events.some((e) => e.type === "notify" && e.roomId === room.id)).toBe(false);
 });
+
+test("attachment-only messages have identical safe summaries in global events and refreshed room lists", async () => {
+  const room = app.store.createRoom("attachment preview", []);
+  const response = await fetch(`${base}/api/rooms/${room.id}/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      senderName: "我",
+      content: "",
+      files: [{ name: "report.txt", mimeType: "text/plain", data: "c2VjcmV0LXRleHQ=" }],
+    }),
+  });
+  expect(response.ok).toBe(true);
+  await app.orchestrator.idle(room.id);
+  await until(() => previews(room.id).some((event) => event.last.attachment?.name === "report.txt"));
+  const all = previews(room.id);
+  const snapshot = (await (await fetch(`${base}/api/rooms`)).json()) as Room[];
+  expect(snapshot.find((value) => value.id === room.id)?.last).toEqual(all.at(-1)?.last);
+  expect(JSON.stringify(all)).not.toContain("c2VjcmV0LXRleHQ=");
+  expect(all.at(-1)?.last).toMatchObject({ text: "", attachment: { kind: "file", name: "report.txt", count: 1 } });
+});

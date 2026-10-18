@@ -1,3 +1,4 @@
+import type { FileAttachment } from "./attachments";
 import type { MessageQuote } from "./messageQuote";
 
 export const DESKTOP_CHECKPOINT_MAX_BYTES = 64 * 1024 * 1024;
@@ -5,6 +6,8 @@ export const DESKTOP_CHECKPOINT_MAX_BYTES = 64 * 1024 * 1024;
 export interface DesktopChatWorkspace {
   draft: string;
   images: { mimeType: string; data: string }[];
+  /** Missing on checkpoints and drafts saved before file attachments were introduced. */
+  files?: FileAttachment[];
   quote: MessageQuote | null;
   reading: { id: string; offset: number; top: number } | null;
 }

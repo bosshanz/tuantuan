@@ -1449,4 +1449,94 @@ export const chatMessages = {
     en: "Retry failed: {reason}. Please try again.",
     ja: "再試行に失敗しました：{reason}。もう一度お試しください。",
   },
+  添加文件或图片: {
+    "zh-TW": "新增檔案或圖片",
+    en: "Add files or images",
+    ja: "ファイルや画像を追加",
+  },
+  "添加文件或图片 · 最多 8 个，单个 5 MiB，合计 20 MiB": {
+    "zh-TW": "新增檔案或圖片 · 最多 8 個，單個 5 MiB，合計 20 MiB",
+    en: "Add files or images · Up to 8, 5 MiB each, 20 MiB total",
+    ja: "ファイルや画像を追加 · 最大 8 個、1 個 5 MiB、合計 20 MiB",
+  },
+  待发送附件: {
+    "zh-TW": "待傳送附件",
+    en: "Attachments to send",
+    ja: "送信する添付ファイル",
+  },
+  "移除文件 {name}": {
+    "zh-TW": "移除檔案 {name}",
+    en: "Remove file {name}",
+    ja: "ファイル {name} を削除",
+  },
+  "下载文件 {name}": {
+    "zh-TW": "下載檔案 {name}",
+    en: "Download file {name}",
+    ja: "ファイル {name} をダウンロード",
+  },
+  附件无法下载: {
+    "zh-TW": "附件無法下載",
+    en: "Could not download the attachment",
+    ja: "添付ファイルをダウンロードできません",
+  },
+  "正在读取 {count} 个附件…": {
+    "zh-TW": "正在讀取 {count} 個附件…",
+    en: "Reading {count} attachments…",
+    ja: "{count} 個の添付ファイルを読み込み中…",
+  },
+  "添加附件失败：{reason}": {
+    "zh-TW": "新增附件失敗：{reason}",
+    en: "Could not add attachments: {reason}",
+    ja: "添付ファイルを追加できませんでした：{reason}",
+  },
+  无法读取附件内容: {
+    "zh-TW": "無法讀取附件內容",
+    en: "Could not read the attachment",
+    ja: "添付ファイルを読み込めません",
+  },
+  附件读取已取消: {
+    "zh-TW": "附件讀取已取消",
+    en: "Attachment reading was cancelled",
+    ja: "添付ファイルの読み込みがキャンセルされました",
+  },
+  "{names} 不支持图片，请移除图片或更换接收成员。": {
+    "zh-TW": "{names} 不支援圖片，請移除圖片或更換接收成員。",
+    en: "{names} cannot receive images. Remove the images or choose other recipients.",
+    ja: "{names} は画像に対応していません。画像を削除するか、送信先のメンバーを変更してください。",
+  },
+  "{names} 不支持图片，仍可添加文件。": {
+    "zh-TW": "{names} 不支援圖片，仍可新增檔案。",
+    en: "{names} cannot receive images. You can still attach files.",
+    ja: "{names} は画像に対応していません。ファイルは引き続き添付できます。",
+  },
+  "图片能力尚未确认，发送时将按接收成员的实际能力处理。": {
+    "zh-TW": "圖片能力尚未確認，傳送時將依接收成員的實際能力處理。",
+    en: "Image support is not confirmed yet. Sending will use the recipients’ actual capabilities.",
+    ja: "画像への対応はまだ確認されていません。送信時に受信メンバーの実際の機能に従って処理されます。",
+  },
+  "BYOK 仅支持文本文件，不支持的文件会明确报错。": {
+    "zh-TW": "BYOK 僅支援文字檔案，不支援的檔案會明確顯示錯誤。",
+    en: "BYOK supports text files only. Unsupported files will show an error.",
+    ja: "BYOK はテキストファイルのみ対応しています。非対応のファイルにはエラーが表示されます。",
+  },
+  "文件：{name}": {
+    "zh-TW": "檔案：{name}",
+    en: "File: {name}",
+    ja: "ファイル：{name}",
+  },
+  "{name} 等 {count} 个文件": {
+    "zh-TW": "{name} 等 {count} 個檔案",
+    en: "{name} ({count} files)",
+    ja: "{name} など {count} 個のファイル",
+  },
+  "{name} 等 {count} 个附件": {
+    "zh-TW": "{name} 等 {count} 個附件",
+    en: "{name} ({count} attachments)",
+    ja: "{name} など {count} 個の添付ファイル",
+  },
+  "{count} 个附件": {
+    "zh-TW": "{count} 個附件",
+    en: "{count} attachments",
+    ja: "{count} 個の添付ファイル",
+  },
 } satisfies MessageCatalog;

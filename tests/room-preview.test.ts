@@ -145,3 +145,76 @@ describe("room list snapshot versus global events", () => {
     expect(state.rooms).toEqual([]);
   });
 });
+
+describe("attachment-only sidebar previews", () => {
+  const file = (name: string) => ({
+    kind: "file" as const,
+    name,
+    mimeType: "text/plain",
+    data: "cHJpdmF0ZS1jb250ZW50",
+  });
+  const image = { kind: "image" as const, mimeType: "image/png", data: "cHJpdmF0ZS1pbWFnZQ==" };
+  const attachmentLast = (parts: NonNullable<Message["timeline"]>["parts"], content = "") =>
+    last({ senderKind: "human", content, timeline: { parts, tools: {}, plan: null } });
+
+  test("single and multiple files preserve filenames and localize only the surrounding summary", () => {
+    const single = attachmentLast([file("中文.txt")]);
+    expect(single.attachment).toEqual({ kind: "file", name: "中文.txt", count: 1 });
+    expect(previewText(single)).toBe("文件：中文.txt");
+    expect(previewText(single, "en")).toBe("File: 中文.txt");
+    expect(previewText(attachmentLast([file("notes.md"), file("code.ts")]))).toBe("notes.md 等 2 个文件");
+    expect(previewText(attachmentLast([image, file("notes.md")]))).toBe("notes.md 等 2 个附件");
+    expect(previewText(attachmentLast([file("x".repeat(255))]))).toHaveLength(83);
+  });
+
+  test("image-only previews use the existing translated image label and text remains first", () => {
+    expect(previewText(attachmentLast([image]))).toBe("（图片）");
+    expect(previewText(attachmentLast([image, image]), "en")).toBe("（Image × 2）");
+    expect(previewText(attachmentLast([file("notes.md"), image], "  first\n   priority  "))).toBe("first priority");
+    expect(attachmentLast([file("notes.md")], "actual text").attachment).toBeUndefined();
+  });
+
+  test("preview extraction never reads or exposes file contents", () => {
+    const guarded = file("secret.txt");
+    Object.defineProperty(guarded, "data", {
+      get: () => {
+        throw new Error("must not read attachment data");
+      },
+    });
+    const result = attachmentLast([guarded, image]);
+    expect(previewText(result)).toContain("secret.txt");
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(JSON.stringify(result)).not.toContain("data");
+    expect(JSON.stringify(result)).not.toContain(image.data);
+  });
+
+  test("room list snapshots derive the same metadata as live previews without returning base64", () => {
+    const store = new Store(":memory:");
+    try {
+      const r = store.createRoom("attachments", []);
+      const inserted = store.insertMessage({
+        roomId: r.id,
+        runId: "run",
+        hop: 0,
+        senderKind: "human",
+        senderId: null,
+        senderName: "我",
+        content: "",
+        status: "done",
+      });
+      for (const parts of [[file("report.txt")], [image], [file("report.txt"), image, file("code.ts")]]) {
+        const updated = store.updateReply(inserted.id, {
+          content: "",
+          status: "done",
+          timeline: { parts, tools: {}, plan: null },
+        });
+        const snapshot = store.listRooms()[0]?.last;
+        expect(snapshot).toEqual(messagePreview(updated) ?? undefined);
+        expect(JSON.stringify(snapshot)).not.toContain("cHJpdmF0ZS");
+        expect(JSON.stringify(snapshot)).not.toContain('"data"');
+      }
+    } finally {
+      store.db.close();
+    }
+  });
+});
