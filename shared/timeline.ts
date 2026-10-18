@@ -111,6 +111,32 @@ export function timelineText(t: Timeline): string {
     .join("");
 }
 
+export interface TimelineBodyPhase {
+  /** Stable position in the original timeline, shared by rendering and phase references. */
+  start: number;
+  parts: { part: Extract<TimelinePart, { kind: "text" | "image" }>; index: number }[];
+  text: string;
+}
+
+/** Consecutive body content forms one visible phase; thought/tool activity separates phases. */
+export function timelineBodyPhases(t: Timeline | null | undefined): TimelineBodyPhase[] {
+  const phases: TimelineBodyPhase[] = [];
+  let current: TimelineBodyPhase | null = null;
+  for (const [index, part] of (t?.parts ?? []).entries()) {
+    if (part.kind === "thought" || part.kind === "tool") {
+      current = null;
+    } else if (part.kind === "image" || part.text.trim()) {
+      if (!current) {
+        current = { start: index, parts: [], text: "" };
+        phases.push(current);
+      }
+      current.parts.push({ part, index });
+      if (part.kind === "text") current.text += part.text;
+    }
+  }
+  return phases;
+}
+
 export interface TimelineProcess {
   tools: number;
   thoughts: number;
@@ -238,6 +264,7 @@ export function replayTurns(updates: acp.SessionUpdate[]): ReplayTurn[] {
       .replace(/<tuantuan-skills>[\s\S]*?<\/tuantuan-skills>\s*/g, "")
       .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
       .replace(/<tuantuan-context>[\s\S]*?<\/tuantuan-context>\s*/g, "")
+      .replace(/<tuantuan-response>[\s\S]*?<\/tuantuan-response>\s*/g, "")
       .trim();
   return turns;
 }

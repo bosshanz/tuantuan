@@ -230,16 +230,23 @@ export async function richMediaSmoke(
     if (Math.abs((await page.locator(".messages").evaluate((element) => element.scrollTop)) - scrollBefore) > 2)
       throw new Error("preview moved the message reading position");
 
-    await row(attachment.id).getByRole("button", { name: "放大预览：图片", exact: true }).click();
+    const attachmentRow = row(attachment.id);
+    await attachmentRow.hover();
+    await attachmentRow.getByRole("button", { name: "更多消息操作", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "消息操作", exact: true })
+      .getByRole("button", { name: "查看详情", exact: true })
+      .click();
+    await page.getByRole("heading", { name: "回复详情", exact: true }).waitFor();
+    const toolDetails = page.locator(".details .timeline details.tool", { hasText: "生成预览图片" });
+    await toolDetails.waitFor();
+    await toolDetails.locator("summary").click();
+    await toolDetails.getByRole("button", { name: "放大预览：工具图片", exact: true }).click();
     await dialog.waitFor();
     await close.click();
-    // Compact view folds the tool behind the process line; open it before the tool card itself.
-    await row(attachment.id).locator(".compact-process > summary").click();
-    await row(attachment.id).locator(".tool > summary").click();
-    await row(attachment.id).getByRole("button", { name: "放大预览：工具图片", exact: true }).click();
-    await dialog.waitFor();
-    await page.mouse.click(4, 4);
     await dialog.waitFor({ state: "hidden" });
+    await page.getByRole("button", { name: "关闭详情面板", exact: true }).click();
+    await page.getByRole("heading", { name: "回复详情", exact: true }).waitFor({ state: "hidden" });
 
     await page.setViewportSize({ width: 720, height: 800 });
     await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });

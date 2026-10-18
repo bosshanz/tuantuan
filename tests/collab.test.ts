@@ -297,7 +297,9 @@ describe("session/load replay", () => {
       writeFileSync(join(skillDir, "SKILL.md"), "---\nname: history-skill\ndescription: private selection\n---\nBody");
       expect((await api("POST", `/api/agents/${a.id}/skills`, { action: "enable", key: skillDir })).status).toBe(200);
       const r1 = await room("r1", [a.id]);
-      await say(r1.id, "外部历史");
+      const initial = await say(r1.id, "外部历史");
+      expect(initial.at(-1)?.content).toBe("收到：「外部历史」（mock-fast）");
+      expect(thought(initial.at(-1))).not.toContain("tuantuan-response");
       const s1 = (await api<{ sessionId: string }>("GET", `/api/rooms/${r1.id}/agents/${a.id}/session`)).data.sessionId;
       const r2 = await room("r2", [a.id], { projectId: r1.projectId }); // same project folder → the harness lists r1's session
       await say(r2.id, "本地消息");
@@ -319,6 +321,7 @@ describe("session/load replay", () => {
       expect(groupReplay.some((turn) => turn.user.includes("协作历史"))).toBe(true);
       expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-coordination"))).toBe(true);
       expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-results"))).toBe(true);
+      expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-response"))).toBe(true);
       expect(groupReplay.every((turn) => !turn.user.includes("tuantuan-skills") && !turn.user.includes(skillDir))).toBe(
         true,
       );

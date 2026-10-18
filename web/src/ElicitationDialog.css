@@ -1,0 +1,343 @@
+.elicit {
+  flex: none;
+  width: 100%;
+  margin: 0 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.elicit::details-content {
+  height: 0;
+  overflow: clip;
+  transition: height 180ms var(--ease-out), content-visibility 180ms allow-discrete;
+}
+
+.elicit[open]::details-content {
+  height: auto;
+}
+
+.elicit-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.elicit-summary::-webkit-details-marker {
+  display: none;
+}
+
+.elicit-summary:hover {
+  background: var(--surface-hover);
+}
+
+.elicit-summary:focus-visible {
+  outline: 2px solid var(--text-2);
+  outline-offset: -3px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.elicit-summary-actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.elicit-status {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.elicit-status.failed {
+  color: var(--danger);
+}
+
+.elicit-disclosure {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.elicit-disclosure svg {
+  transition: transform 180ms var(--ease-out);
+}
+
+.elicit[open] .elicit-disclosure svg {
+  transform: rotate(90deg);
+}
+
+.elicit-close-label,
+.elicit[open] .elicit-open-label {
+  display: none;
+}
+
+.elicit[open] .elicit-close-label {
+  display: inline;
+}
+
+.elicit > form {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  max-height: min(440px, 44dvh);
+  transition: max-height var(--dur-3) var(--ease-out);
+  border-top: 1px solid var(--border);
+}
+
+.elicit-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  scrollbar-gutter: stable;
+}
+
+.elicit-intro {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+
+.elicit-agent {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.elicit-message {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.elicit-prompt {
+  margin: 0 0 20px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.elicit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.elicit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  scroll-margin: 24px;
+}
+
+.elicit-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.elicit-required {
+  margin-left: 4px;
+  color: var(--danger);
+}
+
+.elicit-field .input {
+  min-height: 38px;
+  border-radius: 6px;
+  line-height: 1.5;
+}
+
+.elicit-field .input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.elicit-field .input:focus-visible {
+  border-color: var(--text-2);
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.elicit-help,
+.elicit-error,
+.elicit-form-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.elicit-help {
+  color: var(--text-2);
+}
+
+.elicit-error,
+.elicit-form-error {
+  color: var(--danger);
+}
+
+.elicit-field.elicit-group {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.elicit-group > legend {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.elicit-group > .elicit-help,
+.elicit-group > .elicit-error {
+  margin-top: 8px;
+}
+
+.elicit-options {
+  border-top: 1px solid var(--border);
+}
+
+.elicit-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 40px;
+  padding: 10px 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.elicit-options > .elicit-choice {
+  border-bottom: 1px solid var(--border);
+}
+
+.elicit-choice input {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+}
+
+.elicit-choice input[type="radio"],
+.elicit-choice input[type="checkbox"] {
+  accent-color: var(--ink);
+}
+
+.elicit .elicit-choice input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.elicit .elicit-choice:has(input:focus-visible) {
+  border-radius: 4px;
+  outline: 2px solid var(--text-2);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  .elicit .elicit-choice:has(input:focus-visible) {
+    outline-color: Highlight;
+  }
+}
+
+.elicit-choice > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.elicit-choice small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.elicit-choice:has(input:disabled) {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.elicit-boolean .elicit-choice {
+  min-height: 24px;
+  padding: 0;
+}
+
+.elicit-boolean > .elicit-help,
+.elicit-boolean > .elicit-error {
+  padding-left: 26px;
+}
+
+.elicit-footer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.elicit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.elicit-actions .btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.elicit-actions .btn.primary {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+.elicit-actions .btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 86%, var(--surface));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .elicit::details-content,
+  .elicit > form,
+  .elicit-disclosure svg {
+    transition: none;
+  }
+}

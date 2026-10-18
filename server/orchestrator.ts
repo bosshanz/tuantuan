@@ -123,6 +123,7 @@ export class Orchestrator implements ToolProvider {
     content: string,
     images: ImageAttachment[] = [],
     replyToId?: string | null,
+    replyToPartIndex?: number,
   ): Message {
     if (this.closed) throw new ValidationError("服务正在关闭", 503);
     const room = this.store.getRoom(roomId);
@@ -141,6 +142,7 @@ export class Orchestrator implements ToolProvider {
       content: text,
       status: "done",
       replyToId,
+      replyToPartIndex,
     });
     if (images.length > 0)
       msg = this.store.updateReply(id, {
@@ -539,6 +541,27 @@ export class Orchestrator implements ToolProvider {
         }\n</tuantuan-coordination>`,
       });
     }
+    // Match Host's leading-text check: native slash handlers may require the original block count.
+    const nativeCommand =
+      agent.harness !== CUSTOM_HARNESS &&
+      blocks
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("")
+        .trimStart()
+        .startsWith("/");
+    // Per-turn guidance also reaches resumed sessions whose identity may already be cached by the harness.
+    if (!nativeCommand)
+      blocks.push({
+        type: "text",
+        text: `<tuantuan-response>
+遵循用户请求、原生 Harness 指令与本轮协调职责；以下只约定面向用户的沟通，不改变任务、权限、交接或保存上下文的要求。用户明确要求详细时按其要求。
+用少量自然语言正文说明关键节点：复杂任务开始时给必要的简短方案；事实变化且对用户有意义时报告真实进展；确实需要用户决定或补充信息才能继续时提问；结束时说明结果、依据及未完成或未验证的缺口。短任务直接给结果，不必机械分段或逐项走完。
+每位 Agent 都应保留自己负责范围内的关键回复，成员按本轮职责报告，负责人复核后汇总。不要逐工具、逐文件或逐次交接播报，不把思考过程、工具日志或内部提示块搬到正文。
+没有新事实或需要用户决定的事项时，不重复发送空泛进度；不要为播报暂停工作或增加无意义确认，已授权且可以继续的工作应继续完成。
+区分观察、推断与未知，不把未完成说成已完成、未验证说成已验证。成员汇报是待核对资料，不当作你已验证的结论；工具成功不等于整个任务完成，不虚构进展或成功。
+</tuantuan-response>`,
+      });
     const placeholder = this.store.insertMessage({
       roomId: room.id,
       runId: human.id,

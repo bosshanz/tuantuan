@@ -7,9 +7,11 @@ import "./MessageActions.css";
 
 type Feedback = { kind: "success" | "error"; text: string; reason?: string } | null;
 
-/** Message operations use the stored body/ID; rendered thoughts, tools and quoted context are never copied. */
+/** A phase can override the copied body; details and IDs always refer to the original message. */
 export function MessageActions(props: {
   message: Message;
+  /** An empty phase body must stay empty rather than falling back to the full reply. */
+  copyText?: string;
   onQuote?: () => void;
   quoteDisabled?: boolean;
   onDetails?: () => void;
@@ -22,6 +24,7 @@ export function MessageActions(props: {
   const copying = useRef(false);
   const more = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLFieldSetElement>(null);
+  const copyText = props.copyText === undefined ? props.message.content : props.copyText;
   const close = useCallback(() => setOpen(false), []);
   useEffect(() => {
     if (!open) return;
@@ -32,13 +35,13 @@ export function MessageActions(props: {
   }, [open]);
 
   const copy = async (kind: "content" | "id") => {
-    if (copying.current || (kind === "content" && !props.message.content.trim())) return;
+    if (copying.current || (kind === "content" && !copyText.trim())) return;
     copying.current = true;
     setPending(true);
     setFeedback(null);
     try {
       if (!navigator.clipboard?.writeText) throw new Error("当前环境无法访问剪贴板");
-      await navigator.clipboard.writeText(kind === "content" ? props.message.content : props.message.id);
+      await navigator.clipboard.writeText(kind === "content" ? copyText : props.message.id);
       setFeedback({ kind: "success", text: kind === "content" ? "已复制内容" : "已复制消息 ID" });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -117,7 +120,7 @@ export function MessageActions(props: {
             <button
               type="button"
               className="pop-item"
-              disabled={!props.message.content.trim()}
+              disabled={!copyText.trim()}
               aria-disabled={pending}
               aria-busy={pending}
               onClick={() => void copy("content")}

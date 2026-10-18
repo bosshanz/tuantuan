@@ -1,6 +1,6 @@
-.chat-tasks { margin: 0 4px 8px; font-size: 12px; }
+.chat-tasks { position: relative; z-index: 6; margin: 0 4px 8px; font-size: 12px; }
 .chat-activity { display: flex; align-items: center; gap: 6px; min-height: 32px; }
-.chat-activity-toggle { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: var(--r2); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--dur-1) var(--ease-out); }
+.chat-activity-toggle { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; max-width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: var(--r2); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--dur-1) var(--ease-out); }
 .chat-activity-toggle:hover, .chat-activity-stop:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
 .chat-activity-participants { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-width: 0; }
 .chat-activity-agent { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
@@ -18,6 +18,14 @@
 .chat-activity-stop { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 1px solid var(--border); border-radius: var(--r2); background: transparent; color: var(--text-2); cursor: pointer; }
 .chat-activity-stop:disabled { cursor: default; opacity: 0.4; }
 .chat-activity-stop[data-hidden] { visibility: hidden; }
+.chat-activity:has(.room-conclusion-toggle) .chat-activity-stop { margin-left: 0; }
+.room-conclusion-toggle { display: flex; flex: none; align-items: center; gap: 6px; min-height: 32px; margin-left: auto; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.room-conclusion-toggle:hover { background: var(--surface-hover); color: var(--text); }
+.room-conclusion-toggle:focus-visible { outline: 2px solid var(--text-2); outline-offset: -1px; box-shadow: none; }
+.room-conclusion-toggle.is-idle { flex: 1; min-width: 0; margin-left: 0; text-align: left; }
+.room-conclusion-toggle > svg, .room-conclusion-toggle > span:not(.room-conclusion-goal-line) { flex: none; }
+.room-conclusion-toggle .chev { color: var(--text-3); transform: rotate(-90deg); transition: transform var(--dur-2) var(--ease-out); }
+.room-conclusion-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .chat-task-disclosure, .chat-activity-errors { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-2) var(--ease-in); }
 .chat-activity-errors { grid-template-rows: 1fr; }
 .chat-tasks[data-expanded="true"] > .chat-task-disclosure { grid-template-rows: 1fr; }
@@ -38,12 +46,16 @@
 .chat-task-error { color: var(--danger); margin-top: 3px; overflow-wrap: anywhere; }
 @keyframes chat-activity-pulse { 0%, 70%, 100% { opacity: 0.3; } 35% { opacity: 1; } }
 @media (max-width: 600px) {
-  .chat-activity-toggle { gap: 6px; }
-  .chat-activity-participants { gap: 6px 12px; }
-  .chat-activity-label strong { max-width: 96px; }
+  .chat-activity { flex-wrap: wrap; align-items: flex-start; }
+  .chat-activity-toggle { flex-basis: 220px; gap: 6px; }
+  .chat-activity-participants { flex: 1; gap: 6px 12px; }
+  .chat-activity-agent { align-items: flex-start; }
+  .chat-activity-label { flex-wrap: wrap; row-gap: 0; }
+  .chat-activity-label strong { flex-shrink: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .chat-activity-label > span { flex: 0 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   .chat-task { gap: 6px; padding: 7px 6px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-activity-toggle, .chat-activity-chevron, .chat-task-disclosure, .chat-activity-errors { transition: none; }
+  .chat-activity-toggle, .chat-activity-chevron, .chat-task-disclosure, .chat-activity-errors, .room-conclusion-toggle .chev { transition: none; }
   .chat-activity-dots i { animation: none; opacity: 0.65; }
 }

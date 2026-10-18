@@ -1,8 +1,6 @@
 .message-quote {
-  display: grid;
-  gap: 3px;
   margin: 0 0 8px;
-  padding: 4px 9px;
+  padding: 0;
   border-left: 3px solid currentColor;
   border-radius: 3px;
   color: inherit;
@@ -11,6 +9,10 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.message-quote-link { display: grid; gap: 3px; width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 9px; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.message-quote-link:hover { background: color-mix(in srgb, currentColor 7%, transparent); }
+.message-quote-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.quote-navigation-feedback { margin: 0 0 6px; color: var(--text-2); font-size: 12px; }
 .message-quote-author { font-weight: 650; }
 .message-quote-text {
   display: -webkit-box;

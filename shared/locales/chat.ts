@@ -106,6 +106,16 @@ export const chatMessages = {
     en: "Latest",
     ja: "最新へ",
   },
+  返回刚才位置: {
+    "zh-TW": "返回剛才位置",
+    en: "Back to previous position",
+    ja: "直前の位置に戻る",
+  },
+  会话消息: {
+    "zh-TW": "對話訊息",
+    en: "Conversation messages",
+    ja: "会話のメッセージ",
+  },
   "发消息，/ 命令 · $ Skills…": {
     "zh-TW": "傳送訊息，/ 指令 · $ Skills…",
     en: "Message, / commands · $ Skills…",
@@ -197,9 +207,28 @@ export const chatMessages = {
     ja: "思考中",
   },
   精简视图: { "zh-TW": "精簡檢視", en: "Compact view", ja: "コンパクト表示" },
+  "折叠思考、工具和计划，保留回复正文。应用于本机所有会话。": {
+    "zh-TW": "收合思考、工具和計畫，保留回覆內文。套用至本機所有對話。",
+    en: "Fold thoughts, tools and plans while keeping replies visible. Applies to all conversations on this device.",
+    ja: "思考・ツール・計画を折りたたみ、返答本文を表示します。この端末のすべての会話に適用されます。",
+  },
+  展开提问: { "zh-TW": "展開提問", en: "Open question", ja: "質問を開く" },
+  收起提问: { "zh-TW": "收合提問", en: "Collapse question", ja: "質問を折りたたむ" },
+  提交失败: { "zh-TW": "提交失敗", en: "Submission failed", ja: "送信に失敗しました" },
   开启精简视图: { "zh-TW": "開啟精簡檢視", en: "Enable compact view", ja: "コンパクト表示をオン" },
   关闭精简视图: { "zh-TW": "關閉精簡檢視", en: "Disable compact view", ja: "コンパクト表示をオフ" },
   正在处理: { "zh-TW": "正在處理", en: "Working", ja: "処理中" },
+  未提供文字结果: {
+    "zh-TW": "未提供文字結果",
+    en: "No text result was provided",
+    ja: "テキストの結果はありません",
+  },
+  过程中有异常记录: {
+    "zh-TW": "過程中有異常紀錄",
+    en: "An issue was recorded during processing",
+    ja: "処理中に問題が記録されています",
+  },
+  处理过程: { "zh-TW": "處理過程", en: "Activity", ja: "処理の詳細" },
   "已运行 {count} 秒": {
     "zh-TW": "已執行 {count} 秒",
     en: "running for {count}s",
@@ -375,6 +404,16 @@ export const chatMessages = {
     "zh-TW": "引用 {name} 的訊息",
     en: "Quote from {name}",
     ja: "{name} のメッセージを引用",
+  },
+  "查看 {name} 的原消息": {
+    "zh-TW": "查看 {name} 的原訊息",
+    en: "Go to {name}'s original message",
+    ja: "{name} の元のメッセージを表示",
+  },
+  无法定位来源内容: {
+    "zh-TW": "無法定位來源內容",
+    en: "Source content could not be found",
+    ja: "参照元の内容が見つかりません",
   },
   "· {count} 秒无响应，可停止后重试": {
     "zh-TW": "· {count} 秒無回應，可停止後重試",
@@ -1387,6 +1426,8 @@ export const chatMessages = {
     ja: "{max} 件以内で選択してください",
   },
   当前结论: { "zh-TW": "目前結論", en: "Current conclusion", ja: "現在の結論" },
+  展开结论: { "zh-TW": "展開結論", en: "Show conclusion", ja: "結論を開く" },
+  收起结论: { "zh-TW": "收起結論", en: "Hide conclusion", ja: "結論を閉じる" },
   "{decisions} 项决策 · {pending} 项未完成": {
     "zh-TW": "{decisions} 項決策 · {pending} 項未完成",
     en: "{decisions} decisions · {pending} pending",

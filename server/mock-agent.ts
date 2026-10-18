@@ -382,6 +382,7 @@ acp
       .replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "")
       .replace(/<tuantuan-skills>[\s\S]*?<\/tuantuan-skills>\s*/g, "")
       .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
+      .replace(/<tuantuan-response>[\s\S]*?<\/tuantuan-response>\s*/g, "")
       .trim();
     // A queued group turn carries its own request, even after newer messages have arrived.
     const taskBlock = text.match(/<tuantuan-task>\n([\s\S]*?)\n<\/tuantuan-task>/)?.[1];

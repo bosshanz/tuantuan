@@ -763,10 +763,21 @@ export async function coordinationSmoke(browser: Browser, base: string, projectI
       const result = completed.messages.find((message) => message.senderId === member.id && message.status === "done");
       if (!result || !summary.content.includes(`${member.name} [done]：${result.content}`))
         throw new Error(`coordination summary lost ${member.name}'s result`);
+      await page.locator(`[data-message-id="${result.id}"]`).getByText(result.content, { exact: true }).waitFor();
     }
     const summaryMessage = page.locator(`[data-message-id="${summary.id}"]`);
-    await summaryMessage.getByText("群主跟进 · 已收到 2 份成员结果", { exact: true }).waitFor();
     await summaryMessage.getByText(/群主汇总/).waitFor();
+    const receipt = "群主跟进 · 已收到 2 份成员结果";
+    if (await summaryMessage.getByText(receipt, { exact: true }).count())
+      throw new Error("compact coordination summary exposed internal receipt metadata");
+    await summaryMessage.hover();
+    await summaryMessage.getByRole("button", { name: "更多消息操作", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "消息操作", exact: true })
+      .getByRole("button", { name: "查看详情", exact: true })
+      .click();
+    await page.locator(".details").getByText(receipt, { exact: true }).waitFor();
+    await page.getByRole("button", { name: "关闭详情面板", exact: true }).click();
     await status.waitFor({ state: "detached" });
     if (shotsDir)
       await page.screenshot({ path: join(shotsDir, "group-coordination-summary.png"), animations: "disabled" });

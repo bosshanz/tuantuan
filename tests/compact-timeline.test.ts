@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { currentToolOf, type Timeline, timelineProcess } from "../shared/timeline";
+import { currentToolOf, type Timeline, timelineBodyPhases, timelineProcess } from "../shared/timeline";
 
 const timeline = (t: Partial<Timeline>): Timeline => ({ parts: [], tools: {}, plan: null, ...t });
 const tool = (id: string, status: string): Timeline["tools"][string] => ({
@@ -58,4 +58,49 @@ test("currentToolOf names the running tool only while it is pending or in progre
   });
   expect(currentToolOf(stale)).toBeNull();
   expect(currentToolOf(timeline({ parts: [{ kind: "text", text: "纯文本" }] }))).toBeNull();
+});
+
+test("body phases share stable timeline indices and preserve each group's raw text and images", () => {
+  const t = timeline({
+    parts: [
+      { kind: "text", text: " \n" },
+      { kind: "thought", text: "不进入正文" },
+      { kind: "text", text: "先确认目标。\n\n" },
+      { kind: "text", text: "保留换行\n" },
+      { kind: "image", mimeType: "image/png", data: "first-image" },
+      { kind: "text", text: "\n图后说明" },
+      { kind: "text", text: " \n" },
+      { kind: "tool", toolCallId: "boundary" },
+      { kind: "image", mimeType: "image/png", data: "second-image" },
+      { kind: "image", mimeType: "image/png", data: "adjacent-image" },
+      { kind: "thought", text: "另一段思考" },
+      { kind: "text", text: "\n" },
+      { kind: "text", text: "第二段\n结果" },
+      { kind: "tool", toolCallId: "trailing" },
+      { kind: "text", text: " \t" },
+    ],
+  });
+  const phases = timelineBodyPhases(t);
+  expect(phases.map((phase) => phase.start)).toEqual([2, 8, 12]);
+  expect(phases.map((phase) => phase.parts.map(({ index }) => index))).toEqual([[2, 3, 4, 5], [8, 9], [12]]);
+  expect(phases.map((phase) => phase.text)).toEqual(["先确认目标。\n\n保留换行\n\n图后说明", "", "第二段\n结果"]);
+  expect(phases[0]?.parts[0]?.part === t.parts[2]).toBe(true);
+  expect(
+    timelineBodyPhases({ ...t, parts: [...t.parts, { kind: "text", text: "后来追加" }] }).map((p) => p.start),
+  ).toEqual([2, 8, 12, 15]);
+});
+
+test("absent timelines and whitespace-only body content never create a phase", () => {
+  expect(timelineBodyPhases(null)).toEqual([]);
+  expect(timelineBodyPhases(undefined)).toEqual([]);
+  expect(
+    timelineBodyPhases(
+      timeline({
+        parts: [
+          { kind: "text", text: "\n \t" },
+          { kind: "thought", text: "内部" },
+        ],
+      }),
+    ),
+  ).toEqual([]);
 });
