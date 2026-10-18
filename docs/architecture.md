@@ -13,9 +13,9 @@
 | `server/main.ts` | 打开数据库，按本机监听地址启动服务；退出时先停止调度，再关闭 Harness、安装任务与项目终端，桌面父进程看门狗 |
 | `server/project-terminal.ts` / `shared/project-terminal.ts` | 项目交互式终端：Bun PTY、每项目多个独立 shell、输入 / 尺寸校验、有界输出重放、退出与进程清理；独立于 ACP 工具终端 |
 | `server/app.ts` | HTTP API（参数校验）、WebSocket 订阅、静态文件；HTTP / WS 共用 Host、Origin 与跨站请求检查 |
-| `server/harness.ts` | Harness 定义（常用 6 个 + mock，及 `reg:<id>` 形式的任意 Registry Agent）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖、来源判定 |
+| `server/harness.ts` | Harness 定义（常用 7 个 + mock，及 `reg:<id>` 形式的任意 Registry Agent）：启动命令、安装与登录提示、身份文档传递方式；登录 shell 环境（PATH）解析、`which`、版本检测、绝对路径覆盖、来源判定 |
 | `server/harness-runtime.ts` | 所选 ACP 与配套引擎的启动身份、Codex 命令解析及安装失效代次；Host 进程与探测缓存共用，不把 Registry / ACP 版本误当作底层引擎版本 |
-| `server/registry.ts` | 官方 ACP Registry 客户端：本地缓存 → 随包快照兜底、zod 校验（坏条目跳过）、6 小时刷新、图标缓存（只接受 SVG）；平台键；额外的实验性条目（ZCode 桥接） |
+| `server/registry.ts` | 官方 ACP Registry 客户端：本地缓存 → 随包快照兜底、zod 校验（坏条目跳过）、6 小时刷新、图标缓存（只接受 SVG）；平台键；补充的实验性条目（DeepSeek 官方预发布、ZCode 桥接），明确区别于上游收录 |
 | `server/managed.ts` | 团团安装的 Harness（`<数据目录>/harnesses`）：npx 包用 Bun 或托管 Node 22（`npm install --omit=dev`）、uvx 用 uv（用户的或下载的）、二进制按平台下载 + sha256 校验 + 解压；`manifest.json` 记录版本与命令；卸载 |
 | `server/harness-secrets.ts` | 按 Harness 保存的 API Key（`settings.harnessEnv`，打码给前端，只注入该 Harness 进程）；打开终端（osascript / x-terminal-emulator…）；缺 Key 错误识别在 `shared/auth.ts` |
 | `server/installer.ts` | 安装任务：命令只来自定义（不接受请求里的命令）或 Registry 任务；日志流、取消、超时 |
@@ -213,6 +213,7 @@ Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio M
 ## Harness 来源与一键安装
 
 - `detectHarness` 顺序：「Harness 页填的路径」→ 登录 shell 的 PATH → 团团内置（`bundled`，从团团自己的 `node_modules` 解析 ACP 适配器，用 `process.execPath` 的 Bun 启动）→ 团团安装（`managed`）。`TUANTUAN_PREFER_MANAGED=1` 时团团安装的优先。
+- DeepSeek 常用定义为 `deepseek` / `dsh --profile acp`，身份走首条普通消息；托管安装复用 Registry 安装器，但条目由团团补充，固定官方 npm `@deepseek-ai/dsh@0.2.1-rc.2`，需要 Node ≥ 22.19，符合版本的本机 Node 优先，否则下载托管版本，不加到桌面依赖。登录入口补充 `DEEPSEEK_API_KEY`，沿用 `settings.harnessEnv` 的保存与进程注入；原生 `$DSH_HOME/.credentials.yaml`（默认 `~/.dsh/.credentials.yaml`）优先级归 CLI，不改写本机文件。该版本不声明认证方法且 `authenticate` 不校验凭据，成功握手 / 建会话时的 `loggedIn` 为未知，只表示连接可用；可识别的真实认证失败仍返回未登录及错误。安装版本来自 npm / CLI，不采用固定为 `0.0.1` 的 ACP `agentInfo.version`。会话复用走原生 list / resume，不伪造 `session/load` 回放；DeepSeek 服务商的兼容规则保持独立。
 - 桌面包默认不带 Claude Code / Codex 适配器（引擎各 250–400 MB）：首次使用时走 Registry 安装（`claude-acp` / `codex-acp`，npx 包，Bun 运行）。`TUANTUAN_BUNDLE_ADAPTERS=1` 打包时改为内置。登录命令按「内置 → 团团安装」两处找 Claude / Codex 可执行文件。
 - Registry 安装：schema 与 `installManaged` 的直接入口均校验 id / 版本为安全目录段（版本不得与 manifest 保留名称冲突），并确认安装路径在 Agent 目录内、关键目录不是符号链接。二进制与 npx 先安装到带随机后缀的独立 `.partial` 目录；发布前检查取消信号，成功后替换版本目录并写 manifest，失败 / 取消清理暂存。Registry 版本变了提示更新；卸载只删团团目录。需要 Node ≥ 22 的包（`engines.node` 或常用定义里 `runtime: "node"`，如 MiniMax 的 better-sqlite3）用托管 Node（nodejs.org，校验 SHASUMS256）。uv 工具直接装到最终目录（venv 写死路径）。
 - 一键安装（常用 Harness 的官方脚本 / bun / brew / npm）：`bash -c` 在登录 shell 环境里运行，`stdin` 关闭，日志去掉 ANSI 并折叠 `\r` 进度，最多保留 800 行；取消时连同子进程一起结束；15 分钟超时。完成后清掉登录 shell 环境缓存，页面重新检测。

@@ -4,6 +4,7 @@ import { missingKeyVar } from "../../shared/auth";
 import { api } from "./api";
 import { type AuthMethodView, HarnessAuth } from "./HarnessAuth";
 import { intlLocale, translateError, useI18n } from "./i18n";
+import { BrandLogo } from "./ModelPicker";
 
 export interface RegistryItem {
   id: string;
@@ -24,6 +25,7 @@ export interface RegistryItem {
   updateAvailable: boolean;
   experimental: boolean;
   note: string | null;
+  origin: "acp" | "tuantuan";
 }
 export interface RegistryView {
   source: "network" | "cache" | "snapshot";
@@ -37,13 +39,14 @@ export interface RegistryView {
 export function RegistryIcon({ id, name, size = 20 }: { id: string | null; name: string; size?: number }) {
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
-  const url = id ? `/api/registry/icon/${encodeURIComponent(id)}` : null;
+  const url = id && id !== "deepseek-harness" ? `/api/registry/icon/${encodeURIComponent(id)}` : null;
   useEffect(() => {
     if (!url) return;
     const img = new Image();
     img.onerror = () => setFailed(true);
     img.src = url;
   }, [url]);
+  if (id === "deepseek-harness") return <BrandLogo brand="deepseek" size={size} />;
   if (!url || failed)
     return (
       <span className="reg-icon reg-icon-letter" style={{ width: size, height: size }} aria-hidden>
@@ -141,7 +144,8 @@ export function RegistrySection(props: { onChanged: () => Promise<void> }) {
             {t("来自")}{" "}
             <a href="https://agentclientprotocol.com/get-started/registry" target="_blank" rel="noreferrer">
               {t("ACP 官方 Registry")}
-            </a>
+            </a>{" "}
+            {t("及团团补充目录")}
             {" · "}
             {view ? t("{count} 个", { count: view.agents.filter((a) => !a.curated).length }) : "…"}
             {view &&
@@ -348,6 +352,7 @@ function RegistryCard({
         {t(a.description)}
       </p>
       <div className="reg-tags">
+        {a.origin === "tuantuan" && <span className="tag">{t("团团补充目录")}</span>}
         {a.kinds.map((k) => (
           <span key={k} className="tag">
             {t(KIND[k] ?? k)}

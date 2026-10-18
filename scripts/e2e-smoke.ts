@@ -696,8 +696,20 @@ try {
   if ((await input.inputValue()) !== "$") throw new Error("closing skill completion changed the draft");
   await input.fill("$中文");
   await skillList.getByRole("option").filter({ hasText: "$completion-18" }).waitFor();
+  // Select the completed draft after React handles Enter but before the next frame. A delayed caret
+  // restoration must not collapse this newer selection and append the next replacement to the old draft.
+  await input.evaluate((element) => {
+    window.addEventListener("keydown", () => (element as HTMLTextAreaElement).select(), { once: true });
+  });
   await input.press("Enter");
   if ((await input.inputValue()) !== "$completion-18 ") throw new Error("skill Enter completion submitted the draft");
+  const completionSelection = await input.evaluate(async (element) => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const field = element as HTMLTextAreaElement;
+    return { start: field.selectionStart, end: field.selectionEnd, length: field.value.length };
+  });
+  if (completionSelection.start !== 0 || completionSelection.end !== completionSelection.length)
+    throw new Error(`skill completion overwrote a newer selection: ${JSON.stringify(completionSelection)}`);
   await input.fill("请用 $tion-18 后文");
   for (let i = 0; i < " 后文".length; i++) await input.press("ArrowLeft");
   await skillList.getByRole("option").filter({ hasText: "$completion-18" }).waitFor();

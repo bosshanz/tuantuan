@@ -6,7 +6,7 @@
 
 **讓多個 Agent 在本機協作的工作台。**
 
-將 Claude Code、Codex、OpenCode、Pi、Grok Build、MiniMax Code 及其他程式開發 Agent，放進依專案整理的對話。團團透過 [Agent Client Protocol（ACP）](https://agentclientprotocol.com)連接這些程式開發執行環境（Harness）。
+將 Claude Code、Codex、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code 及其他程式開發 Agent，放進依專案整理的對話。團團透過 [Agent Client Protocol（ACP）](https://agentclientprotocol.com)連接這些程式開發執行環境（Harness）。
 
 可使用 macOS、Windows、Linux 的 Electron 桌面版，或瀏覽器搭配本機服務。模型由你自己的 Harness 帳號或 API 服務商提供，團團不內含模型服務。
 
@@ -16,7 +16,7 @@
 
 ## 主要功能
 
-- **選擇 Harness**：沿用本機既有安裝，或從 ACP Registry 安裝 Agent；依 Harness 提供的登入方式完成設定。
+- **選擇 Harness**：沿用本機既有安裝，或從 ACP Registry 安裝 Agent；也可依需要安裝團團補充的官方 DeepSeek CLI 預先發行版，詳見[安裝與驗證說明（簡體中文）](docs/harness.md)。依 Harness 提供的登入方式完成設定。
 - **多 Agent 協作**：一段對話可有一名或多名 Agent。用 `@` 指定成員，或由主 Agent 分工、跟進並彙整結果。所有成員共用專案工作目錄。
 - **結構化脈絡交接**：交接包含任務說明、目標、重要決策及待辦事項；長訊息與結果可分頁讀取。每名 Agent 保留自己的 Harness 工作階段，交接不會複製來源 Agent 的私有工作階段歷史。
 - **保留原生開發能力**：Claude Code、OpenCode、Pi、Codex 沿用原生提示詞與脈絡管理。團團顯示各 Harness 實際提供的模型、權限、推理及斜線指令選項，具體能力依 Harness 而異。
@@ -27,15 +27,15 @@
 
 完整清單見[功能一覽（簡體中文）](docs/features.md)。
 
-## 下載 v0.1.1
+## 下載 v0.2.2
 
-前往 [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.1.1) 下載桌面版：
+前往 [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.2) 下載桌面版：
 
 - **macOS**：Apple 晶片（arm64）或 Intel（x64），提供 `.dmg` 和 `.zip`。
 - **Windows**：x64 `.exe` 安裝程式。
 - **Linux**：x64 `.AppImage`。
 
-桌面版已包含執行環境，不必安裝 Bun。v0.1.1 的 macOS 套件使用 ad-hoc 簽署，未經 Apple 公證；Windows 安裝程式未經程式碼簽署。詳見[安裝與簽署說明（簡體中文）](docs/install.md)。
+桌面版已包含執行環境，不必安裝 Bun。v0.2.2 的 macOS 套件使用 ad-hoc 簽署，未經 Apple 公證；Windows 安裝程式未經程式碼簽署。詳見[安裝與簽署說明（簡體中文）](docs/install.md)。
 
 ### 用 Homebrew 安裝（macOS）
 

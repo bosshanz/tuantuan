@@ -13,11 +13,23 @@ interface Probe {
   needsKey?: boolean;
   secretEnv?: Record<string, string>;
   authMethods?: AuthMethodView[];
+  sessionError?: string | null;
+  authError?: string | null;
 }
 
-/** The six first-class harnesses (+ the test harness when TUANTUAN_MOCK_HARNESS=1). */
-const FIRST = ["claude-code", "codex", "grok", "opencode", "pi", "minimax", "mock"];
+/** Curated harnesses (+ the test harness when TUANTUAN_MOCK_HARNESS=1). */
+const FIRST = ["claude-code", "codex", "grok", "opencode", "pi", "minimax", "deepseek", "mock"];
 const SHORT: Record<string, string> = { "claude-code": "Claude", codex: "Codex", grok: "Grok", opencode: "OpenCode" };
+
+/** A successful connection with unknown credentials may continue; an explicit failure may not. */
+export function onboardingAuthState(probe: Probe | "running" | null) {
+  const checked = probe && probe !== "running" ? probe : null;
+  const connected = !!checked?.ok && !checked.needsKey && !checked.sessionError && !checked.authError;
+  return {
+    signedIn: connected && checked?.loggedIn === true,
+    canContinue: connected && checked?.loggedIn !== false,
+  };
+}
 
 /**
  * First launch: one screen, three steps — pick a harness (install if missing), sign in if needed,
@@ -79,8 +91,8 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
     return () => window.removeEventListener("focus", f);
   }, [waiting, pick, check]);
 
-  const signedIn = !!probe && probe !== "running" && probe.ok && probe.loggedIn !== false && !probe.needsKey;
-  const step = !installed ? 1 : signedIn ? 3 : 2;
+  const { signedIn, canContinue } = onboardingAuthState(probe);
+  const step = !installed ? 1 : canContinue ? 3 : 2;
 
   const create = async () => {
     if (!h) return;
@@ -130,6 +142,7 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                   >
                     <RegistryIcon id={c.registryId} name={c.name} size={22} />
                     <span className="onb-card-name">{t(c.name)}</span>
+                    {c.experimental && <span className="badge warn-badge">{t("实验性")}</span>}
                     <span className={c.command ? "onb-card-state ok-text" : "onb-card-state"}>
                       {c.command ? t("已安装") : t("未安装")}
                     </span>
@@ -154,15 +167,19 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                 <h3>{t("登录")}</h3>
                 {step >= 2 && probe === "running" && <Loader2 size={14} className="spin muted" />}
                 {signedIn && <span className="ok-text onb-note">{t("已就绪")}</span>}
+                {canContinue && !signedIn && <span className="muted onb-note">{t("登录状态未知")}</span>}
               </div>
-              {step === 2 && probe && probe !== "running" && (
+              {step >= 2 && probe && probe !== "running" && (!signedIn || step === 2) && (
                 <div className="onb-detail">
+                  {h?.auth && <p className="muted">{t(h.auth)}</p>}
                   {!probe.ok && (
                     <div className="error-text">
                       {t("连不上：{error}", { error: translateError(probe.error ?? "") })}
                     </div>
                   )}
-                  {probe.ok && (probe.loggedIn === false || probe.needsKey) && (
+                  {probe.authError && <div className="error-text">{translateError(probe.authError)}</div>}
+                  {probe.sessionError && <div className="error-text">{translateError(probe.sessionError)}</div>}
+                  {probe.ok && (!signedIn || probe.needsKey) && (
                     <>
                       <div className="row onb-actions">
                         {probe.authMethods

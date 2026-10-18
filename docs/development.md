@@ -8,6 +8,17 @@
 
 `tests/model-catalog.test.ts`、`tests/model-catalog-api.test.ts` 使用注入 fetcher 与临时 SQLite 覆盖识别、同步失败恢复、并发去重、缓存和能力关联。`provider-*-reasoning*-real.test.ts`、`provider-claude-real.test.ts`、`provider-codex-real.test.ts` 按文件注释启用实际 CLI，对隔离的本机 mock 验证 ACP 和请求体；不会据此推断真实模型质量。
 
+## DeepSeek 官方 CLI 回归
+
+`tests/deepseek-real.test.ts` 默认跳过。需要时将以下路径指向固定官方 npm 包 `@deepseek-ai/dsh@0.2.1-rc.2` 的原始 CLI 和 Node ≥ 22.19，在 macOS / Linux 运行（Windows 仍跳过）：
+
+```bash
+TUANTUAN_REAL_DEEPSEEK_CLI=/absolute/path/to/@deepseek-ai/dsh/lib/bin.js \
+TUANTUAN_REAL_DEEPSEEK_NODE=/absolute/path/to/node bun test tests/deepseek-real.test.ts
+```
+
+回归隔离 HOME、原生状态目录与工作目录，使用真实 CLI 执行 ACP 协议和原生工具；模型响应只来自本机 Messages SSE mock，不调用付费 API。MCP 实际覆盖 stdio，HTTP 只检查能力声明。这项检查不代表真实模型效果或生产服务可用性。
+
 ## 开发命令
 
 使用 Bun 1.4.2；首次运行完整检查前执行 `bun install && bun run desktop:install`。根目录测试会导入桌面更新模块及锁定版本的 `electron-updater`，因此 CI 和本地都需要桌面依赖。

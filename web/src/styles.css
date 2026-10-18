@@ -1058,6 +1058,8 @@ html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
 .compact-notice > button:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   .task-context summary svg, .room-conclusion { transition: none; }
+  /* The global short duration otherwise creates transitions for the source highlight's color/radius. */
+  [data-message-body] { transition-property: none; }
   .compact-live .spin { animation: none; }
   .compact-bubble { animation: none; }
 }

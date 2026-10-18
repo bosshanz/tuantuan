@@ -142,6 +142,7 @@ export function SetupPage(props: {
                         )}
                         <RegistryIcon id={h.registryId} name={h.name} size={16} />
                         <b>{t(h.name)}</b>
+                        {h.experimental && <span className="badge warn-badge">{t("实验性")}</span>}
                         {h.version && <span className="badge">{h.version}</span>}
                         {h.source && (
                           <span
@@ -202,7 +203,10 @@ export function SetupPage(props: {
                         </div>
                       )}
                       {result && result !== "running" && (
-                        <div className={result.ok ? "ok-text harness-test" : "error-text harness-test"} role="status">
+                        <div
+                          className={`${result.ok ? (result.loggedIn === true && !result.needsKey ? "ok-text" : "muted") : "error-text"} harness-test`}
+                          role="status"
+                        >
                           {result.ok
                             ? `ACP v${result.protocolVersion} · ${result.agentInfo?.title ?? result.agentInfo?.name ?? t("已连接")} · ${
                                 result.needsKey

@@ -59,7 +59,21 @@ export function platformKey(platform: string = process.platform, arch: string = 
 }
 
 /** Agents Tuantuan adds itself (not in the official registry), clearly marked experimental. */
-export const EXTRA_AGENTS: (RegistryAgent & { experimental: true; note: string })[] = [
+export const EXTRA_AGENTS: (RegistryAgent & { origin: "tuantuan"; experimental: true; note: string })[] = [
+  {
+    id: "deepseek-harness",
+    name: "DeepSeek Harness",
+    version: "0.2.1-rc.2",
+    description: "DeepSeek 官方 Harness，原生支持 ACP。团团补充官方 npm 包，尚未收录于上游 ACP Registry。",
+    repository: "https://github.com/deepseek-ai/deepseek-harness",
+    website: "https://deepseek.com/harness/",
+    authors: ["DeepSeek AI"],
+    license: "MIT",
+    distribution: { npx: { package: "@deepseek-ai/dsh@0.2.1-rc.2", args: ["--profile", "acp"] } },
+    origin: "tuantuan",
+    experimental: true,
+    note: "DeepSeek 官方预发布版，团团补充安装入口；使用原生 ACP，不是社区桥接。",
+  },
   {
     id: "zcode-acp",
     name: "ZCode（社区桥接）",
@@ -70,13 +84,14 @@ export const EXTRA_AGENTS: (RegistryAgent & { experimental: true; note: string }
     authors: ["william0wang"],
     license: "Apache-2.0",
     distribution: { npx: { package: "zcode-acp-server@0.70.0" } },
+    origin: "tuantuan",
     experimental: true,
     note: "实验性社区桥接。0.70.0 尚不支持 ZCode 团队套餐；本机团队登录可用不代表桥接可用，1113 错误也可能来自个人 / 团队渠道不一致。",
   },
 ];
 
 export interface RegistryState {
-  agents: (RegistryAgent & { experimental?: boolean; note?: string })[];
+  agents: (RegistryAgent & { origin?: "tuantuan"; experimental?: boolean; note?: string })[];
   source: "network" | "cache" | "snapshot";
   fetchedAt: number | null;
   error: string | null;

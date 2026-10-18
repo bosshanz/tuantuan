@@ -2332,15 +2332,15 @@ function Composer(props: {
       prefix === "$" && token
         ? insertSkill(props.value, token, name)
         : { value: `${prefix}${name} ${props.value.slice(caret)}`, caret: name.length + 2 };
-    props.onChange(next.value);
-    setCaret(next.caret);
-    requestAnimationFrame(() => {
-      const el = ref.current;
-      // The user may have typed or replaced the draft before this frame; never move their caret then.
-      if (!el || el.value !== next.value) return;
-      el.focus();
-      el.setSelectionRange(next.caret, next.caret);
+    // Commit the controlled value before restoring its caret, without a later frame overriding a newer selection.
+    flushSync(() => {
+      props.onChange(next.value);
+      setCaret(next.caret);
     });
+    const el = ref.current;
+    if (!el || el.value !== next.value) return;
+    el.focus();
+    el.setSelectionRange(next.caret, next.caret);
   };
   const picker = commands.length
     ? { kind: "cmd" as const, items: commands, prefix: "/" as const, title: tr("命令") }

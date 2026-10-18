@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { BRAND_SVG } from "../web/src/brandIcons";
-import { type Brand, brandFor, brandOfModel } from "../web/src/brands";
+import { type Brand, brandFor, brandOfModel, harnessBrand } from "../web/src/brands";
 
 const TABLE: [string, Brand][] = [
   ["claude-opus-4-1", "anthropic"],
@@ -61,6 +61,9 @@ test("unknown ids never borrow the harness vendor; only the default alias does",
   expect(brandFor("my-proxy-model", "claude-code")).toBe("generic");
   expect(brandFor("default", "claude-code")).toBe("anthropic");
   expect(brandFor("default", "codex")).toBe("openai");
+  expect(harnessBrand("deepseek")).toBe("deepseek");
+  expect(brandFor("default", "deepseek")).toBe("deepseek");
+  expect(brandFor("my-proxy-model", "deepseek")).toBe("generic");
   expect(brandFor("opus", "claude-code", "GLM-5.3")).toBe("zhipu"); // Claude Code routed to GLM
   expect(brandFor("mock-fast", "mock")).toBe("generic");
 });
