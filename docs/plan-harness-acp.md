@@ -485,8 +485,10 @@ Browser 插件不可用，本次沿用项目 Playwright 流程。测试使用隔
 
 提交前检查为 **694 pass / 39 skip / 0 fail**；构建、分段气泡与引用导航、跨页返回、流式滚动和历史分页 Chrome mock 回归通过。截图使用隔离 mock 数据；未重新打包桌面应用，未调用真实付费模型。两份既有 lockfile 改动继续保留在本地。
 
-用户要求发布 0.2.0 时同步更新 Homebrew 安装版本，发布清单如下（尚未发布）：
+用户要求发布 0.2.0 时同步更新 Homebrew 安装版本，发布清单如下（2026-10-18 已发布）：
 
-- [ ] 发布 v0.2.0 正式安装包与 `SHA256SUMS.txt`。
-- [ ] 更新 [bosshanz/homebrew-tap](https://github.com/bosshanz/homebrew-tap) 的 `Casks/tuantuan.rb`，同步 `version`、macOS arm64 / x64 校验和及下载地址。
-- [ ] 合并 tap 更新并确认 Homebrew 能安装 / 升级到 0.2.0；具体步骤见[安装文档](install.md#发布版本时同步-homebrew)。
+- [x] 发布 [v0.2.0](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.0) 六个正式安装文件与 `SHA256SUMS.txt`。
+- [x] 更新 [bosshanz/homebrew-tap](https://github.com/bosshanz/homebrew-tap) 的 `Casks/tuantuan.rb`，同步 `version`、macOS arm64 / x64 校验和及下载地址。
+- [x] tap 更新已推送到 main（`dae8e2b`），`brew info --cask bosshanz/tap/tuantuan` 已显示 0.2.0；安装和升级命令见[安装文档](install.md#发布版本时同步-homebrew)。
+
+发布记录：版本 PR #18 已合并，标签对应 `19edac1ca825885990f85b2425fc85770a3707dd`；构建提交 `d55426ca31c8d45ee59075a0801f59326007a5b0` 与标签源码树一致。完整本地检查为 694 pass / 39 skip / 0 fail，远端 CI、三平台 Desktop 构建、Linux 桌面冒烟与 macOS 签名验证通过。六个安装文件已核对格式、macOS 应用版本和双架构、ZIP 完整性、DMG 校验；七个 Release 附件的远端大小和 SHA-256 与本地一致。本轮未对用户已安装的应用执行升级，未验证 Windows 实机安装或调用付费模型。
