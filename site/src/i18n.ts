@@ -105,7 +105,7 @@ export const COPY: Record<Locale, Copy> = {
       skip: "Skip to content",
     },
     hero: {
-      eyebrow: "v0.1.1 · Open source",
+      eyebrow: "v0.2.0 · Open source",
       tagline: "Your coding agents, one room.",
       sub: "Stop copy-pasting between terminals. Bring Claude Code, Codex, OpenCode, and other coding agents into one project conversation, mention who you need, and watch them work side by side.",
       meta: "Desktop app for macOS, Windows, and Linux. Bring your own harness account or API provider.",
@@ -114,7 +114,7 @@ export const COPY: Record<Locale, Copy> = {
       mac: "Download for macOS",
       win: "Download for Windows",
       linux: "Download for Linux",
-      any: "Download v0.1.1",
+      any: "Download v0.2.0",
       notes: "Install notes",
     },
     macFirst: {
@@ -184,7 +184,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     features: {
       title: "Built for working with several agents",
-      sub: "Everything below is in v0.1.1.",
+      sub: "Everything below is in v0.2.0.",
       cards: [
         {
           title: "Choose your harness",
@@ -248,7 +248,7 @@ export const COPY: Record<Locale, Copy> = {
       skip: "跳到正文",
     },
     hero: {
-      eyebrow: "v0.1.1 · 开源",
+      eyebrow: "v0.2.0 · 开源",
       tagline: "你的编码 Agent，同在一室。",
       sub: "不用再在一堆终端之间复制粘贴。把 Claude Code、Codex、OpenCode 等编码 Agent 放进同一个项目会话，@ 谁谁就开工，进展实时看得见。",
       meta: "macOS、Windows、Linux 桌面版。使用你自己的 Harness 账号或 API 服务商。",
@@ -257,7 +257,7 @@ export const COPY: Record<Locale, Copy> = {
       mac: "下载 macOS 版",
       win: "下载 Windows 版",
       linux: "下载 Linux 版",
-      any: "下载 v0.1.1",
+      any: "下载 v0.2.0",
       notes: "安装说明",
     },
     macFirst: {
@@ -326,7 +326,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     features: {
       title: "为多 Agent 协作而做",
-      sub: "以下功能均已在 v0.1.1 中提供。",
+      sub: "以下功能均已在 v0.2.0 中提供。",
       cards: [
         { title: "选择 Harness", body: "沿用本机已有安装，或从 ACP Registry 安装 Agent，按 Harness 提供的方式登录。" },
         { title: "多 Agent 协作", body: "用 @ 指定成员，或由主 Agent 分工、跟进、汇总。所有成员共用项目工作目录。" },
@@ -374,7 +374,7 @@ export const COPY: Record<Locale, Copy> = {
       skip: "跳到主要內容",
     },
     hero: {
-      eyebrow: "v0.1.1 · 開源",
+      eyebrow: "v0.2.0 · 開源",
       tagline: "你的程式開發 Agent，同在一室。",
       sub: "不用再在一堆終端機之間複製貼上。把 Claude Code、Codex、OpenCode 等程式開發 Agent 放進同一段專案對話，@ 誰誰就動手，進度即時看得見。",
       meta: "macOS、Windows、Linux 桌面版。使用你自己的 Harness 帳號或 API 服務商。",
@@ -383,7 +383,7 @@ export const COPY: Record<Locale, Copy> = {
       mac: "下載 macOS 版",
       win: "下載 Windows 版",
       linux: "下載 Linux 版",
-      any: "下載 v0.1.1",
+      any: "下載 v0.2.0",
       notes: "安裝說明",
     },
     macFirst: {
@@ -452,7 +452,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     features: {
       title: "為多 Agent 協作打造",
-      sub: "以下功能皆已在 v0.1.1 提供。",
+      sub: "以下功能皆已在 v0.2.0 提供。",
       cards: [
         { title: "選擇 Harness", body: "沿用本機既有安裝，或從 ACP Registry 安裝 Agent，依 Harness 提供的方式登入。" },
         {
@@ -503,7 +503,7 @@ export const COPY: Record<Locale, Copy> = {
       skip: "本文へ移動",
     },
     hero: {
-      eyebrow: "v0.1.1 · オープンソース",
+      eyebrow: "v0.2.0 · オープンソース",
       tagline: "コーディングエージェントを、ひとつの部屋に。",
       sub: "ターミナル間のコピペはもう要りません。Claude Code、Codex、OpenCode などのコーディングエージェントを 1 つのプロジェクト会話に集め、@ で呼べばすぐに作業開始。進み具合はその場で確認できます。",
       meta: "macOS、Windows、Linux 向けデスクトップアプリ。ハーネスのアカウントや API プロバイダーはご自身のものを使います。",
@@ -512,7 +512,7 @@ export const COPY: Record<Locale, Copy> = {
       mac: "macOS 版をダウンロード",
       win: "Windows 版をダウンロード",
       linux: "Linux 版をダウンロード",
-      any: "v0.1.1 をダウンロード",
+      any: "v0.2.0 をダウンロード",
       notes: "インストールの説明",
     },
     macFirst: {
@@ -583,7 +583,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     features: {
       title: "複数のエージェントで働くために",
-      sub: "以下はすべて v0.1.1 で利用できます。",
+      sub: "以下はすべて v0.2.0 で利用できます。",
       cards: [
         {
           title: "ハーネスを選択",
