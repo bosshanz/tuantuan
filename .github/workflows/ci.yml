@@ -14,6 +14,9 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - name: Install desktop dependencies for shared tests
+        working-directory: desktop
+        run: bun install --frozen-lockfile && node node_modules/electron/install.js
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run test

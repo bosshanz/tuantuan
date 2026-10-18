@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopUpdateCheckpoint, DesktopUpdateStatus } from "../../shared/desktopUpdate";
+import type {
+  DesktopCheckpointRequest,
+  DesktopCheckpointState,
+  DesktopUpdateCheckpoint,
+  DesktopUpdateStatus,
+} from "../../shared/desktopUpdate";
 
 /** The only surface the web UI gets: no Node, just these calls. */
 contextBridge.exposeInMainWorld("tuantuan", {
@@ -20,8 +25,8 @@ contextBridge.exposeInMainWorld("tuantuan", {
   installUpdate: () => ipcRenderer.invoke("tuantuan:update-install"),
   setUpdateChecks: (enabled: boolean) => ipcRenderer.invoke("tuantuan:update-checks", enabled),
   openUpdateRelease: () => ipcRenderer.invoke("tuantuan:update-open-release"),
-  saveUpdateCheckpoint: (checkpoint: DesktopUpdateCheckpoint) =>
-    ipcRenderer.invoke("tuantuan:update-checkpoint-save", checkpoint),
+  saveUpdateCheckpoint: (checkpoint: DesktopUpdateCheckpoint, requestId?: string) =>
+    ipcRenderer.invoke("tuantuan:update-checkpoint-save", checkpoint, requestId),
   readUpdateCheckpoint: () => ipcRenderer.invoke("tuantuan:update-checkpoint-read"),
   clearUpdateCheckpoint: (id: string) => ipcRenderer.invoke("tuantuan:update-checkpoint-clear", id),
   onUpdateState: (cb: (status: DesktopUpdateStatus) => void) => {
@@ -29,14 +34,23 @@ contextBridge.exposeInMainWorld("tuantuan", {
     ipcRenderer.on("tuantuan:update-state", listener);
     return () => ipcRenderer.removeListener("tuantuan:update-state", listener);
   },
-  onPrepareUpdate: (cb: () => Promise<void>) => {
-    const listener = (_event: unknown, id: string) => {
+  onCheckpointState: (cb: (state: DesktopCheckpointState) => void) => {
+    const listener = (_event: unknown, state: DesktopCheckpointState) => cb(state);
+    ipcRenderer.on("tuantuan:checkpoint-state", listener);
+    return () => ipcRenderer.removeListener("tuantuan:checkpoint-state", listener);
+  },
+  onPrepareUpdate: (cb: (request: DesktopCheckpointRequest) => Promise<void>) => {
+    const listener = (_event: unknown, request: DesktopCheckpointRequest) => {
       Promise.resolve()
-        .then(cb)
+        .then(() => cb(request))
         .then(
-          () => ipcRenderer.send("tuantuan:update-checkpoint", { id, ok: true }),
+          () => ipcRenderer.send("tuantuan:update-checkpoint", { id: request.id, ok: true }),
           (error) =>
-            ipcRenderer.send("tuantuan:update-checkpoint", { id, ok: false, error: String(error?.message ?? error) }),
+            ipcRenderer.send("tuantuan:update-checkpoint", {
+              id: request.id,
+              ok: false,
+              error: String(error?.message ?? error),
+            }),
         );
     };
     ipcRenderer.on("tuantuan:update-prepare", listener);

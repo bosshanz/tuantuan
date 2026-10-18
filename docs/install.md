@@ -2,18 +2,18 @@
 
 下载桌面安装包，或从源码运行（浏览器 + 本机服务）和构建桌面版。
 
-## 下载桌面版 v0.2.0
+## 下载桌面版 v0.2.1
 
-前往 [GitHub Releases v0.2.0](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.0)，按操作系统和芯片选择安装包：
+前往 [GitHub Releases v0.2.1](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1)，按操作系统和芯片选择安装包：
 
 | 平台 | 安装包 |
 | --- | --- |
-| macOS · Apple 芯片（arm64） | `Tuantuan-0.2.0-mac-arm64.dmg` |
-| macOS · Intel（x64） | `Tuantuan-0.2.0-mac-x64.dmg` |
-| Windows · x64 | `Tuantuan-0.2.0-win-x64.exe` |
-| Linux · x64 | `Tuantuan-0.2.0-linux-x64.AppImage` |
+| macOS · Apple 芯片（arm64） | `Tuantuan-0.2.1-mac-arm64.dmg` |
+| macOS · Intel（x64） | `Tuantuan-0.2.1-mac-x64.dmg` |
+| Windows · x64 | `Tuantuan-0.2.1-win-x64.exe` |
+| Linux · x64 | `Tuantuan-0.2.1-linux-x64.AppImage` |
 
-macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.2.0 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。已发布的 v0.2.0 尚无应用内更新入口，首次升级需从 Release 下载或使用 Homebrew；下面的更新功能属于后续源码版本。
+macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.2.1 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。v0.2.1 增加「关于与更新」入口。macOS 当前推荐通过 Homebrew 升级，暂不配置 Apple Developer；从 v0.2.0 首次升级也需 Homebrew 或手动安装。
 
 - **macOS（Homebrew，推荐）**：`brew install --cask bosshanz/tap/tuantuan`。[这个 tap](https://github.com/bosshanz/homebrew-tap) 安装后会自动清除隔离标记，打开时不会被 Gatekeeper 拦截，升级用 `brew upgrade --cask tuantuan`。
 - **macOS**：打开 `.dmg`，把 **tuantuan.app** 拖进「应用程序」后启动（用 `.zip` 时在访达里双击解压，再移到「应用程序」）。不要直接在磁盘映像里运行。因为没有 Developer ID 和公证，第一次打开会被拦截：
@@ -26,8 +26,8 @@ macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需
 - **Linux**：给 `.AppImage` 添加可执行权限后运行：
 
   ```bash
-  chmod +x Tuantuan-0.2.0-linux-x64.AppImage
-  ./Tuantuan-0.2.0-linux-x64.AppImage
+  chmod +x Tuantuan-0.2.1-linux-x64.AppImage
+  ./Tuantuan-0.2.1-linux-x64.AppImage
   ```
 
 ## 从源码运行
@@ -56,7 +56,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-可直接使用 [v0.2.0 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.0)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+可直接使用 [v0.2.1 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](screenshots/desktop-linux.png)
 
@@ -78,9 +78,9 @@ xvfb-run -a bun run desktop:smoke        # Linux：无界面端到端冒烟
 
 macOS 本机构建：在 Mac 上执行上面的依赖安装和 `desktop:build` 命令，会生成当前架构的 `.dmg` 和 `.zip`；使用 `--arch arm64,x64` 可同时生成 Apple 芯片和 Intel 版本。未配置 Developer ID 证书时，构建配置使用 ad-hoc 签名；它不等同于 Developer ID 签名或 Apple 公证。要使用 Developer ID 签名并公证，打包前设置 `CSC_LINK`、`CSC_KEY_PASSWORD`（Developer ID 证书）和 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`；Windows 签名使用 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`。
 
-### 配置 macOS 正式签名与公证
+### 配置 macOS 正式签名与公证（可选，当前暂缓）
 
-以下步骤对应仓库当前的 electron-builder 26 和 `.github/workflows/desktop.yml`。证书签名证明发布身份，Apple 公证用于通过 Gatekeeper 分发检查；先配置好这两项，再发布用于真实 OTA 验证的两个连续版本。
+当前发布使用 Homebrew，不需要 Apple Developer 会员或以下 Secrets。下面保留以后启用 macOS 应用内安装时的配置步骤，对应仓库的 electron-builder 26 和 `.github/workflows/desktop.yml`。正式签名与公证配置完成后，再用同一发布身份签名的两个连续版本验证 macOS 应用内升级。
 
 1. 使用有效的 Apple Developer Program 账号，在 [Certificates, Identifiers & Profiles](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/) 创建 **Developer ID Application** 证书。按页面要求在 Mac 钥匙串生成 CSR，上传后下载并安装证书；在「钥匙串访问 → 我的证书」中确认它带有私钥，将证书和私钥导出为带密码的 `.p12`。这里不使用 Developer ID Installer 或 Apple Development 证书。
 2. 在 [Apple Account](https://account.apple.com/) 的「登录与安全 → App 专用密码」生成供公证使用的密码；账号需要开启双重认证。Apple Developer 会员信息页可查到 10 位 Team ID。具体入口见 [Apple 说明](https://support.apple.com/en-us/102654)。
@@ -117,15 +117,15 @@ xcrun stapler validate "/path/to/团团.app"
 
 应看到有效 Developer ID 签名、正确 TeamIdentifier、Gatekeeper 接受和公证票据验证成功。仅设置 Secrets 或构建任务成功不能代替这些产物检查。首个正式签名版本要先手动安装作为 OTA 基线；下一个版本沿用同一发布身份和 `appId`，在不由 Homebrew 管理的安装上验证应用内升级。参考 [electron-builder 26 签名](https://www.electron.build/v26/docs/features/code-signing/)与[公证说明](https://www.electron.build/v26/docs/notarization/)。
 
-### 应用内更新（后续源码版本）
+### 关于与更新（v0.2.1 起）
 
 「设置 → 关于与更新」显示当前版本、可用版本与发布说明，可以手动检查更新或控制后台检查。后台检查不会自动下载安装；下载完成后由用户选择重启安装或稍后处理。任何会话仍在运行、排队、等待权限或提问、取消收尾时都不能安装，无法确认任务状态时也不会退出。任务结束后不会自行安装，仍需再次点击。
 
-重启前先保存各会话的草稿、图片、引用、阅读位置与当前页面，再由服务端原子确认空闲并阻止新任务进入。保存或安装准备失败时保留当前应用并恢复操作；恢复文件只有在新版成功导入后才清除，恢复失败可重试。浏览器版不提供桌面安装操作。
+重启前先保存各会话的草稿、图片、引用、阅读位置与当前页面，再由服务端原子确认空闲并阻止新任务进入。保存或安装准备失败时保留当前应用并恢复操作；恢复文件只有在新版成功导入后才清除，恢复失败可重试。浏览器版不提供桌面安装操作。 正常退出应用也执行同样的工作区保存，以便 Homebrew 升级后跨端口恢复；保存失败会提示并保留当前应用供重试。macOS 红点关闭仅隐藏窗口，正常退出请使用菜单或 Cmd+Q；强制退出和断电无法保证最后一次保存。
 
 源码构建的正式安装包默认写入 GitHub Releases 更新源，不需要上传凭据。`TUANTUAN_UPDATE_FEED=none` 可在打包时显式关闭；开发运行不使用正式更新源。`desktop:build` 始终只构建，不上传，`TUANTUAN_PUBLISH` 不再控制包内更新源。
 
-Windows NSIS 和 Linux AppImage 可在应用中检查、下载并安装更新；macOS 必须具备正式签名才使用自动安装，当前 ad-hoc 包会引导前往 Release 下载。Homebrew 安装通过 `brew upgrade --cask tuantuan` 升级，避免应用内安装脱离 brew 的版本记录。已经发布的 v0.2.0 不会因这次源码改动自动获得更新功能。
+Windows NSIS 和 Linux AppImage 可在应用中检查、下载并安装更新；macOS 必须具备正式签名才使用自动安装，当前 ad-hoc 包会引导前往 Release 下载。Homebrew 安装先等待 Agent 任务完成并正常退出团团，再执行 `brew update && brew upgrade --cask tuantuan`，完成后重新打开，避免应用内安装脱离 brew 的版本记录。Homebrew 是外部包管理器，不受团团的安装锁控制，不能在 Agent 仍运行时直接替换应用。已经发布的 v0.2.0 不会因这次源码改动自动获得更新功能。
 
 更新界面与重启恢复的开发回归可运行 `bun run build && bun run e2e:updates`（需要本机 Chrome，`CHROME_PATH` 可覆盖）。它使用真实浏览器、IndexedDB、本地服务与 mock ACP，更新器桥接使用模拟；不会下载或安装正式新版本。
 
@@ -165,7 +165,7 @@ bun desktop/scripts/release.ts publish --tag v0.2.1 --dir desktop/release-ready 
 
 公开 Release 后，工作流用 `desktop/scripts/sync-homebrew.ts` 同步 [bosshanz/homebrew-tap](https://github.com/bosshanz/homebrew-tap) 的 `Casks/tuantuan.rb`。脚本只接受已公开的稳定版本，下载 Release 的 `SHA256SUMS.txt` 和 arm64 / x64 两份 `.dmg`，核对文件名、下载 URL、实际 SHA-256 与清单，再更新 cask 的版本和双架构哈希；其余内容保持原样。版本回退、同版本不同摘要、缺架构或任一校验失败都不会写入 cask。
 
-自动提交和推送需要配置明确命名的仓库 Secret **`HOMEBREW_TAP_TOKEN`**：使用只能访问 `bosshanz/homebrew-tap` 且具备 **Contents: read and write** 的 fine-grained PAT，或等价的 GitHub App token。它与主仓库的 `GITHUB_TOKEN` 分开，Git 身份只在 tap 工作副本配置。受保护分支还须允许该凭据按仓库规则写入。
+本次发布先使用下方手动同步流程；`HOMEBREW_TAP_TOKEN` 未配置不妨碍本地校验、提交和推送 tap。启用 Actions 自动提交和推送时，需要配置明确命名的仓库 Secret **`HOMEBREW_TAP_TOKEN`**：使用只能访问 `bosshanz/homebrew-tap` 且具备 **Contents: read and write** 的 fine-grained PAT，或等价的 GitHub App token。它与主仓库的 `GITHUB_TOKEN` 分开，Git 身份只在 tap 工作副本配置。受保护分支还须允许该凭据按仓库规则写入。
 
 配置 fine-grained PAT：
 

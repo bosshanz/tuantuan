@@ -97,6 +97,48 @@ async function ready(manager: DesktopUpdates) {
   await manager.download();
 }
 
+test("a downloaded event cannot permit installation before cache finalization, and failure remains retryable", async () => {
+  const ctx = setup();
+  let finish!: () => void;
+  const cache = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const download = spyOn(ctx.updater, "downloadUpdate").mockImplementationOnce(async () => {
+    ctx.updater.emit("update-downloaded");
+    await cache;
+    const error = new Error("EACCES: current.blockmap");
+    ctx.updater.emit("error", error);
+    throw error;
+  });
+  restorers.push(() => download.mockRestore());
+  await ctx.manager.check();
+  const pending = ctx.manager.download();
+  expect(ctx.manager.status().phase).toBe("downloading");
+  await ctx.manager.install();
+  expect(ctx.saves).toBe(0);
+  expect(ctx.updater.installs).toBe(0);
+  finish();
+  await pending;
+  expect(ctx.manager.status().phase).toBe("error");
+  expect(ctx.manager.status().error).toContain("current.blockmap");
+  await ctx.manager.check();
+  await ctx.manager.download();
+  expect(download).toHaveBeenCalledTimes(2);
+  expect(ctx.manager.status().phase).toBe("ready");
+  await ctx.manager.install();
+  expect(ctx.updater.installs).toBe(1);
+});
+
+test("a late SDK error after a completed download preserves an actionable ready state", async () => {
+  const ctx = setup();
+  await ready(ctx.manager);
+  ctx.updater.emit("error", new Error("late SDK error"));
+  expect(ctx.manager.status().phase).toBe("ready");
+  expect(ctx.manager.status().error).toContain("late SDK error");
+  await ctx.manager.install();
+  expect(ctx.updater.installs).toBe(1);
+});
+
 test("a download never installs, including a normal app exit; only explicit idle installation does", async () => {
   const ctx = setup();
   expect(ctx.updater.autoDownload).toBe(false);

@@ -203,14 +203,14 @@ export class ChatWorkspaceStore {
     await Promise.all([...this.rooms.keys()].map((id) => this.save(id)));
   }
 
-  async prepareUpdate(route: string, desktop: Pick<DesktopUpdateBridge, "saveUpdateCheckpoint">) {
+  async prepareUpdate(route: string, desktop: Pick<DesktopUpdateBridge, "saveUpdateCheckpoint">, requestId?: string) {
     await this.flush();
     // Include drafts not visited in this renderer session, not only entries in the memory cache.
     const rooms = await this.storage.all();
-    const checkpoint: DesktopUpdateCheckpoint = { schema: 1, id: crypto.randomUUID(), route, rooms };
+    const checkpoint: DesktopUpdateCheckpoint = { schema: 1, id: requestId ?? crypto.randomUUID(), route, rooms };
     if (new Blob([JSON.stringify(checkpoint)]).size > DESKTOP_CHECKPOINT_MAX_BYTES)
       throw new Error("聊天草稿中的图片过大，无法保存更新前的工作。请减少图片后重试。");
-    await desktop.saveUpdateCheckpoint(checkpoint);
+    await desktop.saveUpdateCheckpoint(checkpoint, requestId);
   }
 
   restoreCheckpoint(desktop: Pick<DesktopUpdateBridge, "readUpdateCheckpoint">) {

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal, flushSync } from "react-dom";
+import type { DesktopCheckpointRequest } from "../../shared/desktopUpdate";
 import { previewText } from "../../shared/roomPreview";
 import { AboutUpdates } from "./AboutUpdates";
 import { AgentEditor } from "./AgentEditor";
@@ -92,7 +93,10 @@ export function App() {
   const [route, go] = useHashRoute();
   const workspaceError = useSyncExternalStore(chatWorkspace.subscribe, chatWorkspace.error);
   const [checkpointError, setCheckpointError] = useState<string | null>(null);
-  const [preparingUpdate, setPreparingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [preparingCheckpoint, setPreparingCheckpoint] = useState<DesktopCheckpointRequest | null>(null);
+  const checkpointRequest = useRef<DesktopCheckpointRequest | null>(null);
+  const preparingUpdate = installingUpdate || !!preparingCheckpoint;
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateVersion, setUpdateVersion] = useState<string>();
   const desktopUpdates = updateBridge();
@@ -104,7 +108,7 @@ export function App() {
     let alive = true;
     let receivedEvent = false;
     const show = (status: { phase: string; availableVersion?: string }) => {
-      setPreparingUpdate(status.phase === "installing");
+      setInstallingUpdate(status.phase === "installing");
       setUpdateAvailable(status.phase === "available" || status.phase === "ready");
       setUpdateVersion(status.availableVersion);
     };
@@ -123,6 +127,20 @@ export function App() {
       off();
     };
   }, [desktopUpdates]);
+  useEffect(
+    () =>
+      desktopUpdates?.onCheckpointState?.((state) => {
+        if (state.phase === "preparing") {
+          checkpointRequest.current = state;
+          flushSync(() => setPreparingCheckpoint(state));
+        } else if (checkpointRequest.current?.id === state.id && state.phase === "error") {
+          checkpointRequest.current = null;
+          setPreparingCheckpoint(null);
+          setCheckpointError(state.error ?? t("无法保存当前工作"));
+        }
+      }),
+    [desktopUpdates, t],
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: restoreAttempt explicitly retries a failed import or acknowledgement
   useEffect(() => {
     if (!desktopUpdates) return;
@@ -157,18 +175,28 @@ export function App() {
   }, [desktopUpdates, restoreAttempt]);
   useEffect(
     () =>
-      desktopUpdates?.onPrepareUpdate(async () => {
+      desktopUpdates?.onPrepareUpdate(async (request) => {
+        const current = request ?? { id: crypto.randomUUID(), reason: "update" as const };
+        checkpointRequest.current = current;
         // Commit the interaction lock before capturing state, even if IPC events share a React batch.
-        flushSync(() => setPreparingUpdate(true));
+        flushSync(() => setPreparingCheckpoint(current));
         setCheckpointError(null);
         try {
-          await chatWorkspace.prepareUpdate(location.hash || "#/c", desktopUpdates);
+          // Do not replace the only host copy while startup import/acknowledgement is incomplete.
+          if (restoringUpdate) throw new Error(t("正在恢复聊天草稿…"));
+          await chatWorkspace.prepareUpdate(location.hash || "#/c", desktopUpdates, request?.id);
         } catch (error) {
-          setCheckpointError((error as Error).message);
-          throw new Error(t("保存工作失败，未重启更新。请重试。"));
+          if (checkpointRequest.current?.id === current.id) setCheckpointError((error as Error).message);
+          throw current.reason === "update" ? new Error(t("保存工作失败，未重启更新。请重试。")) : error;
+        } finally {
+          // A timed-out callback must not unlock a newer request. Quit stays locked until main exits.
+          if (checkpointRequest.current?.id === current.id && current.reason === "update") {
+            checkpointRequest.current = null;
+            setPreparingCheckpoint(null);
+          }
         }
       }),
-    [desktopUpdates, t],
+    [desktopUpdates, restoringUpdate, t],
   );
   const listeners = useRef(new Set<(e: WsEvent) => void>());
   const ws = useRef<ReturnType<typeof connectWs> | null>(null);
@@ -298,11 +326,11 @@ export function App() {
   if (restoringUpdate)
     return (
       <div className="update-preparing" role="status">
-        <p>{t("正在恢复更新前的工作…")}</p>
+        <p>{t("正在恢复上次的工作…")}</p>
         {restoreError && (
           <>
             <p className="error-text" role="alert">
-              {t("无法恢复更新前的工作：{error}", { error: translateError(restoreError) })}
+              {t("无法恢复上次的工作：{error}", { error: translateError(restoreError) })}
             </p>
             <button type="button" className="btn" onClick={() => setRestoreAttempt((value) => value + 1)}>
               {t("重试")}
@@ -566,7 +594,7 @@ export function App() {
         {(workspaceError || checkpointError) && (
           <div className="form-error workspace-save-error" role="alert">
             <span>
-              {t("聊天工作尚未保存，重启更新已暂停：{error}", {
+              {t("聊天工作尚未保存：{error}", {
                 error: translateError(workspaceError ?? checkpointError ?? ""),
               })}
             </span>
@@ -736,8 +764,10 @@ export function App() {
       {preparingUpdate &&
         createPortal(
           <div className="update-preparing" role="status" aria-live="polite">
-            <p>{t("正在保存工作并重启…")}</p>
-            {updateVersion && <p className="muted">{t("新版本 {version} 可用", { version: updateVersion })}</p>}
+            <p>{t(preparingCheckpoint?.reason === "quit" ? "正在保存工作并退出…" : "正在保存工作并重启…")}</p>
+            {updateVersion && preparingCheckpoint?.reason !== "quit" && (
+              <p className="muted">{t("新版本 {version} 可用", { version: updateVersion })}</p>
+            )}
           </div>,
           document.body,
         )}

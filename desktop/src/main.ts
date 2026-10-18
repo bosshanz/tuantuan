@@ -23,7 +23,7 @@ import { serverLayout } from "./paths";
 import { TaskPowerManager } from "./power";
 import { type RunningServer, startServer } from "./server";
 import { loginShellEnv } from "./shell-env";
-import { UpdateCheckpointFile } from "./update-checkpoint";
+import { DesktopCheckpoint, UpdateCheckpointFile } from "./update-checkpoint";
 import { hasMacUpdateIdentity, isHomebrewApp, updatePolicy } from "./update-policy";
 import { DesktopUpdates, type UpdateActivity } from "./updates";
 
@@ -38,7 +38,8 @@ let quitting = false;
 let taskPower: TaskPowerManager | null = null;
 let desktopUpdates: DesktopUpdates | null = null;
 let checkpointFile: UpdateCheckpointFile | null = null;
-let currentCheckpointId: string | null = null;
+let checkpoint: DesktopCheckpoint | null = null;
+let quitInFlight: Promise<void> | null = null;
 let updateQuitRequested = false;
 let windowReady = false;
 let rendererReady = false;
@@ -145,9 +146,13 @@ function createWindow() {
       return;
     }
     // macOS keeps the app (and its agents) running with the window closed, like Mail.
-    if (isMac && !quitting && !updateQuitRequested) {
+    if (isMac && !quitting && !updateQuitRequested && !desktopUpdates?.canQuitForUpdate()) {
       e.preventDefault();
       win?.hide();
+    } else if (!quitting && !updateQuitRequested && !desktopUpdates?.canQuitForUpdate()) {
+      // Keep the last renderer alive until its cross-origin handoff has committed.
+      e.preventDefault();
+      app.quit();
     }
   });
   win.on("closed", () => {
@@ -261,29 +266,6 @@ function trustedUpdateCaller(event: IpcMainEvent | IpcMainInvokeEvent): boolean 
   }
 }
 
-function checkpointForUpdate(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!win || win.isDestroyed()) return reject(new Error("请打开团团窗口后再更新"));
-    const id = crypto.randomUUID();
-    const cleanup = () => {
-      clearTimeout(timer);
-      ipcMain.removeListener("tuantuan:update-checkpoint", receive);
-    };
-    const receive = (event: IpcMainEvent, reply: { id?: string; ok?: boolean; error?: string } | null) => {
-      if (!trustedUpdateCaller(event) || reply?.id !== id) return;
-      cleanup();
-      if (reply.ok === true) resolve();
-      else reject(new Error(typeof reply.error === "string" ? reply.error.slice(0, 1000) : "无法保存当前工作，请重试"));
-    };
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("保存当前工作超时，尚未开始安装"));
-    }, 15_000);
-    ipcMain.on("tuantuan:update-checkpoint", receive);
-    win.webContents.send("tuantuan:update-prepare", id);
-  });
-}
-
 async function updateActivity(action: "activity" | "prepare" | "resume"): Promise<UpdateActivity> {
   if (!srv || quitting) throw new Error("无法确认 Agent 任务状态");
   const response = await fetch(new URL(`/api/desktop/update-${action}`, srv.url), {
@@ -301,6 +283,20 @@ async function updateActivity(action: "activity" | "prepare" | "resume"): Promis
 
 async function updates() {
   checkpointFile = new UpdateCheckpointFile(join(app.getPath("userData"), "update-checkpoint.json"));
+  const handoff = new DesktopCheckpoint(
+    checkpointFile,
+    (request) => {
+      if (!win || win.isDestroyed()) throw new Error("请打开团团窗口后重试保存");
+      win.webContents.send("tuantuan:update-prepare", request);
+    },
+    (state) => {
+      if (win && !win.isDestroyed()) win.webContents.send("tuantuan:checkpoint-state", state);
+    },
+  );
+  checkpoint = handoff;
+  ipcMain.on("tuantuan:update-checkpoint", (event, reply) => {
+    if (trustedUpdateCaller(event)) checkpoint?.reply(reply);
+  });
   const policy = updatePolicy({
     packaged: app.isPackaged,
     disabled: process.env.TUANTUAN_AUTO_UPDATE === "0",
@@ -326,13 +322,12 @@ async function updates() {
     activity: () => updateActivity("activity"),
     prepare: () => updateActivity("prepare"),
     resume: () => updateActivity("resume"),
-    checkpoint: checkpointForUpdate,
+    checkpoint: () => handoff.request("update"),
     changed: (status) => {
       // Installation was abandoned: later user edits must not be replaced by a stale restart snapshot.
-      if (currentCheckpointId && status.phase !== "installing") {
+      if (status.phase !== "installing") {
         try {
-          checkpointFile?.clear(currentCheckpointId);
-          currentCheckpointId = null;
+          checkpoint?.abandonUpdate();
         } catch (error) {
           console.error("Could not remove abandoned update checkpoint", error);
         }
@@ -347,19 +342,19 @@ async function updates() {
       acknowledgeAppImageUpdate();
       return manager.status();
     },
-    "tuantuan:update-checkpoint-save": (value: unknown) => {
-      if (manager.status().phase !== "installing") throw new Error("更新保存请求已过期，请重新点击安装");
-      checkpointFile?.save(value);
-      currentCheckpointId = checkpointFile?.read()?.id ?? null;
+    "tuantuan:update-checkpoint-save": (value: unknown, requestId: unknown) => {
+      checkpoint?.save(value, requestId);
     },
     "tuantuan:update-checkpoint-read": () => checkpointFile?.read() ?? null,
     "tuantuan:update-checkpoint-clear": (id: unknown) => {
-      checkpointFile?.clear(id);
-      if (id === currentCheckpointId) currentCheckpointId = null;
+      checkpoint?.clear(id);
     },
     "tuantuan:update-check": () => manager.check(),
     "tuantuan:update-download": () => manager.download(),
-    "tuantuan:update-install": () => manager.install(),
+    "tuantuan:update-install": () => {
+      if (quitInFlight) throw new Error("团团正在保存工作并退出，请稍后重试");
+      return manager.install();
+    },
     "tuantuan:update-checks": (enabled: unknown) => {
       if (typeof enabled !== "boolean") throw new Error(t("设置值必须为布尔值"));
       return manager.setChecks(enabled);
@@ -368,9 +363,9 @@ async function updates() {
       shell.openExternal(manager.status().releaseUrl ?? "https://github.com/bosshanz/tuantuan/releases/latest"),
   };
   for (const [channel, action] of Object.entries(actions))
-    ipcMain.handle(channel, (event, value: unknown) => {
+    ipcMain.handle(channel, (event, value: unknown, requestId: unknown) => {
       if (!trustedUpdateCaller(event)) throw new Error("更新操作仅允许团团窗口调用");
-      return action(value);
+      return action(value, requestId);
     });
   manager.start();
 }
@@ -469,6 +464,39 @@ app.on("before-quit", (e) => {
     return;
   }
   updateQuitRequested = false;
+  if (!quitting && !desktopUpdates?.canQuitForUpdate() && win && !win.isDestroyed()) {
+    e.preventDefault();
+    // An explicit update already owns its checkpoint and install lock. Do not race it.
+    if (desktopUpdates?.status().phase === "installing" || quitInFlight) return;
+    quitInFlight = (async () => {
+      for (;;) {
+        try {
+          if (!checkpoint) throw new Error("团团尚未准备好保存工作，请稍后重试");
+          await checkpoint.request("quit");
+          quitting = true;
+          app.quit();
+          return;
+        } catch (error) {
+          restore();
+          const options: Electron.MessageBoxOptions = {
+            type: "error",
+            title: t("无法保存当前工作"),
+            message: t("保存工作失败，退出已暂停。"),
+            detail: t((error as Error).message),
+            buttons: [t("重试"), t("继续编辑")],
+            defaultId: 0,
+            cancelId: 1,
+            noLink: true,
+          };
+          const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+          if (result.response !== 0) return;
+        }
+      }
+    })().finally(() => {
+      quitInFlight = null;
+    });
+    return;
+  }
   quitting = true;
   desktopUpdates?.dispose();
   taskPower?.dispose();

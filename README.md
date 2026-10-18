@@ -23,20 +23,20 @@ Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser 
 - **See the work as it happens.** Follow streaming replies, thinking when provided, tool calls, diffs, terminal output, plans, and permission requests. Read Markdown and Mermaid diagrams, and stop individual tasks.
 - **Use your API providers.** Configure compatible providers for Claude Code, OpenCode, Pi, and Codex. Direct BYOK mode supports OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages for chat and handoffs, without file or terminal tools. Compatibility depends on the harness and provider protocol.
 - **Bring your setup.** Discover local Skills and Claude plugins, choose them per agent, and import CC Switch providers without modifying CC Switch. View token usage and quotas where the harness reports them. Tuantuan does not rewrite `~/.claude` or `~/.codex`.
-- **Update when you are ready.** Desktop Settings → About & Updates checks for new releases and offers supported in-app updates. Restart waits for every Agent task to finish and saves chat drafts and reading positions. Homebrew installations continue to update through Homebrew; see [update and signing requirements](docs/install.md). This feature is in source and is not retroactively added to the released v0.2.0 app.
+- **Update when you are ready.** Desktop Settings → About & Updates checks for new releases and offers supported in-app updates. In-app installation is blocked while any Agent task is active and requires an explicit restart after all tasks finish. Homebrew installations continue to update through Homebrew; see [update and signing requirements](docs/install.md). macOS currently uses Homebrew or manual downloads; Developer ID signing is deferred.
 - **Choose your language.** The interface supports English, Simplified Chinese, Traditional Chinese, and Japanese. Changing it leaves conversation content and model response language unchanged.
 
 See the [full feature list (Simplified Chinese)](docs/features.md).
 
-## Download v0.2.0
+## Download v0.2.1
 
-Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.0):
+Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1):
 
 - **macOS**: Apple silicon (arm64) or Intel (x64), `.dmg` or `.zip`.
 - **Windows**: x64 `.exe` installer.
 - **Linux**: x64 `.AppImage`.
 
-The desktop app includes its runtime; you do not need to install Bun. The v0.2.0 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
+The desktop app includes its runtime; you do not need to install Bun. The v0.2.1 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
 
 ### Install with Homebrew (macOS)
 

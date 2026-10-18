@@ -17,6 +17,16 @@ export interface DesktopUpdateCheckpoint {
   rooms: Record<string, DesktopChatWorkspace>;
 }
 
+export interface DesktopCheckpointRequest {
+  id: string;
+  reason: "update" | "quit";
+}
+
+export interface DesktopCheckpointState extends DesktopCheckpointRequest {
+  phase: "preparing" | "saved" | "error";
+  error?: string;
+}
+
 /** Desktop owns update state; the renderer never selects update URLs or files. */
 export interface DesktopUpdateStatus {
   version: string;
@@ -42,9 +52,10 @@ export interface DesktopUpdateBridge {
   setUpdateChecks(enabled: boolean): Promise<DesktopUpdateStatus>;
   openUpdateRelease(): Promise<void>;
   onUpdateState(callback: (status: DesktopUpdateStatus) => void): () => void;
-  /** Main process awaits this checkpoint before it acquires the server install lock. */
-  onPrepareUpdate(callback: () => Promise<void>): () => void;
-  saveUpdateCheckpoint(checkpoint: DesktopUpdateCheckpoint): Promise<void>;
+  /** Main awaits the same durable handoff before an update or an ordinary quit. */
+  onPrepareUpdate(callback: (request?: DesktopCheckpointRequest) => Promise<void>): () => void;
+  onCheckpointState?(callback: (state: DesktopCheckpointState) => void): () => void;
+  saveUpdateCheckpoint(checkpoint: DesktopUpdateCheckpoint, requestId?: string): Promise<void>;
   readUpdateCheckpoint(): Promise<DesktopUpdateCheckpoint | null>;
   /** Renderer acknowledges only after importing all rooms and restoring the route. */
   clearUpdateCheckpoint(id: string): Promise<void>;

@@ -4,14 +4,15 @@
 
 ## 开发环境
 
-需要 [Bun](https://bun.sh) ≥ 1.3。
+使用 [Bun](https://bun.sh) 1.4.2，与 CI 保持一致。
 
 ```bash
 bun install
+bun run desktop:install   # 完整检查也会测试真实的桌面更新 SDK
 bun run dev          # 前后端开发模式
 bun run check        # 类型检查 + Biome + 单元测试（提交前必须通过）
 bun run build && bun run e2e   # 端到端冒烟测试
-bun run desktop:install && bun run desktop:build && bun run desktop:smoke   # 桌面版
+bun run desktop:build && bun run desktop:smoke   # 桌面版
 ```
 
 ## 提交 PR

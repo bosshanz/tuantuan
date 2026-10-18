@@ -112,10 +112,6 @@ export class DesktopUpdates {
         if (!progress || !Number.isFinite(progress.percent)) return;
         if (this.value.phase === "downloading") this.patch({ progress: Math.max(0, Math.min(100, progress.percent)) });
       });
-      this.listen("update-downloaded", () => {
-        this.ready = true;
-        this.patch({ phase: "ready", progress: 100, error: undefined });
-      });
       this.listen("error", (value: unknown) => {
         const error = value instanceof Error ? value : new Error(String(value));
         if (this.value.phase === "installing") {
@@ -123,7 +119,7 @@ export class DesktopUpdates {
           this.updateQuitAllowed = false;
           updater.cancelInstall?.();
           void this.releaseAfterFailure(error);
-        } else this.patch({ phase: "error", error: error.message });
+        } else this.patch({ phase: this.ready ? "ready" : "error", error: error.message });
       });
     }
   }
@@ -261,7 +257,12 @@ export class DesktopUpdates {
     try {
       if (!this.options.updater) throw new Error("当前安装方式不支持自动更新");
       await this.options.updater.downloadUpdate();
+      if (this.disposed) return this.status();
+      // The SDK emits update-downloaded before asynchronous cache finalization can still fail.
+      this.ready = true;
+      this.patch({ phase: "ready", progress: 100, error: undefined });
     } catch (error) {
+      this.ready = false;
       this.patch({ phase: "error", error: (error as Error).message });
     }
     return this.status();

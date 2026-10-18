@@ -292,7 +292,7 @@ try {
   hostCheckpoint = new UpdateCheckpointFile(checkpointPath);
   assert(base !== oldOrigin, "restart must use a different origin");
   await page.goto(`${base}/?failRestore=1`);
-  await page.getByText("无法恢复更新前的工作：", { exact: false }).waitFor();
+  await page.getByText("无法恢复上次的工作：", { exact: false }).waitFor();
   assert(existsSync(checkpointPath), "failed import consumed the durable checkpoint");
   assert(
     (await page.locator(".composer textarea").count()) === 0,

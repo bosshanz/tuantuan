@@ -155,3 +155,28 @@ test("host save and import failures reject without consuming the only durable ch
   };
   await expect(store.prepareUpdate("#/about", desktop)).rejects.toThrow("host disk full");
 });
+
+test("the renderer binds its complete workspace to the current host quit request", async () => {
+  const { store, storage, rooms } = fixture();
+  await store.load("visited");
+  store.update("visited", { draft: "latest composer" });
+  rooms.set("unvisited", { draft: "other room", images: [], quote: null, reading: null });
+  store.capture(() => store.update("visited", { reading: { id: "visible", offset: -10, top: 12 } }, true));
+  let saved: DesktopUpdateCheckpoint | undefined;
+  let request: string | undefined;
+  await store.prepareUpdate(
+    "#/c/visited",
+    {
+      saveUpdateCheckpoint: async (value, requestId) => {
+        saved = value;
+        request = requestId;
+      },
+    },
+    "quit-request",
+  );
+  expect(request).toBe("quit-request");
+  expect(saved?.id).toBe(request);
+  expect(saved?.rooms).toEqual(await storage.all());
+  expect(saved?.rooms.visited?.reading?.id).toBe("visible");
+  expect(saved?.rooms.unvisited?.draft).toBe("other room");
+});

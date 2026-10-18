@@ -231,7 +231,7 @@ Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio M
 
 服务进程由桌面启动时获得一次随机更新 capability，`server/main.ts` 捕获后移除环境变量，避免子 Harness/终端继承。受该 capability 保护的 `/api/desktop/update-activity`、`update-prepare`、`update-resume` 仅供主进程使用。`Orchestrator` 持有接收锁，并跟踪执行 Promise 的完整生命周期：prepare 在同一个同步步骤检查所有 runtime 并关闭新消息入口，不取消既有工作；失败时 resume 恢复入口。没有 capability 的普通浏览器服务不开放这组接口。
 
-renderer 在明确重启前完成持久化 checkpoint，主进程等待成功后才申请服务端锁。超时、存储异常、状态不可读或 prepare 失败均不调用安装器。`autoInstallOnAppQuit` 始终关闭；失败的锁释放会重试恢复接收，但不会重试安装。会话草稿与阅读锚点的持久化由前端聚焦模块管理，图片保存在 IndexedDB。桌面服务每次启动会换端口，更新前还需通过主进程把所有房间的草稿、图片、引用、阅读锚点及路由原子写入 userData/update-checkpoint.json（64 MiB 上限、私有文件权限）；新窗口将其导入新 origin 的 IndexedDB，恢复路由后才按 checkpoint id 确认删除。导入失败保留源文件并提供重试，安装放弃后清理本次快照，避免覆盖后续编辑。安装页不维护另一份会话状态。
+renderer 在明确重启前完成持久化 checkpoint，主进程等待成功后才申请服务端锁。超时、存储异常、状态不可读或 prepare 失败均不调用安装器。`autoInstallOnAppQuit` 始终关闭；失败的锁释放会重试恢复接收，但不会重试安装。会话草稿与阅读锚点的持久化由前端聚焦模块管理，图片保存在 IndexedDB。桌面服务每次启动会换端口，更新和正常退出前还需通过主进程把所有房间的草稿、图片、引用、阅读锚点及路由原子写入 userData/update-checkpoint.json（64 MiB 上限、私有文件权限）；新窗口将其导入新 origin 的 IndexedDB，恢复路由后才按 checkpoint id 确认删除。导入失败保留源文件并提供重试，安装放弃后清理本次快照，避免覆盖后续编辑。安装页不维护另一份会话状态。 普通退出在窗口销毁和服务停止前完成相同保存握手；主进程按请求 id 拥有保存许可，迟到写入不能覆盖后续快照。退出保存与更新安装状态分开，后台检查不能清除退出快照或解除编辑锁。macOS 仅隐藏窗口时不保存退出快照、不停止服务；保存失败取消退出并允许重试。强制终止不保证此握手完成。
 
 退出许可与界面 installing 状态分开：只有 checkpoint 完成且 prepare 成功后才能授予，任何失败立即撤销。主进程使用 before-quit-for-update 区分更新退出，并覆盖 macOS 先关窗再退出的顺序。Windows 保留 NSIS 的安装参数和提权流程，但通过 SDK 声明的扩展点等待安装器启动成功；macOS 用原生更新器的一次性等待，失败撤销回调；AppImage 在同文件系统暂存并保留旧可执行文件，通过 app.relaunch 排程到旧实例退出、释放单实例锁后再启动。userData/appimage-update.json 记录本次 nonce 和恢复路径；新版服务健康、窗口 ready 且 renderer 成功调用更新状态 IPC 后，才按 nonce 和镜像路径确认并清理旧包。安排重启失败会还原；新版首次启动失败会留下旧包及记录供手动恢复，不自动回滚。下载、签名验证和更新源仍由 electron-updater 负责。
 

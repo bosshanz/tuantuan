@@ -1,6 +1,73 @@
 import type { MessageCatalog } from "./types";
 
 export const updateMessages: MessageCatalog = {
+  "正在恢复上次的工作…": {
+    "zh-TW": "正在恢復上次的工作…",
+    en: "Restoring your previous work…",
+    ja: "前回の作業を復元中…",
+  },
+  "无法恢复上次的工作：{error}": {
+    "zh-TW": "無法恢復上次的工作：{error}",
+    en: "Couldn’t restore your previous work: {error}",
+    ja: "前回の作業を復元できませんでした：{error}",
+  },
+  "聊天工作尚未保存：{error}": {
+    "zh-TW": "聊天工作尚未儲存：{error}",
+    en: "Your chat work hasn’t been saved: {error}",
+    ja: "チャットの作業を保存できていません：{error}",
+  },
+  "正在保存工作并退出…": {
+    "zh-TW": "正在儲存工作並退出…",
+    en: "Saving your work and quitting…",
+    ja: "作業を保存して終了中…",
+  },
+  无法保存当前工作: {
+    "zh-TW": "無法儲存目前工作",
+    en: "Couldn’t save your work",
+    ja: "現在の作業を保存できませんでした",
+  },
+  "保存工作失败，退出已暂停。": {
+    "zh-TW": "儲存工作失敗，退出已暫停。",
+    en: "Couldn’t save your work. Quitting is paused.",
+    ja: "作業を保存できなかったため、終了を中止しました。",
+  },
+  继续编辑: { "zh-TW": "繼續編輯", en: "Continue editing", ja: "編集を続ける" },
+  "团团尚未准备好保存工作，请稍后重试": {
+    "zh-TW": "團團尚未準備好儲存工作，請稍後重試",
+    en: "Tuantuan is not ready to save your work. Please retry shortly.",
+    ja: "団団はまだ作業を保存できません。しばらくしてから再試行してください。",
+  },
+  请打开团团窗口后重试保存: {
+    "zh-TW": "請開啟團團視窗後重試儲存",
+    en: "Open the Tuantuan window and retry saving.",
+    ja: "団団のウインドウを開いて保存を再試行してください。",
+  },
+  "正在保存当前工作，请稍后重试": {
+    "zh-TW": "正在儲存目前工作，請稍後重試",
+    en: "Your work is being saved. Please retry shortly.",
+    ja: "作業を保存中です。しばらくしてから再試行してください。",
+  },
+  "保存当前工作超时，请重试": {
+    "zh-TW": "儲存目前工作逾時，請重試",
+    en: "Saving your work timed out. Please retry.",
+    ja: "作業の保存がタイムアウトしました。再試行してください。",
+  },
+  "保存请求已过期，请重试": {
+    "zh-TW": "儲存請求已過期，請重試",
+    en: "The save request expired. Please retry.",
+    ja: "保存リクエストの有効期限が切れました。再試行してください。",
+  },
+  "更新保存已取消，请重试": {
+    "zh-TW": "更新儲存已取消，請重試",
+    en: "Saving for the update was cancelled. Please retry.",
+    ja: "更新前の保存をキャンセルしました。再試行してください。",
+  },
+  "团团正在保存工作并退出，请稍后重试": {
+    "zh-TW": "團團正在儲存工作並退出，請稍後重試",
+    en: "Tuantuan is saving your work and quitting. Please retry later.",
+    ja: "団団は作業を保存して終了中です。後で再試行してください。",
+  },
+
   "正在恢复更新前的工作…": {
     "zh-TW": "正在恢復更新前的工作…",
     en: "Restoring your work from before the update…",
