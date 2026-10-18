@@ -509,7 +509,7 @@ Homebrew 管理的安装使用 brew 升级；ad-hoc macOS 保留检查与手动�
 
 用户确认先发布带更新能力的版本，再新增 **DeepSeek Harness**，通过下一版本安装到本机验证；随后明确暂缓 Apple Developer，以 **Homebrew** 为当前发布和升级渠道。按两个连续稳定版本推进，不能把两个功能合在首次安装中代替跨版本升级证据，也不能用源码热更新或修改本地版本号冒充升级。Homebrew 升级结果不等同于 macOS 应用内 OTA 已验证。
 
-- [ ] 发布包含 OTA 的基线版本，完成安装包、更新元数据和双架构 Homebrew cask 校验；v0.2.0 首次升级需要手动安装或 brew。
+- [x] 发布基线版本 [v0.2.1](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1)，完成安装包、更新元数据和双架构 Homebrew cask 校验；v0.2.0 首次升级需要手动安装或 brew。
 - [ ] 验证前先将本机 Homebrew 安装升级到基线版本，确认版本、草稿与会话恢复；本次发布不自动替换用户本机应用。
 - [ ] 在后续版本接入官方 DeepSeek Harness，优先使用其原生 `dsh acp` / `dsh --profile acp`。现有 DeepSeek 服务商接入继续保留；新增 Harness 按实际握手暴露能力，验证安装发现、配置、会话、消息、工具、权限、取消及恢复，再同步 Harness/产品/架构文档和发布说明。
 - [ ] 发布 DeepSeek 版本及 Homebrew 更新；在基线版本中检查到新版，等待所有 Agent 任务结束并正常退出后，显式执行 `brew update && brew upgrade --cask tuantuan`，再启动验证。Homebrew 不受应用内安装锁控制，不在任务运行时替换应用。
@@ -529,3 +529,8 @@ Homebrew 管理的安装使用 brew 升级；ad-hoc macOS 保留检查与手动�
 真实 Electron 使用隔离数据启动三次，实际端口 52748 → 52772 → 52887；普通退出约 628 ms，恢复多个房间、5 MiB 附件、引用、451 条历史的阅读锚点及页面，并确认三次服务停止。故意令主机保存路径无法替换，验证重复退出只触发一份失败提示、服务与窗口保留、重试保存失败后的新编辑；macOS 关闭窗口仅隐藏。对话框选择由 Electron API 自动化，未声称手动操作原生对话框或完成正式安装包跨版本升级。Windows/Linux 原生关窗仍待对应平台实机验证；Linux 打包冒烟由发布工作流执行。
 
 v0.2.1 发布采用三平台构建与产物校验后公开，再校验并手动推送 Homebrew tap；当前未配置 `HOMEBREW_TAP_TOKEN`，不把手动同步记为 Actions 自动同步成功。此轮不替换本机已安装的应用，也不加入 DeepSeek Harness；后续先建立本机基线，再用 DeepSeek 版本验证 Homebrew 跨版本升级。
+
+
+发布结果：PR [#20](https://github.com/bosshanz/tuantuan/pull/20) 已合并，`v0.2.1` 指向 `4625a2d15425b8c779eda373c249de8f5055c17c`。[PR CI](https://github.com/bosshanz/tuantuan/actions/runs/39128401947) 与 [Desktop 三平台构建、Linux 冒烟及产物校验](https://github.com/bosshanz/tuantuan/actions/runs/39128638988) 通过。2026-10-18 公开 [v0.2.1 Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1) 为 latest stable，共 15 个附件（6 个安装文件、5 个外置 blockmap、3 份更新清单和 SHA256SUMS）；每个远端文件的大小、SHA-256 与本地一致，公开下载的校验和文件也一致。两个 macOS 包均为 0.2.1、架构与 ad-hoc 签名验证通过，ZIP 完整性和 DMG 校验通过；没有启用 Developer ID 或 Apple 公证。
+
+Homebrew cask 已校验公开 Release 的资产摘要及本地安装包，并推送至 [tap main 的 `786bd64`](https://github.com/bosshanz/homebrew-tap/commit/786bd64)，版本与 arm64 / x64 哈希同步完成。本机 tap 快进更新后 `brew info --cask bosshanz/tap/tuantuan` 显示可用版本 0.2.1；未执行 brew 安装或升级，现有 Caskroom 安装记录仍为 0.1.1，后续建立基线时应同时核对应用实际版本与该记录。此轮由本机显式发布和手动推送 tap，Actions 的 publish/homebrew job 按默认配置跳过，不声称 HOMEBREW_TAP_TOKEN 自动同步已验证。下一步仍是单独接入 DeepSeek Harness，再通过 Homebrew 做实际跨版本升级验证。
