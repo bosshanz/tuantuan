@@ -94,7 +94,7 @@ export const COPY: Record<Locale, Copy> = {
     ogLocale: "en_US",
     title: "Tuantuan — A local workspace for multi-agent collaboration",
     description:
-      "Bring Claude Code, Codex, OpenCode, Pi, Grok Build, and MiniMax Code into one project conversation, and hand off work between them with structured context. Open source, over ACP.",
+      "Bring Claude Code, Codex, DeepSeek, OpenCode, Pi, Grok Build, and MiniMax Code into one project conversation, and hand off work between them with structured context. Open source, over ACP.",
     name: "Tuantuan",
     nav: {
       handoff: "Handoff",
@@ -105,16 +105,16 @@ export const COPY: Record<Locale, Copy> = {
       skip: "Skip to content",
     },
     hero: {
-      eyebrow: "v0.2.0 · Open source",
+      eyebrow: "v0.2.4 · Open source",
       tagline: "Your coding agents, one room.",
-      sub: "Stop copy-pasting between terminals. Bring Claude Code, Codex, OpenCode, and other coding agents into one project conversation, mention who you need, and watch them work side by side.",
+      sub: "Stop copy-pasting between terminals. Bring Claude Code, Codex, DeepSeek, OpenCode, and other coding agents into one project conversation, mention who you need, and watch them work side by side.",
       meta: "Desktop app for macOS, Windows, and Linux. Bring your own harness account or API provider.",
     },
     download: {
       mac: "Download for macOS",
       win: "Download for Windows",
       linux: "Download for Linux",
-      any: "Download v0.2.0",
+      any: "Download v0.2.4",
       notes: "Install notes",
     },
     macFirst: {
@@ -184,7 +184,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     features: {
       title: "Built for working with several agents",
-      sub: "Everything below is in v0.2.0.",
+      sub: "Everything below is in v0.2.4.",
       cards: [
         {
           title: "Choose your harness",
@@ -204,7 +204,7 @@ export const COPY: Record<Locale, Copy> = {
         },
         {
           title: "See the work",
-          body: "Streaming replies, tool calls, diffs, terminal output, plans, and permission requests. Stop any task.",
+          body: "Attach files and images, follow streaming replies, tool calls, diffs, terminal output, plans, and permission requests.",
         },
         {
           title: "Bring your setup",
@@ -237,7 +237,7 @@ export const COPY: Record<Locale, Copy> = {
     ogLocale: "zh_CN",
     title: "团团 Tuantuan — 本机多 Agent 协作工作台",
     description:
-      "把 Claude Code、Codex、OpenCode、Pi、Grok Build、MiniMax Code 放进同一个项目会话，用结构化上下文在 Agent 之间交接任务。开源，基于 ACP。",
+      "把 Claude Code、Codex、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code 放进同一个项目会话，用结构化上下文在 Agent 之间交接任务。开源，基于 ACP。",
     name: "团团 Tuantuan",
     nav: {
       handoff: "交接",
@@ -248,16 +248,16 @@ export const COPY: Record<Locale, Copy> = {
       skip: "跳到正文",
     },
     hero: {
-      eyebrow: "v0.2.0 · 开源",
+      eyebrow: "v0.2.4 · 开源",
       tagline: "你的编码 Agent，同在一室。",
-      sub: "不用再在一堆终端之间复制粘贴。把 Claude Code、Codex、OpenCode 等编码 Agent 放进同一个项目会话，@ 谁谁就开工，进展实时看得见。",
+      sub: "不用再在一堆终端之间复制粘贴。把 Claude Code、Codex、DeepSeek、OpenCode 等编码 Agent 放进同一个项目会话，@ 谁谁就开工，进展实时看得见。",
       meta: "macOS、Windows、Linux 桌面版。使用你自己的 Harness 账号或 API 服务商。",
     },
     download: {
       mac: "下载 macOS 版",
       win: "下载 Windows 版",
       linux: "下载 Linux 版",
-      any: "下载 v0.2.0",
+      any: "下载 v0.2.4",
       notes: "安装说明",
     },
     macFirst: {
@@ -326,13 +326,16 @@ export const COPY: Record<Locale, Copy> = {
     },
     features: {
       title: "为多 Agent 协作而做",
-      sub: "以下功能均已在 v0.2.0 中提供。",
+      sub: "以下功能均已在 v0.2.4 中提供。",
       cards: [
         { title: "选择 Harness", body: "沿用本机已有安装，或从 ACP Registry 安装 Agent，按 Harness 提供的方式登录。" },
         { title: "多 Agent 协作", body: "用 @ 指定成员，或由主 Agent 分工、跟进、汇总。所有成员共用项目工作目录。" },
         { title: "带上下文交接", body: "交接携带任务、目标、关键决策和未完成事项。每名 Agent 保留自己的会话。" },
         { title: "保留原生能力", body: "沿用原生提示词与上下文管理。模型、权限、推理和斜杠命令选项来自各 Harness。" },
-        { title: "完整呈现过程", body: "流式回复、工具调用、diff、终端输出、计划和权限请求，可单独停止任务。" },
+        {
+          title: "完整呈现过程",
+          body: "附带文件与图片，查看流式回复、工具调用、diff、终端输出、计划和权限请求，可单独停止任务。",
+        },
         {
           title: "沿用本机配置",
           body: "自定义 API 服务商、本机 Skills 和 Claude 插件。团团不改写 ~/.claude 或 ~/.codex。",
@@ -363,7 +366,7 @@ export const COPY: Record<Locale, Copy> = {
     ogLocale: "zh_TW",
     title: "團團 Tuantuan — 讓多個 Agent 在本機協作的工作台",
     description:
-      "將 Claude Code、Codex、OpenCode、Pi、Grok Build、MiniMax Code 放進同一段專案對話，以結構化脈絡在 Agent 之間交接任務。開源，基於 ACP。",
+      "將 Claude Code、Codex、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code 放進同一段專案對話，以結構化脈絡在 Agent 之間交接任務。開源，基於 ACP。",
     name: "團團 Tuantuan",
     nav: {
       handoff: "交接",
@@ -374,16 +377,16 @@ export const COPY: Record<Locale, Copy> = {
       skip: "跳到主要內容",
     },
     hero: {
-      eyebrow: "v0.2.0 · 開源",
+      eyebrow: "v0.2.4 · 開源",
       tagline: "你的程式開發 Agent，同在一室。",
-      sub: "不用再在一堆終端機之間複製貼上。把 Claude Code、Codex、OpenCode 等程式開發 Agent 放進同一段專案對話，@ 誰誰就動手，進度即時看得見。",
+      sub: "不用再在一堆終端機之間複製貼上。把 Claude Code、Codex、DeepSeek、OpenCode 等程式開發 Agent 放進同一段專案對話，@ 誰誰就動手，進度即時看得見。",
       meta: "macOS、Windows、Linux 桌面版。使用你自己的 Harness 帳號或 API 服務商。",
     },
     download: {
       mac: "下載 macOS 版",
       win: "下載 Windows 版",
       linux: "下載 Linux 版",
-      any: "下載 v0.2.0",
+      any: "下載 v0.2.4",
       notes: "安裝說明",
     },
     macFirst: {
@@ -452,7 +455,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     features: {
       title: "為多 Agent 協作打造",
-      sub: "以下功能皆已在 v0.2.0 提供。",
+      sub: "以下功能皆已在 v0.2.4 提供。",
       cards: [
         { title: "選擇 Harness", body: "沿用本機既有安裝，或從 ACP Registry 安裝 Agent，依 Harness 提供的方式登入。" },
         {
@@ -461,7 +464,10 @@ export const COPY: Record<Locale, Copy> = {
         },
         { title: "帶著脈絡交接", body: "交接包含任務、目標、重要決策與待辦事項。每名 Agent 保留自己的工作階段。" },
         { title: "保留原生能力", body: "沿用原生提示詞與脈絡管理。模型、權限、推理與斜線指令選項來自各 Harness。" },
-        { title: "看見完整過程", body: "串流回覆、工具呼叫、diff、終端輸出、計畫與權限請求，也可個別停止任務。" },
+        {
+          title: "看見完整過程",
+          body: "附上檔案與圖片，查看串流回覆、工具呼叫、diff、終端輸出、計畫與權限請求，也可個別停止任務。",
+        },
         {
           title: "沿用本機設定",
           body: "自訂 API 服務商、本機 Skills 與 Claude 外掛程式。團團不會改寫 ~/.claude 或 ~/.codex。",
@@ -492,7 +498,7 @@ export const COPY: Record<Locale, Copy> = {
     ogLocale: "ja_JP",
     title: "Tuantuan — 複数のエージェントがローカルで協力するワークスペース",
     description:
-      "Claude Code、Codex、OpenCode、Pi、Grok Build、MiniMax Code を 1 つのプロジェクト会話に集め、構造化されたコンテキストでエージェント間の引き継ぎができます。オープンソース、ACP 対応。",
+      "Claude Code、Codex、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code を 1 つのプロジェクト会話に集め、構造化されたコンテキストでエージェント間の引き継ぎができます。オープンソース、ACP 対応。",
     name: "Tuantuan",
     nav: {
       handoff: "引き継ぎ",
@@ -503,16 +509,16 @@ export const COPY: Record<Locale, Copy> = {
       skip: "本文へ移動",
     },
     hero: {
-      eyebrow: "v0.2.0 · オープンソース",
+      eyebrow: "v0.2.4 · オープンソース",
       tagline: "コーディングエージェントを、ひとつの部屋に。",
-      sub: "ターミナル間のコピペはもう要りません。Claude Code、Codex、OpenCode などのコーディングエージェントを 1 つのプロジェクト会話に集め、@ で呼べばすぐに作業開始。進み具合はその場で確認できます。",
+      sub: "ターミナル間のコピペはもう要りません。Claude Code、Codex、DeepSeek、OpenCode などのコーディングエージェントを 1 つのプロジェクト会話に集め、@ で呼べばすぐに作業開始。進み具合はその場で確認できます。",
       meta: "macOS、Windows、Linux 向けデスクトップアプリ。ハーネスのアカウントや API プロバイダーはご自身のものを使います。",
     },
     download: {
       mac: "macOS 版をダウンロード",
       win: "Windows 版をダウンロード",
       linux: "Linux 版をダウンロード",
-      any: "v0.2.0 をダウンロード",
+      any: "v0.2.4 をダウンロード",
       notes: "インストールの説明",
     },
     macFirst: {
@@ -583,7 +589,7 @@ export const COPY: Record<Locale, Copy> = {
     },
     features: {
       title: "複数のエージェントで働くために",
-      sub: "以下はすべて v0.2.0 で利用できます。",
+      sub: "以下はすべて v0.2.4 で利用できます。",
       cards: [
         {
           title: "ハーネスを選択",
@@ -603,7 +609,7 @@ export const COPY: Record<Locale, Copy> = {
         },
         {
           title: "作業の過程が見える",
-          body: "ストリーミング応答、ツール呼び出し、diff、ターミナル出力、計画、権限の承認要求。タスクは個別に停止できます。",
+          body: "ファイルや画像の添付、ストリーミング応答、ツール呼び出し、diff、ターミナル出力、計画、権限の承認要求に対応します。",
         },
         {
           title: "既存の環境を活かす",

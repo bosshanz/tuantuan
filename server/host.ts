@@ -588,7 +588,9 @@ export class HarnessHost {
       usage: null,
       title: null,
       capabilities: {
-        image: !!caps.promptCapabilities?.image,
+        // Grok Build's ACP server accepts ContentBlock::Image in session/prompt,
+        // but xai-grok-shell's initialize omits PromptCapabilities::image(true).
+        image: !!caps.promptCapabilities?.image || proc.spec.id === "grok" || proc.spec.registry === "grok-build",
         loadSession: !!caps.loadSession,
         list: !!caps.sessionCapabilities?.list,
         resume: !!caps.sessionCapabilities?.resume,

@@ -10,7 +10,7 @@
 | M2：多 Agent 协作 | 已完成 | 项目会话、@ 路由、群主协调、并行与排队、交接笔记及原文追读 |
 | M3：桌面交付与更新 | 已发布，部分平台验证待补 | Electron + 随包 Bun；三平台构建；macOS Homebrew 跨版本升级已实测 |
 | M4：更多 Harness 与扩展 | 按需求推进 | 官方 Registry 与明确标注的补充目录；DeepSeek Harness 已在 0.2.2 发布 |
-| 0.2.3：文件与图片附件 | 已实现并通过开发验证 | 输入框入口、文件传递、BYOK 图片与草稿恢复；安装包以公开 Release 为准 |
+| 0.2.3–0.2.4：文件与图片附件 | 已发布 | 输入框入口、文件传递、BYOK 与 Grok Build 图片支持、草稿恢复及官网更新 |
 
 ## 保留的关键决定
 
@@ -35,7 +35,8 @@
 | 0.2.0 | 聊天卡片、阶段气泡、引用定位与返回 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.0) · [PR #18](https://github.com/bosshanz/tuantuan/pull/18) |
 | 0.2.1 | 检查更新、活动任务保护、正常退出保存工作区 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.1) · [PR #20](https://github.com/bosshanz/tuantuan/pull/20) |
 | 0.2.2 | 官方 DeepSeek Harness 与输入交互修正 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.2) · [PR #22](https://github.com/bosshanz/tuantuan/pull/22) |
-| 0.2.3 | 文件与图片上传、下载及草稿恢复 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.3) |
+| 0.2.3 | 文件与图片上传、下载及草稿恢复 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.3) · [PR #23](https://github.com/bosshanz/tuantuan/pull/23) |
+| 0.2.4 | Grok Build 图片支持与 GitHub Pages 站点同步 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.4) |
 
 当前 macOS 使用 **Homebrew**，Apple Developer、Developer ID 签名和公证暂缓。应用内检查可用，但 Homebrew 升级不等于 macOS 原生 OTA 已验证。升级必须等 Agent 全部结束并正常退出；外部 brew 不受应用内安装锁控制。签名要求、更新流程与 tap 配置集中维护在[安装文档](install.md)。
 
@@ -56,13 +57,13 @@ v0.2.2 的 [CI](https://github.com/bosshanz/tuantuan/actions/runs/39133717186)�
 
 真实官方 CLI 的安装、握手、消息、配置、工具权限、取消、跨进程恢复及 stdio MCP 已在隔离环境验证，模型端点使用本机模拟响应；没有付费模型质量结论，HTTP MCP 仅确认能力声明。
 
-## 0.2.3 附件交付
+## 0.2.3–0.2.4 附件交付
 
-统一选择、拖放、粘贴入口，支持纯附件请求、预览、移除和原样下载；图片能力关闭时普通文件入口仍可用。附件按房间持久化，完成读入前等待保存提交，恢复旧草稿与桌面 checkpoint，不新增数据库迁移。
+统一选择、拖放、粘贴入口，支持纯附件请求、预览、移除和原样下载；图片能力关闭时普通文件入口仍可用。附件按房间持久化，完成读入前等待保存提交，恢复旧草稿与桌面 checkpoint，不新增数据库迁移。Grok Build 在 `initialize` 中未声明 `promptCapabilities.image`，但实测 `session/prompt` 接受并解析 `ContentBlock::Image`，0.2.4 起按实测能力启用。
 
 UTF-8 文本完整内联，原生 Harness 的二进制原件按精确只读路径授权并在进程重建后恢复；三种 BYOK 接口使用原生图片结构，不支持的内容明确报错。附件契约与限制集中见[会话文档](conversations.md#文件与图片附件)。
 
-项目检查、完整 Chrome 冒烟、附件专项、跨端口的文件/图片/引用/阅读位置恢复均已通过，独立审查问题已修复并复核。使用隔离 mock ACP 与本机模型端点，不推断真实模型识图或任意二进制解析质量。安装包和 Homebrew 仍遵循上面的发布校验流程，实际交付以 Release/tap 为准。
+项目检查、完整 Chrome 冒烟、附件专项、跨端口的文件/图片/引用/阅读位置恢复均已通过，独立审查问题已修复并复核。使用隔离 mock ACP、本机 Grok CLI 1.0.62 实测与本机模型端点；安装包和 Homebrew 仍遵循上面的发布校验流程，实际交付以 Release/tap 为准。
 
 ## 尚未完成或暂缓
 

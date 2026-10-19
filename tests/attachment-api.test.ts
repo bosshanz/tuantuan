@@ -242,6 +242,46 @@ test("binary files become managed paths with read-only ACP grants; unsupported i
   }
 });
 
+test("Grok Build keeps image input enabled when ACP initialize omits promptCapabilities.image", async () => {
+  const mockGrok = join(scratch, "mock-grok");
+  writeFileSync(
+    mockGrok,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(import.meta.dir, "../server/mock-agent.ts"))}\n`,
+    { mode: 0o755 },
+  );
+  app.store.setSetting("harnessPaths", { grok: mockGrok });
+  const agent = app.store.createAgent(
+    agentInput("GrokAttachments", {
+      harness: "grok",
+      env: { MOCK_AGENT_IMAGE: "0" },
+    }),
+  );
+  const room = app.store.createRoom("grok-images", [agent.id], { projectId: project.id });
+  const attached = await app.host.session(room, agent, "test");
+  expect(attached.slot.view.capabilities.image).toBe(true);
+  const request = spyOn(attached.proc.acp.agent, "request");
+  try {
+    const result = await post(room.id, {
+      content: "describe this image",
+      images: [{ mimeType: "image/png", data: "aGk=" }],
+      files: [file("context.txt", "Grok attachment test")],
+    });
+    expect(result.status).toBe(201);
+    await app.orchestrator.idle(room.id);
+    const prompt = request.mock.calls.find(([method]) => method === methods.agent.session.prompt)?.[1] as PromptRequest;
+    expect(prompt.prompt).toContainEqual({ type: "image", mimeType: "image/png", data: "aGk=" });
+    expect(
+      prompt.prompt.some(
+        (block) =>
+          block.type === "resource" && "text" in block.resource && block.resource.text.includes("Grok attachment test"),
+      ),
+    ).toBe(true);
+  } finally {
+    request.mockRestore();
+    app.store.setSetting("harnessPaths", {});
+  }
+});
+
 test("custom API binary uploads fail before persistence rather than reporting an unreadable attachment as sent", async () => {
   const agent = app.store.createAgent(
     agentInput("CustomBinary", {

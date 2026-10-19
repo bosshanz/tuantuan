@@ -29,15 +29,15 @@ Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser 
 
 See the [full feature list (Simplified Chinese)](docs/features.md).
 
-## Download v0.2.3
+## Download v0.2.4
 
-Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.3):
+Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.4):
 
 - **macOS**: Apple silicon (arm64) or Intel (x64), `.dmg` or `.zip`.
 - **Windows**: x64 `.exe` installer.
 - **Linux**: x64 `.AppImage`.
 
-The desktop app includes its runtime; you do not need to install Bun. The v0.2.3 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
+The desktop app includes its runtime; you do not need to install Bun. The v0.2.4 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
 
 ### Install with Homebrew (macOS)
 

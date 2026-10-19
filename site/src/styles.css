@@ -320,15 +320,14 @@ h2 { margin: 0; font-size: clamp(30px, 4.2vw, 44px); font-weight: 750; line-heig
 .av[data-expr="sad"] .sweat { opacity: 1; transform: none; }
 
 /* ---------- harnesses ---------- */
-.harnesses { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.harnesses { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .harness, .harness-more a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; height: 136px; padding: 16px 10px; text-align: center; }
 .harness { border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--border); transition: box-shadow 0.2s, transform 0.2s var(--ease); }
 .harness:hover { box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-1); transform: translateY(-2px); }
 .harness-logo { display: grid; place-items: center; width: 32px; height: 32px; color: var(--text); }
 .harness-name { display: grid; gap: 1px; font-size: 14px; font-weight: 650; line-height: 1.3; }
 .harness-name small { font-size: 12px; font-weight: 500; color: var(--text-3); }
-.harness-more { padding: 0; background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); }
-.harness-more { box-shadow: none; border: 1px dashed var(--border-strong); }
+.harness-more { padding: 0; background: transparent; box-shadow: none; border: 1px dashed var(--border-strong); }
 .harness-more:hover { box-shadow: none; border-color: var(--text-3); }
 .harness-more a { position: relative; width: 100%; height: 100%; border-radius: 15px; color: var(--text-2); }
 .harness-more .harness-logo { color: var(--text-3); }
@@ -381,9 +380,6 @@ h2 { margin: 0; font-size: clamp(30px, 4.2vw, 44px); font-weight: 750; line-heig
 /* ---------- responsive ---------- */
 @media (max-width: 1040px) {
   .harnesses { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .harness-more { grid-column: span 2; }
-  .harness-more a { flex-direction: row; gap: 14px; }
-  .harness-more .harness-name { text-align: left; }
 }
 @media (max-width: 960px) {
   .ho-grid, .start-grid { grid-template-columns: minmax(0, 1fr); }

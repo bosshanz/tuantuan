@@ -30,7 +30,7 @@ import { BRAND_SVG } from "../../web/src/brandIcons";
 import { COPY, LANG_NAME, LOCALE_PATH, LOCALES, type Locale, README_FILE } from "./i18n";
 
 export const REPO = "https://github.com/bosshanz/tuantuan";
-export const RELEASE = `${REPO}/releases/tag/v0.2.0`;
+export const RELEASE = `${REPO}/releases/tag/v0.2.4`;
 const ACP = "https://agentclientprotocol.com";
 /** The bundle is tuantuan.app (CFBundleName 团团); the xattr path must use the file name. */
 const BREW = "brew install --cask bosshanz/tap/tuantuan";
@@ -53,6 +53,7 @@ type Harness = { name: string; svg: string; viewBox: string };
 const HARNESSES: Harness[] = [
   { name: "Claude Code", svg: BRAND_SVG.anthropic ?? "", viewBox: "0 0 24 24" },
   { name: "Codex", svg: BRAND_SVG.openai ?? "", viewBox: "0 0 24 24" },
+  { name: "DeepSeek", svg: BRAND_SVG.deepseek ?? "", viewBox: "0 0 24 24" },
   { name: "OpenCode", svg: BRAND_SVG.opencode ?? "", viewBox: "0 0 24 24" },
   { name: "Pi", svg: PI_SVG, viewBox: "0 0 16 16" },
   { name: "Grok Build", svg: BRAND_SVG.xai ?? "", viewBox: "0 0 24 24" },
@@ -626,7 +627,7 @@ export function Page({ locale, siteUrl }: { locale: Locale; siteUrl: string }) {
                     <ArrowUpRight size={14} strokeWidth={2} aria-hidden="true" />
                   </a>
                   <a href={RELEASE}>
-                    v0.2.0
+                    v0.2.4
                     <ArrowUpRight size={14} strokeWidth={2} aria-hidden="true" />
                   </a>
                 </p>
