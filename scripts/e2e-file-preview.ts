@@ -49,15 +49,15 @@ export async function filePreviewSmoke(browser: Browser, base: string, store: St
   };
   const markdown = `# 项目交付说明\n\n直接在团团检查 **文档与代码**。\n\n| 项目 | 状态 |\n| --- | --- |\n| 文件预览 | 已完成 |\n\n\`\`\`ts\nconst release = "0.2.5";\n\`\`\`\n\n![外部图片](https://example.invalid/__file_preview_probe/md.png)\n\n<script>window.__filePreviewExecuted = true</script>\n`;
   const code = 'export const version: string = "0.2.5";\nconst literal = "<script>unsafe()</script>";\n';
-  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+  const html = `<!doctype html><html lang="zh-CN" class="delivery-root"><head><meta charset="utf-8"><style>
     @import url("https://example.invalid/__file_preview_probe/import.css");
-    body{margin:0;padding:40px;font:16px/1.7 system-ui;background:#f1f5f3;color:#183e35}
+    body{margin:0;padding:40px;font:16px/1.7 system-ui;color:#183e35}body.delivery-body{background:rgb(241,245,243)}
     main{max-width:760px;margin:auto}h1{font-size:36px;line-height:1.3}p{color:#5c736b}
     section{background:white;border:1px solid #d6e1dc;border-radius:16px;padding:24px;margin-top:24px}
     .tag{font-size:12px;letter-spacing:2px;color:#387d68}.bar{height:12px;background:#418870;border-radius:6px;width:80%}
     body::after{content:"";display:block;width:1px;height:1px;background-image:url("https://example.invalid/__file_preview_probe/css.png")}
     </style><meta http-equiv="refresh" content="0;url=${base}/__file_preview_probe/refresh"><base href="https://example.invalid/"></head>
-    <body><main><div class="tag">TUANTUAN / DELIVERY</div><h1>每一次交付，都清晰可见</h1><p>文档、代码和页面，在会话里直接检查。</p><section><h2>本周进展</h2><p>8 项任务已完成 · 2 项进行中</p><div class="bar"></div></section>
+    <body class="delivery-body" style="color:rgb(24,62,53);letter-spacing:0.1px"><main><div class="tag">TUANTUAN / DELIVERY</div><h1>每一次交付，都清晰可见</h1><p>文档、代码和页面，在会话里直接检查。</p><section><h2>本周进展</h2><p>8 项任务已完成 · 2 项进行中</p><div class="bar"></div></section>
     <svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#418870"/></svg>
     <a href="${base}/__file_preview_probe/link" target="_top">外部链接测试</a>
     <svg width="180" height="30"><a href="${base}/__file_preview_probe/svg"><text x="0" y="20">SVG 链接测试</text></a></svg>
@@ -132,10 +132,29 @@ export async function filePreviewSmoke(browser: Browser, base: string, store: St
     await open("周报.html");
     const frame = page.frameLocator("iframe.file-preview-html");
     await frame.getByRole("heading", { name: "每一次交付，都清晰可见", exact: true }).waitFor();
+    if (
+      (await frame.locator("html").getAttribute("lang")) !== "zh-CN" ||
+      (await frame.locator("html").getAttribute("class")) !== "delivery-root" ||
+      (await frame.locator("body").getAttribute("class")) !== "delivery-body"
+    )
+      throw new Error("HTML document attributes were lost during preview");
+    const bodyStyle = await frame.locator("body").evaluate((body) => ({
+      background: getComputedStyle(body).backgroundColor,
+      color: getComputedStyle(body).color,
+      spacing: getComputedStyle(body).letterSpacing,
+    }));
+    if (
+      bodyStyle.background !== "rgb(241, 245, 243)" ||
+      bodyStyle.color !== "rgb(24, 62, 53)" ||
+      bodyStyle.spacing !== "0.1px"
+    )
+      throw new Error(`HTML authored body styles changed: ${JSON.stringify(bodyStyle)}`);
     if ((await preview.locator("iframe").getAttribute("sandbox")) !== "")
       throw new Error("HTML sandbox grants permissions");
     if (await frame.locator("script,iframe,object,embed,base,meta[http-equiv=refresh]").count())
       throw new Error("active HTML elements survived static preview");
+    if (!(await frame.getByRole("button", { name: "提交测试", exact: true }).isDisabled()))
+      throw new Error("static HTML form content is missing or interactive");
     await frame.getByText("外部链接测试", { exact: true }).click();
     await frame.getByText("SVG 链接测试", { exact: true }).click();
     await page.waitForTimeout(100);

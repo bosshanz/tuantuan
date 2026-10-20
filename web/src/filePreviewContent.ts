@@ -40,7 +40,6 @@ const removedTags = new Set([
   "base",
   "meta",
   "link",
-  "form",
   "template",
   "portal",
   "fencedframe",
@@ -76,11 +75,62 @@ const removedAttributes = new Set([
   "is",
 ]);
 
+function markupEnd(source: string, start: number): number {
+  let quote = "";
+  for (let index = start; index < source.length; index++) {
+    const character = source[index];
+    if (quote) {
+      if (character === quote) quote = "";
+    } else if (character === '"' || character === "'") quote = character;
+    else if (character === ">") return index;
+  }
+  return -1;
+}
+
+/** Only inspect the document prefix; an <html> string inside content is never an attribute source. */
+function leadingHtmlTag(source: string): string | null {
+  let index = 0;
+  // The preview response bounds the entire source to 1 MiB.
+  while (index < source.length) {
+    while (/[\t\n\f\r \uFEFF]/.test(source[index] ?? "")) index++;
+    if (source.startsWith("<!--", index)) {
+      const end = source.indexOf("-->", index + 4);
+      if (end < 0) return null;
+      index = end + 3;
+      continue;
+    }
+    const prefix = source.slice(index, index + 16);
+    if (/^<!doctype(?:\s|>)/i.test(prefix) || /^<\?xml(?:\s|\?)/i.test(prefix)) {
+      const end = markupEnd(source, index);
+      if (end < 0) return null;
+      index = end + 1;
+      continue;
+    }
+    if (!/^<html(?=[\t\n\f\r />])/i.test(prefix)) return null;
+    const end = markupEnd(source, index + 5);
+    return end < 0 ? null : source.slice(index, end + 1);
+  }
+  return null;
+}
+
 /** Parse into an inert template, never a detached document that could start resource requests. */
 export function staticHtmlDocument(source: string): string {
   const template = document.createElement("template");
-  template.innerHTML = source;
-  const pending = [...template.content.children];
+  // Template contents own an inert document (no browsing context). An html-context fragment
+  // keeps the real head/body and their attributes; parsing directly into a template drops them.
+  const root = template.content.ownerDocument.createElement("html");
+  template.content.append(root);
+  root.innerHTML = source;
+  // Fragment parsing ignores the outer html start tag. Parse that isolated prefix as an inert
+  // ordinary element, then subject its attributes to the same sanitizer as every other node.
+  const htmlTag = leadingHtmlTag(source);
+  if (htmlTag) {
+    const attributes = template.content.ownerDocument.createElement("template");
+    attributes.innerHTML = htmlTag.replace(/^<html/i, "<div");
+    const element = attributes.content.firstElementChild;
+    if (element) for (const attribute of element.attributes) root.setAttributeNode(attribute.cloneNode() as Attr);
+  }
+  const pending: Element[] = [root];
   let count = 0;
   while (pending.length) {
     const element = pending.pop();
@@ -103,6 +153,7 @@ export function staticHtmlDocument(source: string): string {
     if (["input", "button", "select", "textarea"].includes(element.localName)) element.setAttribute("disabled", "");
     for (const child of element.children) pending.push(child);
   }
-  // The policy is encountered before every byte of imported markup or CSS.
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${STATIC_CSP}"><meta name="referrer" content="no-referrer"></head><body>${template.innerHTML}</body></html>`;
+  // The document parser puts this trusted prefix in head, then merges the authored html
+  // attributes. Thus even root/body inline styles are encountered only after the policy.
+  return `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${STATIC_CSP}"><meta name="referrer" content="no-referrer">${root.outerHTML}`;
 }
