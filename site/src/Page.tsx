@@ -8,7 +8,9 @@ import {
   Copy,
   Download,
   Eye,
+  Files,
   Globe,
+  Inbox,
   Info,
   LayoutGrid,
   LoaderCircle,
@@ -16,6 +18,7 @@ import {
   Play,
   Plug,
   RotateCcw,
+  Search,
   SlidersHorizontal,
   SquareTerminal,
   Users,
@@ -30,7 +33,7 @@ import { BRAND_SVG } from "../../web/src/brandIcons";
 import { COPY, LANG_NAME, LOCALE_PATH, LOCALES, type Locale, README_FILE } from "./i18n";
 
 export const REPO = "https://github.com/bosshanz/tuantuan";
-export const RELEASE = `${REPO}/releases/tag/v0.2.4`;
+export const RELEASE = `${REPO}/releases/tag/v0.2.5`;
 const ACP = "https://agentclientprotocol.com";
 /** The bundle is tuantuan.app (CFBundleName 团团); the xattr path must use the file name. */
 const BREW = "brew install --cask bosshanz/tap/tuantuan";
@@ -60,7 +63,7 @@ const HARNESSES: Harness[] = [
   { name: "MiniMax Code", svg: BRAND_SVG.minimax ?? "", viewBox: "0 0 24 24" },
 ];
 
-const FEATURE_ICONS = [Plug, Users, ArrowRightLeft, SquareTerminal, Eye, SlidersHorizontal];
+const FEATURE_ICONS = [Plug, Users, ArrowRightLeft, SquareTerminal, Eye, SlidersHorizontal, Search, Files, Inbox];
 
 function Logo({ svg, viewBox, label, size = 28 }: { svg: string; viewBox: string; label: string; size?: number }) {
   return (
@@ -627,7 +630,7 @@ export function Page({ locale, siteUrl }: { locale: Locale; siteUrl: string }) {
                     <ArrowUpRight size={14} strokeWidth={2} aria-hidden="true" />
                   </a>
                   <a href={RELEASE}>
-                    v0.2.4
+                    v0.2.5
                     <ArrowUpRight size={14} strokeWidth={2} aria-hidden="true" />
                   </a>
                 </p>

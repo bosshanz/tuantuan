@@ -8,6 +8,7 @@ import {
   Folder,
   FolderOpen,
   Gauge,
+  Inbox,
   Info,
   MessagesSquare,
   PlugZap,
@@ -23,10 +24,11 @@ import type { DesktopCheckpointRequest } from "../../shared/desktopUpdate";
 import { previewText } from "../../shared/roomPreview";
 import { AboutUpdates } from "./AboutUpdates";
 import { AgentEditor } from "./AgentEditor";
+import { AttentionCenter, useAttention } from "./AttentionCenter";
 import { AvatarShowcase } from "./AvatarShowcase";
 import { type Agent, api, connectWs, type McpServer, type Meta, type Project, type Room, type WsEvent } from "./api";
 import { BrandMark } from "./BrandMark";
-import { ChatView } from "./ChatView";
+import { type ChatNavigationTarget, ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
 import { chatWorkspace } from "./chatWorkspace";
 import { agentSubtitle, defaultsSummary } from "./config";
@@ -48,7 +50,7 @@ export function App() {
   const { t } = useI18n();
   const [meta, setMeta] = useState<Meta | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [{ rooms }, dispatchRooms] = useReducer(roomListReducer, { rooms: [], loading: null });
+  const [{ rooms, loading: roomsLoading }, dispatchRooms] = useReducer(roomListReducer, { rooms: [], loading: null });
   const reloadId = useRef(0);
   const [projects, setProjects] = useState<Project[]>([]);
   const [collapsed, setCollapsed] = useState<string[]>(() => {
@@ -64,6 +66,17 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [connected, setConnected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteScope, setPaletteScope] = useState<"all" | "current">("all");
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const [chatTarget, setChatTarget] = useState<(ChatNavigationTarget & { roomId: string }) | null>(null);
+  const navigationSequence = useRef(0);
+  const consumeNavigation = useCallback((nonce: number) => {
+    setChatTarget((target) => (target?.nonce === nonce ? null : target));
+  }, []);
+  const openSearch = useCallback((scope: "all" | "current") => {
+    setPaletteScope(scope);
+    setPaletteOpen(true);
+  }, []);
   const palette = usePresence(paletteOpen, 140);
   const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
   const [profileLoaded, setProfileLoaded] = useState(false);
@@ -251,14 +264,25 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (preparingUpdate) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.isComposing) return;
+      if (e.key.toLowerCase() === "k" && paletteOpen) {
         e.preventDefault();
-        setPaletteOpen((v) => !v);
+        setPaletteOpen(false);
+        return;
+      }
+      if (document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"]')) return;
+      if (e.target instanceof Element && e.target.closest(".xterm")) return;
+      if (e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        openSearch("all");
+      } else if (e.key.toLowerCase() === "f" && route[0] === "c" && route[1] && route[1] !== "new") {
+        e.preventDefault();
+        openSearch("current");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [preparingUpdate]);
+  }, [preparingUpdate, paletteOpen, openSearch, route]);
 
   const section =
     route[0] === "a"
@@ -310,6 +334,15 @@ export function App() {
     openRoomId: roomId,
     open: (id) => go(`c/${id}`),
   });
+  const attention = useAttention({ subscribeEvents, connected });
+  const navigateToChat = (target: Omit<ChatNavigationTarget, "nonce"> & { roomId: string }) => {
+    setPaletteOpen(false);
+    setAttentionOpen(false);
+    // Search/attention can refer to a room created in another window after this sidebar loaded.
+    if (!rooms.some((item) => item.id === target.roomId)) void reload();
+    setChatTarget({ ...target, nonce: ++navigationSequence.current });
+    go(`c/${target.roomId}`);
+  };
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
   const fullPage =
@@ -353,7 +386,7 @@ export function App() {
             className="side-icon"
             aria-label={t("搜索")}
             title={t("搜索（⌘K / Ctrl+K）")}
-            onClick={() => setPaletteOpen(true)}
+            onClick={() => openSearch("all")}
           >
             <Search size={17} />
           </button>
@@ -367,6 +400,23 @@ export function App() {
             <Plus size={18} />
           </button>
         </div>
+        <button
+          type="button"
+          className="side-attention"
+          onClick={() => setAttentionOpen(true)}
+          aria-haspopup="dialog"
+          title={attention.stale && !attention.loading ? t("列表可能已过期，请刷新后再处理") : undefined}
+        >
+          <Inbox size={17} />
+          <span>{t("需要我处理")}</span>
+          <span className="side-attention-count" data-active={(attention.pendingCount ?? 0) > 0 || undefined}>
+            {attention.loading
+              ? (attention.pendingCount ?? "…")
+              : attention.stale
+                ? "!"
+                : (attention.pendingCount ?? "…")}
+          </span>
+        </button>
         <div className="side-scroll">
           {section === "rooms" ? (
             <>
@@ -661,7 +711,18 @@ export function App() {
               }}
             />
           )}
-          {section === "rooms" && roomId && loaded && !room && <NotFound what={t("会话")} onBack={() => go("c")} />}
+          {section === "rooms" &&
+            roomId &&
+            loaded &&
+            !room &&
+            !loadError &&
+            (roomsLoading ? (
+              <div className="empty" role="status">
+                {t("正在加载会话…")}
+              </div>
+            ) : (
+              <NotFound what={t("会话")} onBack={() => go("c")} />
+            ))}
           {room && (
             <ChatView
               key={room.id}
@@ -671,6 +732,10 @@ export function App() {
               userName={userName}
               harnessName={harnessName}
               subscribeEvents={subscribeEvents}
+              onSearch={() => openSearch("current")}
+              onNavigateMessage={(id) => navigateToChat({ roomId: room.id, kind: "message", id })}
+              navigationTarget={chatTarget?.roomId === room.id ? chatTarget : null}
+              onNavigationHandled={consumeNavigation}
               onBack={() => go("c")}
               onRoomChange={reload}
               onDeleted={async () => {
@@ -751,9 +816,13 @@ export function App() {
 
       {palette.mounted && (
         <CommandPalette
+          key={paletteScope}
           state={palette.state}
           agents={agents}
           rooms={rooms}
+          currentRoom={room ? { id: room.id, name: room.name } : undefined}
+          initialScope={paletteScope}
+          onSelectMessage={(result) => navigateToChat({ roomId: result.roomId, kind: "message", id: result.messageId })}
           onClose={() => setPaletteOpen(false)}
           onGo={(path) => {
             setPaletteOpen(false);
@@ -761,6 +830,18 @@ export function App() {
           }}
         />
       )}
+      <AttentionCenter
+        open={attentionOpen}
+        onClose={() => setAttentionOpen(false)}
+        controller={attention}
+        onNavigate={(target) =>
+          navigateToChat({
+            roomId: target.roomId,
+            kind: "askId" in target ? target.kind : "message",
+            id: "askId" in target ? target.askId : target.messageId,
+          })
+        }
+      />
       {preparingUpdate &&
         createPortal(
           <div className="update-preparing" role="status" aria-live="polite">

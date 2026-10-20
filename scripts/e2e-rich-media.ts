@@ -46,6 +46,40 @@ export async function richMediaSmoke(
   });
   await page.route(imageUrl, (route) => route.fulfill({ contentType: "image/png", body: Buffer.from(png, "base64") }));
   await page.route("https://diagram-resource.invalid/**", (route) => route.fulfill({ status: 200, body: "" }));
+  const variants = await page.evaluate(() => {
+    const draw = (width: number, height: number) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("canvas unavailable");
+      context.fillStyle = "#fafaf9";
+      context.fillRect(0, 0, width, height);
+      context.fillStyle = "#27272a";
+      context.font = "26px sans-serif";
+      context.fillText("团团 · 图片预览", 24, 48);
+      context.font = "18px sans-serif";
+      context.fillText("放大看细节，按 Esc 返回对话", 24, 90);
+      if (height > 1000) {
+        for (let y = 160; y < height - 80; y += 200) {
+          context.fillStyle = y % 400 === 160 ? "#e8462b" : "#2f6fed";
+          context.fillRect(24, y, width - 48, 120);
+        }
+        context.fillStyle = "#27272a";
+        context.fillText("长图底部", 24, height - 24);
+      }
+      return canvas.toDataURL("image/png").split(",")[1] as string;
+    };
+    return { small: draw(640, 132), tall: draw(400, 3600) };
+  });
+  for (const [name, data] of Object.entries(variants))
+    await page.route(`https://rich-media.invalid/${name}.png`, (route) =>
+      route.fulfill({ contentType: "image/png", body: Buffer.from(data, "base64") }),
+    );
+  let recoverImage = false;
+  await page.route("https://rich-media.invalid/retry.png", (route) =>
+    route.fulfill({ contentType: "image/png", body: recoverImage ? Buffer.from(png, "base64") : "invalid image" }),
+  );
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const response = await fetch(`${base}${path}`, {
       method,
@@ -112,6 +146,9 @@ export async function richMediaSmoke(
     },
     plan: null,
   });
+  const smallImage = insert("![横向小截图](https://rich-media.invalid/small.png)");
+  const tallImage = insert("![长图](https://rich-media.invalid/tall.png)");
+  const retryImage = insert("![加载失败](https://rich-media.invalid/retry.png)");
   const shot = async (name: string) => {
     if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}.png`), animations: "disabled" });
   };
@@ -148,6 +185,10 @@ export async function richMediaSmoke(
     await diagramTrigger.click();
     const diagramPreview = page.locator("dialog.image-preview[open]");
     await diagramPreview.waitFor();
+    await page.waitForFunction(() => {
+      const image = document.querySelector<HTMLImageElement>(".image-preview-viewport img");
+      return image && image.width > 0 && image.naturalWidth > 0;
+    });
     const enlargedDiagram = await diagramPreview.locator(".image-preview-viewport img").boundingBox();
     if (!inlineDiagram || !enlargedDiagram || enlargedDiagram.width <= inlineDiagram.width + 100)
       throw new Error(`diagram preview did not enlarge: ${JSON.stringify({ inlineDiagram, enlargedDiagram })}`);
@@ -175,7 +216,9 @@ export async function richMediaSmoke(
       !(await diagramPreview.locator('.image-preview-viewport[data-original="true"]').count()) ||
       !(await diagramPreview.evaluate((element) => element.contains(document.activeElement)))
     )
-      throw new Error("changing the theme closed the diagram preview or lost its zoom/focus state");
+      throw new Error(
+        `changing the theme closed the diagram preview or lost its zoom/focus state: ${await page.evaluate(() => JSON.stringify({ active: document.activeElement?.outerHTML.slice(0, 220), original: document.querySelector(".image-preview-viewport")?.getAttribute("data-original"), open: !!document.querySelector("dialog.image-preview[open]") }))}`,
+      );
     if ((await diagramPreview.locator(".image-preview-viewport img").getAttribute("src")) === lightUrl)
       throw new Error("the open preview retained the old diagram theme");
     await diagramPreview.getByRole("button", { name: "适应窗口", exact: true }).click();
@@ -208,14 +251,55 @@ export async function richMediaSmoke(
     if (!imageSize || imageSize.width <= 320 || imageSize.width > 1440 || imageSize.height > 1000)
       throw new Error(`preview does not fit the viewport: ${JSON.stringify(imageSize)}`);
     const close = dialog.getByRole("button", { name: "关闭图片预览", exact: true });
-    await close.focus();
+    const original = dialog.getByRole("button", { name: "原图", exact: true });
+    await original.focus();
     await page.keyboard.press("Tab");
-    if (
-      !(await dialog
-        .getByRole("button", { name: "原图", exact: true })
-        .evaluate((element) => element === document.activeElement))
-    )
+    if (!(await close.evaluate((element) => element === document.activeElement)))
       throw new Error("image preview focus escaped the dialog");
+    await page.keyboard.press("Shift+Tab");
+    if (!(await original.evaluate((element) => element === document.activeElement)))
+      throw new Error("reverse tab escaped the image preview");
+
+    const viewport = dialog.locator(".image-preview-viewport");
+    const image = viewport.locator("img");
+    const scale = () => dialog.locator(".image-preview-scale").textContent();
+    const fitScale = await scale();
+    await dialog.getByRole("button", { name: "放大", exact: true }).click();
+    if ((await scale()) === fitScale) throw new Error("zoom button did not change the image scale");
+    await original.click();
+    const naturalSize = await image.boundingBox();
+    if (naturalSize?.width !== 1600 || naturalSize.height !== 1000)
+      throw new Error("original mode does not show actual image dimensions");
+    const bounds = await viewport.boundingBox();
+    if (!bounds) throw new Error("missing image viewport");
+    const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+    await page.mouse.move(center.x, center.y);
+    await page.mouse.down();
+    await page.mouse.move(center.x - 60, center.y - 50, { steps: 5 });
+    await page.mouse.up();
+    const panned = await image.boundingBox();
+    if (!panned || Math.abs(panned.x - naturalSize.x + 60) > 2 || Math.abs(panned.y - naturalSize.y + 50) > 2)
+      throw new Error("dragging the image did not pan it");
+    if (!(await dialog.count())) throw new Error("finishing an image drag dismissed the preview");
+    await viewport.focus();
+    await page.keyboard.press("ArrowDown");
+    const keyboardPan = await image.boundingBox();
+    if (!keyboardPan || keyboardPan.y >= panned.y) throw new Error("keyboard image panning failed");
+    await dialog.getByRole("button", { name: "适应窗口", exact: true }).click();
+    await page.mouse.move(center.x, center.y);
+    await page.mouse.wheel(0, -300);
+    await page.waitForFunction(() => {
+      const image = document.querySelector<HTMLImageElement>(".image-preview-viewport img");
+      return image && image.getBoundingClientRect().width > 1400;
+    });
+    if ((await scale()) === fitScale) throw new Error("wheel did not zoom the image");
+    if ((await page.evaluate(() => window.visualViewport?.scale)) !== 1)
+      throw new Error("image zoom changed the browser zoom");
+    await dialog.getByRole("button", { name: "适应窗口", exact: true }).click();
+    await image.dblclick();
+    if ((await scale()) === fitScale) throw new Error("double click did not zoom the image");
+    await image.dblclick();
+    if ((await scale()) !== fitScale) throw new Error("double click did not restore fit mode");
     const appended = `${markdown}\n\n后续流式内容`;
     publish(
       store.updateReply(message.id, { content: appended, status: "streaming", timeline: textTimeline(appended) }),
@@ -248,6 +332,51 @@ export async function richMediaSmoke(
     await page.getByRole("button", { name: "关闭详情面板", exact: true }).click();
     await page.getByRole("heading", { name: "回复详情", exact: true }).waitFor({ state: "hidden" });
 
+    await row(smallImage.id).getByRole("button", { name: "放大预览：横向小截图", exact: true }).click();
+    await dialog.waitFor();
+    await page.waitForFunction(
+      () => document.querySelector<HTMLImageElement>(".image-preview-viewport img")?.width === 640,
+    );
+    const smallBounds = await image.boundingBox();
+    if (smallBounds?.width !== 640 || smallBounds.height !== 132)
+      throw new Error("small images should retain their native sharpness when opened");
+    await shot("image-preview-small");
+    await dialog.getByRole("button", { name: "放大", exact: true }).click();
+    await dialog.getByRole("button", { name: "放大", exact: true }).click();
+    await shot("image-preview-small-zoomed");
+    await page.mouse.click(16, 400);
+    await dialog.waitFor({ state: "hidden" });
+
+    await row(tallImage.id).getByRole("button", { name: "放大预览：长图", exact: true }).click();
+    await dialog.waitFor();
+    await page.waitForFunction(
+      () => document.querySelector<HTMLImageElement>(".image-preview-viewport img")?.naturalHeight === 3600,
+    );
+    const tallFit = await image.boundingBox();
+    const tallViewport = await viewport.boundingBox();
+    if (!tallFit || !tallViewport || tallFit.height > tallViewport.height + 1 || tallFit.y < tallViewport.y - 1)
+      throw new Error("the complete tall image does not fit");
+    await original.click();
+    await viewport.focus();
+    for (let i = 0; i < 40; i++) await page.keyboard.press("ArrowDown");
+    const tallBottom = await image.boundingBox();
+    if (!tallBottom || Math.abs(tallBottom.y + tallBottom.height - tallViewport.y - tallViewport.height) > 2)
+      throw new Error("the bottom of a tall image cannot be reached");
+    await dialog.getByRole("button", { name: "适应窗口", exact: true }).click();
+    await shot("image-preview-tall");
+    await page.keyboard.press("Escape");
+
+    await row(retryImage.id).getByRole("button", { name: "放大预览：加载失败", exact: true }).click();
+    await dialog.getByRole("button", { name: "重试", exact: true }).waitFor();
+    if (!(await dialog.getByRole("button", { name: "放大", exact: true }).isDisabled()))
+      throw new Error("failed images expose active zoom controls");
+    recoverImage = true;
+    await dialog.getByRole("button", { name: "重试", exact: true }).click();
+    await page.waitForFunction(
+      () => document.querySelector<HTMLImageElement>(".image-preview-viewport img")?.naturalWidth === 1600,
+    );
+    await page.keyboard.press("Escape");
+
     await page.setViewportSize({ width: 720, height: 800 });
     await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
     await trigger.click();
@@ -256,7 +385,59 @@ export async function richMediaSmoke(
     const panel = await dialog.locator(".image-preview-panel").boundingBox();
     if (!panel || panel.x < 0 || panel.y < 0 || panel.x + panel.width > 720 || panel.y + panel.height > 800)
       throw new Error(`image preview overflows the narrow viewport: ${JSON.stringify(panel)}`);
+    await page.setViewportSize({ width: 390, height: 700 });
+    await page.waitForFunction(() => document.querySelector("dialog.image-preview")?.clientHeight === 700);
+    const actions = await dialog.locator(".image-preview-action").evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      }),
+    );
+    if (
+      actions.some(
+        (rect) =>
+          rect.x < 0 || rect.x + rect.width > 390 || rect.y < 0 || rect.y + rect.height > 700 || rect.height < 36,
+      )
+    )
+      throw new Error(`narrow preview controls are clipped: ${JSON.stringify(actions)}`);
+    await shot("image-preview-mobile");
+    const savedProfile = await request<Record<string, unknown>>("GET", "/api/profile");
+    try {
+      for (const language of ["en", "ja"]) {
+        await request("PUT", "/api/profile", { ...savedProfile, language });
+        await page.waitForFunction((value) => document.documentElement.lang === value, language);
+        for (const width of [390, 320]) {
+          await page.setViewportSize({ width, height: 700 });
+          await page.waitForFunction(
+            (value) => document.querySelector("dialog.image-preview")?.clientWidth === value,
+            width,
+          );
+          const clipped = await dialog.locator(".image-preview-action").evaluateAll((elements) =>
+            elements.some((element) => {
+              const rect = element.getBoundingClientRect();
+              return rect.x < 0 || rect.right > innerWidth || rect.y < 0 || rect.bottom > innerHeight;
+            }),
+          );
+          if (clipped) {
+            await shot(`image-preview-clipped-${language}-${width}`);
+            const dimensions = await dialog.locator(".image-preview-action").evaluateAll((elements) =>
+              elements.map((element) => ({
+                label: element.textContent || element.getAttribute("aria-label"),
+                rect: element.getBoundingClientRect().toJSON(),
+              })),
+            );
+            throw new Error(`preview controls clipped in ${language} at ${width}px: ${JSON.stringify(dimensions)}`);
+          }
+          await shot(`image-preview-${language}-${width}`);
+        }
+      }
+    } finally {
+      await request("PUT", "/api/profile", savedProfile);
+      await page.waitForFunction((value) => document.documentElement.lang === value, savedProfile.language);
+    }
+
     await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 720, height: 800 });
     await row(message.id).locator(".mermaid-svg").first().scrollIntoViewIfNeeded();
     await shot("rich-media-narrow-dark");
     if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))

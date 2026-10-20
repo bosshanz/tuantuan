@@ -18,6 +18,7 @@
 
 ## 主要功能
 
+- **找回消息与文件**：搜索当前或全部会话，定位原消息并返回阅读位置。会话文件列表汇总历史附件、图片和 Agent 文件，支持图片、Markdown、代码与单文件静态 HTML 预览、下载和查看来源；「需要我处理」集中展示待授权、提问和失败回复。
 - **选择 Harness**：沿用本机已有安装，或从 ACP Registry 安装 Agent；也可按需安装团团补充的官方 DeepSeek CLI 预发布版，详见[安装与认证说明](docs/harness.md)。按 Harness 提供的登录方式完成设置。
 - **文件与图片附件**：选择、拖放或粘贴附件，切换会话和正常重启保留草稿。文本文件内联提供，图片与二进制读取取决于模型和 Harness。[附件范围与限制](docs/conversations.md#文件与图片附件)。
 - **多 Agent 协作**：一个会话可有一名或多名 Agent。用 `@` 指定成员，或由主 Agent 分工、跟进、汇总。所有成员共用项目工作目录。
@@ -30,15 +31,15 @@
 
 完整清单见[功能一览](docs/features.md)。
 
-## 下载 v0.2.4
+## 下载 v0.2.5
 
-前往 [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.4) 下载桌面版：
+前往 [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.5) 下载桌面版：
 
 - **macOS**：Apple 芯片（arm64）或 Intel（x64），提供 `.dmg` 和 `.zip`。
 - **Windows**：x64 `.exe` 安装包。
 - **Linux**：x64 `.AppImage`。
 
-桌面版已包含运行时，无需安装 Bun。v0.2.4 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名。详见[安装与签名说明](docs/install.md)。
+桌面版已包含运行时，无需安装 Bun。v0.2.5 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名。详见[安装与签名说明](docs/install.md)。
 
 ### 用 Homebrew 安装（macOS）
 

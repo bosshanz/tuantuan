@@ -1,8 +1,10 @@
-import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "../server/app";
+import { getRegistry, setRegistry } from "../server/harness";
+import { managedRoot, setManagedRoot } from "../server/managed";
 import "./helpers";
 
 /**
@@ -11,21 +13,51 @@ import "./helpers";
  * Each agent is installed into a throwaway managed dir exactly like the 安装 button does.
  */
 const real = process.env.TUANTUAN_REAL_REGISTRY === "1";
-process.env.TUANTUAN_HARNESS_DIR = mkdtempSync(join(tmpdir(), "tuantuan-managed-"));
-const { app, server } = serve({ dbPath: ":memory:" }, 0);
-const base = `http://localhost:${server.port}`;
-const api = async <T>(m: string, p: string, b?: unknown) =>
-  (await (
-    await fetch(base + p, {
+let current: ReturnType<typeof serve> | undefined;
+let directory: string | undefined;
+let restore: (() => void) | undefined;
+beforeAll(() => {
+  // A skipped opt-in suite must not redirect later suites to an empty managed installation.
+  if (!real) return;
+  const previous = process.env.TUANTUAN_HARNESS_DIR;
+  const previousRoot = managedRoot();
+  const previousRegistry = getRegistry();
+  restore = () => {
+    if (previous === undefined) delete process.env.TUANTUAN_HARNESS_DIR;
+    else process.env.TUANTUAN_HARNESS_DIR = previous;
+    setManagedRoot(previousRoot);
+    setRegistry(previousRegistry);
+  };
+  directory = mkdtempSync(join(tmpdir(), "tuantuan-managed-"));
+  process.env.TUANTUAN_HARNESS_DIR = directory;
+  current = serve({ dbPath: ":memory:" }, 0);
+});
+const api = async <T>(m: string, p: string, b?: unknown) => {
+  if (!current) throw new Error("real registry fixture not started");
+  return (await (
+    await fetch(`http://localhost:${current.server.port}${p}`, {
       method: m,
       headers: { "content-type": "application/json" },
       body: b === undefined ? undefined : JSON.stringify(b),
     })
   ).json()) as T;
-afterAll(() => {
-  app.host.shutdown();
-  app.installer.shutdown();
-  server.stop(true);
+};
+afterAll(async () => {
+  try {
+    if (current) {
+      const { app, server } = current;
+      app.orchestrator.shutdown();
+      app.host.shutdown();
+      app.installer.shutdown();
+      app.registry.stop();
+      await app.projectTerminals.shutdown();
+      server.stop(true);
+      app.store.db.close();
+    }
+  } finally {
+    restore?.();
+    if (directory) rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 type Job = { state: string; error: string | null; log: string[] };

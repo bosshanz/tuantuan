@@ -16,6 +16,8 @@ Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser 
 
 ## What you can do
 
+- **Find messages and pending work** — Search saved chat history across conversations or within the current chat, jump to the original message, and return to your reading position. A global attention list gathers pending approvals, questions and failed replies.
+- **Find conversation files.** Browse historical attachments, images, and files linked or edited by agents. Preview images, Markdown, source code, and static single-file HTML; download available files and return to their source messages. Project files show their current content and availability.
 - **Choose your harness.** Use an existing local installation or install an agent from the ACP Registry. Tuantuan also offers the official DeepSeek CLI prerelease as an on-demand install; see [setup and authentication](docs/harness.md). Setup guides you through the sign-in options provided by the harness.
 - **Attach files and images.** Choose, drop, or paste attachments; drafts survive switching conversations and normal restarts. Text files are supplied inline, while image and binary support depends on the model and Harness. [Attachment limits](docs/conversations.md#文件与图片附件).
 - **Work with a team.** Use one agent or several in a conversation. Mention members with `@`, or let a lead agent delegate, follow up, and bring the results together. Agents share the project's working directory.
@@ -29,15 +31,15 @@ Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser 
 
 See the [full feature list (Simplified Chinese)](docs/features.md).
 
-## Download v0.2.4
+## Download v0.2.5
 
-Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.4):
+Get the desktop app from [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.5):
 
 - **macOS**: Apple silicon (arm64) or Intel (x64), `.dmg` or `.zip`.
 - **Windows**: x64 `.exe` installer.
 - **Linux**: x64 `.AppImage`.
 
-The desktop app includes its runtime; you do not need to install Bun. The v0.2.4 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
+The desktop app includes its runtime; you do not need to install Bun. The v0.2.5 macOS builds are ad-hoc signed and are not notarized by Apple; the Windows installer is not code signed. See [installation and signing notes (Simplified Chinese)](docs/install.md).
 
 ### Install with Homebrew (macOS)
 

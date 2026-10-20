@@ -1,12 +1,15 @@
 import type { Element } from "hast";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
 import go from "highlight.js/lib/languages/go";
 import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
 import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 import { User, Users } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -20,12 +23,17 @@ import { getLocale, intlLocale, type Locale, translate, useI18n } from "./i18n";
 import { MermaidBlock } from "./MermaidBlock";
 import { withViewTransition } from "./motion";
 
-for (const [name, lang] of Object.entries({ bash, go, javascript, json, python, sql, typescript }))
+for (const [name, lang] of Object.entries({ bash, css, go, javascript, json, python, sql, typescript, xml, yaml }))
   hljs.registerLanguage(name, lang);
 hljs.registerAliases(["ts", "tsx"], { languageName: "typescript" });
 hljs.registerAliases(["js", "jsx"], { languageName: "javascript" });
 hljs.registerAliases(["sh", "shell"], { languageName: "bash" });
 hljs.registerAliases(["py"], { languageName: "python" });
+
+/** Callers own rendering budgets; highlight.js escapes source before adding its token spans. */
+export function highlightCode(source: string, language?: string): string | null {
+  return language && hljs.getLanguage(language) ? hljs.highlight(source, { language }).value : null;
+}
 
 const _EMOJI = /\p{Extended_Pictographic}/u;
 

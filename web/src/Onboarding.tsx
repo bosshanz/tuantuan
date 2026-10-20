@@ -114,7 +114,7 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
   const login = h?.login ?? "";
   return (
     <>
-      <header className="main-head">
+      <header className="main-head onb-head">
         <div className="title">
           <h2>{t("开始使用团团")}</h2>
         </div>
@@ -140,11 +140,17 @@ export function Onboarding(props: { agents: Agent[]; onDone: (roomId: string | n
                     className="onb-card"
                     onClick={() => setPick(c.id)}
                   >
-                    <RegistryIcon id={c.registryId} name={c.name} size={22} />
-                    <span className="onb-card-name">{t(c.name)}</span>
-                    {c.experimental && <span className="badge warn-badge">{t("实验性")}</span>}
-                    <span className={c.command ? "onb-card-state ok-text" : "onb-card-state"}>
-                      {c.command ? t("已安装") : t("未安装")}
+                    <span className="onb-card-icon">
+                      <RegistryIcon id={c.registryId} name={c.name} size={22} />
+                    </span>
+                    <span className="onb-card-content">
+                      <span className="onb-card-name">{t(c.name)}</span>
+                      <span className="onb-card-meta">
+                        <span className={c.command ? "onb-card-state ok-text" : "onb-card-state"}>
+                          {c.command ? t("已安装") : t("未安装")}
+                        </span>
+                        {c.experimental && <span className="badge warn-badge">{t("实验性")}</span>}
+                      </span>
                     </span>
                   </button>
                 ))}

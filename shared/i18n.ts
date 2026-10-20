@@ -1,14 +1,20 @@
+import { attentionMessages } from "./locales/attention";
 import { chatMessages } from "./locales/chat";
 import { coreMessages } from "./locales/core";
 import { desktopMessages } from "./locales/desktop";
 import { errorMessages } from "./locales/errors";
+import { fileMessages } from "./locales/files";
 import { harnessMessages } from "./locales/harness";
+import { searchMessages } from "./locales/search";
 import { LOCALES, type Locale, type MessageCatalog, type MessageParams } from "./locales/types";
 import { updateMessages } from "./locales/updates";
 
 export type { Locale, MessageCatalog, MessageParams };
 export { LOCALES };
 export const messages: MessageCatalog = {
+  ...attentionMessages,
+  ...searchMessages,
+  ...fileMessages,
   ...coreMessages,
   ...harnessMessages,
   ...chatMessages,

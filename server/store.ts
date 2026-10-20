@@ -2,6 +2,11 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { type MessageQuote, messageQuote } from "../shared/messageQuote";
+import {
+  MESSAGE_SEARCH_SNIPPET_LENGTH,
+  type MessageSearchQuery,
+  type MessageSearchResult,
+} from "../shared/messageSearch";
 import { messagePreview, type RoomPreview } from "../shared/roomPreview";
 import { emptyTimeline, type RoomConclusion, type Timeline } from "../shared/timeline";
 import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
@@ -213,6 +218,13 @@ export const MIGRATIONS: string[] = [
    );`,
   // Alias capability references only; API credentials remain in the existing secret columns.
   `ALTER TABLE providers ADD COLUMN model_catalog TEXT NOT NULL DEFAULT '{}';`,
+  // Actionable failures stay visible until explicitly acknowledged, across restarts.
+  `CREATE TABLE message_attention_dismissals (
+     message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+     dismissed_at INTEGER NOT NULL
+   );
+   CREATE INDEX messages_attention_failed ON messages(created_at DESC, id DESC)
+     WHERE sender_kind = 'agent' AND status IN ('error','interrupted');`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -341,6 +353,21 @@ export interface Message {
   quote: MessageQuote | null;
   createdAt: number;
 }
+
+/** Compact persisted references; binary payloads are selected only for an exact download. */
+export interface ConversationFileSource {
+  key: string;
+  kind: "inline" | "path" | "text";
+  name: string | null;
+  mimeType: string | null;
+  path: string | null;
+  size: number | null;
+  valid: number;
+  text: string | null;
+  data: string | null;
+}
+
+export type ConversationFileMessage = Pick<Message, "id" | "seq" | "senderKind" | "senderName" | "createdAt">;
 
 export interface AcpSessionRow {
   roomId: string;
@@ -753,6 +780,163 @@ export class Store {
       .query("SELECT * FROM messages WHERE room_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?")
       .all(roomId, beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as Row[];
     return rows.reverse().map(toMessage);
+  }
+
+  /** One persisted message at a time keeps attachment blobs out of file-list memory. */
+  conversationFileMessage(roomId: string, beforeSeq = Number.MAX_SAFE_INTEGER): ConversationFileMessage | null {
+    const row = this.db
+      .query(
+        `SELECT id, seq, sender_kind, sender_name, created_at FROM messages m
+         WHERE room_id = ? AND seq <= ? AND sender_kind IN ('human', 'agent') AND status != 'streaming'
+           AND ((sender_kind = 'agent' AND instr(content, '](') > 0)
+             OR EXISTS (
+               SELECT 1 FROM json_each(CASE WHEN json_valid(timeline) THEN timeline ELSE '{}' END, '$.parts') p
+               WHERE p.type = 'object' AND json_extract(p.value, '$.kind') IN ('file', 'image'))
+             OR (sender_kind = 'agent' AND EXISTS (
+               SELECT 1 FROM json_each(CASE WHEN json_valid(timeline) THEN timeline ELSE '{}' END, '$.tools') t
+               WHERE t.type = 'object' AND json_extract(t.value, '$.status') = 'completed'
+                 AND json_extract(t.value, '$.kind') != 'read'
+                 AND ((json_extract(t.value, '$.kind') = 'edit' AND
+                       (json_array_length(t.value, '$.locations') > 0 OR EXISTS (
+                         SELECT 1 FROM json_each(t.value, '$.content') c WHERE c.type = 'object' AND json_extract(c.value, '$.type') = 'diff')))
+                   OR EXISTS (SELECT 1 FROM json_each(t.value, '$.content') c
+                     WHERE c.type = 'object' AND json_extract(c.value, '$.type') = 'content'
+                       AND json_extract(c.value, '$.content.type') IN ('resource_link', 'image'))))))
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(roomId, beforeSeq) as Row | null;
+    return row
+      ? {
+          id: row.id as string,
+          seq: row.seq as number,
+          senderKind: row.sender_kind as "human" | "agent",
+          senderName: row.sender_name as string,
+          createdAt: row.created_at as number,
+        }
+      : null;
+  }
+
+  /**
+   * SQLite projects only file metadata and visible message bodies. JSON data, thoughts,
+   * tool inputs, read results and diff bodies never leave SQLite during listing.
+   * `exactKey` is a persisted reference coordinate, never a filesystem path or JSON path.
+   */
+  conversationFileSources(
+    roomId: string,
+    messageId: string,
+    afterKey: string,
+    limit: number,
+    exactKey: string | null = null,
+    includeData = false,
+    dataMaxBytes = 20 * 1024 * 1024,
+  ): ConversationFileSource[] {
+    return this.db
+      .query(
+        `WITH message AS MATERIALIZED (
+           SELECT content, sender_kind,
+                  CASE WHEN json_valid(timeline) THEN timeline ELSE '{}' END AS timeline
+           FROM messages WHERE room_id = ? AND id = ? AND sender_kind IN ('human', 'agent') AND status != 'streaming'
+         ), tools AS MATERIALIZED (
+           SELECT t.key, t.value FROM message, json_each(message.timeline, '$.tools') t
+           WHERE t.type = 'object' AND message.sender_kind = 'agent' AND json_extract(t.value, '$.status') = 'completed'
+             AND json_extract(t.value, '$.kind') != 'read'
+         ), sources AS (
+           SELECT 'p:' || printf('%012d', p.key) AS key, 'inline' AS kind,
+                  json_extract(p.value, '$.name') AS name, json_extract(p.value, '$.mimeType') AS mimeType,
+                  NULL AS path, json_extract(p.value, '$.data') AS payload, NULL AS text
+           FROM message, json_each(message.timeline, '$.parts') p
+           WHERE p.type = 'object' AND json_extract(p.value, '$.kind') IN ('file', 'image')
+           UNION ALL
+           SELECT 'b:000000000000', 'text', NULL, NULL, NULL, NULL, message.content
+           FROM message WHERE sender_kind = 'agent' AND instr(content, '](') > 0
+           UNION ALL
+           SELECT 't:' || hex(t.key) || ':l:' || printf('%012d', l.key), 'path', NULL, NULL,
+                  json_extract(l.value, '$.path'), NULL, NULL
+           FROM tools t, json_each(t.value, '$.locations') l WHERE l.type = 'object' AND json_extract(t.value, '$.kind') = 'edit'
+           UNION ALL
+           SELECT 't:' || hex(t.key) || ':c:' || printf('%012d', c.key),
+                  CASE WHEN json_extract(c.value, '$.content.type') = 'image' THEN 'inline' ELSE 'path' END,
+                  json_extract(c.value, '$.content.name'), json_extract(c.value, '$.content.mimeType'),
+                  CASE WHEN json_extract(c.value, '$.type') = 'diff' THEN json_extract(c.value, '$.path')
+                       ELSE json_extract(c.value, '$.content.uri') END,
+                  CASE WHEN json_extract(c.value, '$.content.type') = 'image' THEN json_extract(c.value, '$.content.data') END,
+                  NULL
+           FROM tools t, json_each(t.value, '$.content') c
+           WHERE c.type = 'object' AND ((json_extract(c.value, '$.type') = 'diff' AND json_extract(t.value, '$.kind') = 'edit')
+              OR (json_extract(c.value, '$.type') = 'content' AND json_extract(c.value, '$.content.type') IN ('resource_link', 'image')))
+         )
+         SELECT key, kind, name, mimeType, path,
+                CASE WHEN typeof(payload) = 'text' THEN length(payload) / 4 * 3 -
+                     CASE WHEN substr(payload, -2) = '==' THEN 2 WHEN substr(payload, -1) = '=' THEN 1 ELSE 0 END END AS size,
+                CASE WHEN typeof(payload) = 'text' AND length(payload) <= 27962028
+                          AND length(payload) % 4 = 0 AND payload NOT GLOB '*[^A-Za-z0-9+/=]*'
+                          AND instr(rtrim(payload, '='), '=') = 0
+                          AND length(payload) - length(rtrim(payload, '=')) <= 2
+                          AND (substr(payload, -2) != '==' OR instr('AQgw', substr(payload, -3, 1)) > 0)
+                          AND (substr(payload, -1) != '=' OR substr(payload, -2) = '=='
+                               OR instr('AEIMQUYcgkosw048', substr(payload, -2, 1)) > 0)
+                     THEN 1 ELSE 0 END AS valid,
+                text,
+                CASE WHEN ? AND length(payload) <= ? THEN payload ELSE NULL END AS data
+         FROM sources s WHERE (? IS NULL AND key > ?) OR key = ? ORDER BY key LIMIT ?`,
+      )
+      .all(
+        roomId,
+        messageId,
+        includeData ? 1 : 0,
+        Math.ceil(dataMaxBytes / 3) * 4,
+        exactKey,
+        afterKey,
+        exactKey,
+        limit,
+      ) as ConversationFileSource[];
+  }
+
+  /** Search the complete persisted body column, returning only a bounded excerpt and source metadata. */
+  searchMessages({ query, roomId, limit, before }: MessageSearchQuery): MessageSearchResult[] {
+    const rows = this.db
+      .query(
+        `WITH page AS MATERIALIZED (
+           SELECT m.id FROM messages m
+           WHERE m.sender_kind != 'system' AND m.status != 'streaming'
+             AND instr(lower(m.content), lower(?)) > 0
+             ${roomId ? "AND m.room_id = ?" : ""}
+             ${before ? "AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))" : ""}
+           ORDER BY m.created_at DESC, m.id DESC LIMIT ?
+         ), matches AS (
+           SELECT m.id, m.room_id, r.name AS room_name, p.name AS project_name,
+                  m.sender_name, m.sender_kind, m.created_at, m.seq, m.content,
+                  instr(lower(m.content), lower(?)) AS match_at
+           FROM page JOIN messages m ON m.id = page.id
+           JOIN rooms r ON r.id = m.room_id
+           LEFT JOIN projects p ON p.id = r.project_id
+         )
+         SELECT id, room_id, room_name, project_name, sender_name, sender_kind, created_at, seq,
+                CASE WHEN match_at > 71 THEN '…' ELSE '' END ||
+                substr(content, max(1, match_at - 70), ?) ||
+                CASE WHEN length(content) >= max(1, match_at - 70) + ? THEN '…' ELSE '' END AS snippet
+         FROM matches ORDER BY created_at DESC, id DESC`,
+      )
+      .all(
+        query,
+        ...(roomId ? [roomId] : []),
+        ...(before ? [before.createdAt, before.createdAt, before.messageId] : []),
+        limit,
+        query,
+        MESSAGE_SEARCH_SNIPPET_LENGTH,
+        MESSAGE_SEARCH_SNIPPET_LENGTH,
+      ) as Row[];
+    return rows.map((row) => ({
+      messageId: row.id as string,
+      roomId: row.room_id as string,
+      roomName: row.room_name as string,
+      projectName: row.project_name as string | null,
+      senderName: row.sender_name as string,
+      senderKind: row.sender_kind as MessageSearchResult["senderKind"],
+      createdAt: row.created_at as number,
+      seq: row.seq as number,
+      snippet: row.snippet as string,
+    }));
   }
 
   /** Stream persisted user attachments for exact-file read grants when a Harness process is rebuilt. */

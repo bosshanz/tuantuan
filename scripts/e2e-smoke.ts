@@ -12,6 +12,9 @@ import { attachmentsSmoke } from "./e2e-attachments";
 import { chatHistorySmoke } from "./e2e-chat-history";
 import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { chatToolsSmoke } from "./e2e-chat-tools";
+import { conversationFilesSmoke } from "./e2e-conversation-files";
+import { filePreviewSmoke } from "./e2e-file-preview";
+import { onboardingLayoutSmoke } from "./e2e-onboarding-layout";
 import { quoteReturnSmoke } from "./e2e-quote-return";
 import { registryAuthSmoke } from "./e2e-registry-auth";
 import { registryUsageSmoke } from "./e2e-registry-usage";
@@ -20,6 +23,7 @@ import { richMediaSmoke } from "./e2e-rich-media";
 import { schedulingSmoke } from "./e2e-scheduling";
 import { taskContextSmoke } from "./e2e-task-context";
 import { terminalSmoke } from "./e2e-terminal";
+import { v025Smoke } from "./e2e-v025";
 
 process.env.TUANTUAN_MOCK_HARNESS = "1";
 // The mock harness starts logged out; onboarding logs in through ACP `authenticate`, which creates this file.
@@ -562,6 +566,22 @@ try {
     shotsDir,
   );
   await attachmentsSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
+  await conversationFilesSmoke(
+    browser,
+    `http://localhost:${server.port}`,
+    app.store,
+    (message) => server.publish(`room:${message.roomId}`, JSON.stringify({ type: "message", message })),
+    shotsDir,
+  );
+  await filePreviewSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
+  await v025Smoke(
+    browser,
+    `http://localhost:${server.port}`,
+    app.store,
+    (message) => server.publish(`room:${message.roomId}`, JSON.stringify({ type: "message", message })),
+    shotsDir,
+  );
+  await onboardingLayoutSmoke(browser, `http://localhost:${server.port}`, shotsDir);
   await schedulingSmoke(browser, `http://localhost:${server.port}`, group.id, shotsDir);
   // Auxiliary smoke pages use their own contexts; return focus before testing caret-driven completion.
   await page.bringToFront();

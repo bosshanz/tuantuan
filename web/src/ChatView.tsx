@@ -9,12 +9,14 @@ import {
   CircleSlash,
   Clock3,
   FileText,
+  FolderOpen,
   History,
   Loader2,
   PanelRight,
   Pin,
   Plus,
   RotateCcw,
+  Search,
   Square,
   SquareTerminal,
   Trash2,
@@ -58,6 +60,7 @@ import {
 } from "./api";
 import { agentActivity, messageExpression } from "./avatarState";
 import { SessionChips } from "./ConfigChips";
+import { ConversationFiles } from "./ConversationFiles";
 import { type ChatSnapshot, chatReducer, emptyChat, historyCursor, type MessagePage } from "./chatState";
 import { chatWorkspace, type ImageAttachment } from "./chatWorkspace";
 import { formatAttachmentSize } from "./composerAttachments";
@@ -78,6 +81,12 @@ const GROUP_GAP_MS = 5 * 60 * 1000;
 const HISTORY_PAGE_SIZE = 200;
 const ProjectTerminal = lazy(() => import("./ProjectTerminal"));
 
+export interface ChatNavigationTarget {
+  kind: "message" | "permission" | "question";
+  id: string;
+  nonce: number;
+}
+
 function terminalWasOpen(projectId: string | null) {
   if (!projectId) return false;
   try {
@@ -94,6 +103,10 @@ export function ChatView(props: {
   userName: string;
   harnessName: (id: string) => string;
   subscribeEvents: (fn: (e: WsEvent) => void) => () => void;
+  onSearch?: () => void;
+  onNavigateMessage: (messageId: string) => void;
+  navigationTarget?: ChatNavigationTarget | null;
+  onNavigationHandled?: (nonce: number) => void;
   onBack: () => void;
   onRoomChange: () => Promise<void>;
   onDeleted: () => void;
@@ -116,6 +129,8 @@ export function ChatView(props: {
   const pendingCancellations = useRef(new Set<string>());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [jumpError, setJumpError] = useState<{ source: string; reason?: string } | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<ChatNavigationTarget | null>(null);
+  const consumedNavigation = useRef<number | null>(null);
   const [replay, setReplay] = useState<ReplayTurn[]>([]);
   const workspace = useChatWorkspace(room.id);
   const { draft, images, files, quote } = workspace.data;
@@ -128,6 +143,7 @@ export function ChatView(props: {
   const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<{ source: string; reason: string } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [filesOpen, setFilesOpen] = useState(false);
   // Compact replies keep the agent's words in separate bubbles; raw activity stays in details.
   const [compact, setCompact] = useState(() => localStorage.getItem("tuantuan:compact") !== "0");
   const densityAnimation = useRef<Animation | null>(null);
@@ -217,6 +233,7 @@ export function ChatView(props: {
   );
   useEffect(() => {
     const toggle = (event: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]")) return;
       if (event.ctrlKey && event.code === "Backquote" && !event.isComposing && props.project) {
         event.preventDefault();
         event.stopPropagation();
@@ -366,6 +383,34 @@ export function ChatView(props: {
     jumpTarget.current = target;
     void loadHistoryRef.current();
   };
+  const jumpToMessageRef = useRef(jumpToMessage);
+  jumpToMessageRef.current = jumpToMessage;
+  useEffect(() => {
+    const target = props.navigationTarget;
+    if (!target || consumedNavigation.current === target.nonce || !history.initialized || !workspace.loaded) return;
+    // A cross-room search must capture that room's restored reading position, not its temporary
+    // recent page while older history is still loading. Failed restoration remains recoverable.
+    if (target.kind === "message" && restoringWorkspace.current && !readingRestoreError) return;
+    consumedNavigation.current = target.nonce;
+    props.onNavigationHandled?.(target.nonce);
+    if (target.kind === "message") {
+      jumpToMessageRef.current(target.id);
+      return;
+    }
+    const requests = target.kind === "permission" ? asks : elicitations;
+    if (requests.some((request) => request.id === target.id)) {
+      setJumpError(null);
+      setSelectedRequest(target);
+    } else setJumpError({ source: "该请求已处理或已结束" });
+  }, [
+    props.navigationTarget,
+    props.onNavigationHandled,
+    history,
+    workspace.loaded,
+    readingRestoreError,
+    asks,
+    elicitations,
+  ]);
   useEffect(() => {
     const target = jumpTarget.current;
     if (!target) return;
@@ -627,9 +672,11 @@ export function ChatView(props: {
   const tasks = state.tasks;
   const stopTask = tasks.length === 1 ? tasks[0] : undefined;
   const selectedMsg = messages.find((m) => m.id === selected);
-  const ask = asks[0];
+  const ask = asks.find((item) => selectedRequest?.kind === "permission" && item.id === selectedRequest.id) ?? asks[0];
   // Inline questions stay mounted while another agent asks for permission, preserving draft answers.
-  const elicitation = elicitations[0];
+  const elicitation =
+    elicitations.find((item) => selectedRequest?.kind === "question" && item.id === selectedRequest.id) ??
+    elicitations[0];
 
   return (
     <div className="conversation-workspace">
@@ -658,6 +705,28 @@ export function ChatView(props: {
               <h2>{room.name}</h2>
             </button>
             <div className="chat-head-actions">
+              <button
+                type="button"
+                className="btn ghost icon conversation-files-open"
+                aria-label={tr("会话文件")}
+                title={tr("会话文件")}
+                aria-haspopup="dialog"
+                aria-expanded={filesOpen}
+                onClick={() => setFilesOpen(true)}
+              >
+                <FolderOpen size={18} />
+              </button>
+              {props.onSearch && (
+                <button
+                  type="button"
+                  className="btn ghost icon"
+                  aria-label={tr("搜索当前会话")}
+                  title={tr("搜索当前会话（⌘F / Ctrl+F）")}
+                  onClick={props.onSearch}
+                >
+                  <Search size={18} />
+                </button>
+              )}
               {props.project && (
                 <button
                   ref={terminalButton}
@@ -873,6 +942,11 @@ export function ChatView(props: {
               <ElicitationDialog
                 key={elicitation.id}
                 ask={elicitation}
+                revealRequest={
+                  selectedRequest?.kind === "question" && selectedRequest.id === elicitation.id
+                    ? selectedRequest.nonce
+                    : undefined
+                }
                 agentName={agentById.get(elicitation.agentId)?.name ?? "Agent"}
                 pending={answers[elicitation.id]?.pending ?? false}
                 error={answers[elicitation.id]?.error ?? null}
@@ -941,21 +1015,22 @@ export function ChatView(props: {
           </footer>
         </div>
 
-        {ask && (
-          <PermissionDialog
-            key={ask.id}
-            ask={ask}
-            agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
-            terminals={terminals}
-            pending={answers[ask.id]?.pending ?? false}
-            error={
-              answers[ask.id]?.error
-                ? tr("授权提交失败：{reason}。请重试。", { reason: translateError(answers[ask.id]?.error ?? "") })
-                : null
-            }
-            onAnswer={(optionId) => void answer(ask.id, optionId)}
-          />
-        )}
+        {ask &&
+          !(selectedRequest?.kind === "question" && elicitations.some((item) => item.id === selectedRequest.id)) && (
+            <PermissionDialog
+              key={ask.id}
+              ask={ask}
+              agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
+              terminals={terminals}
+              pending={answers[ask.id]?.pending ?? false}
+              error={
+                answers[ask.id]?.error
+                  ? tr("授权提交失败：{reason}。请重试。", { reason: translateError(answers[ask.id]?.error ?? "") })
+                  : null
+              }
+              onAnswer={(optionId) => void answer(ask.id, optionId)}
+            />
+          )}
 
         {panelPresence.mounted && (
           <>
@@ -1031,6 +1106,22 @@ export function ChatView(props: {
           </>
         )}
       </div>
+      {filesOpen && (
+        <ConversationFiles
+          key={room.id}
+          roomId={room.id}
+          roomName={room.name}
+          revision={messages
+            .filter((message) => message.status !== "streaming")
+            .map((message) => `${message.id}:${message.status}`)
+            .join("|")}
+          onClose={() => setFilesOpen(false)}
+          onSelectMessage={(messageId) => {
+            setFilesOpen(false);
+            props.onNavigateMessage(messageId);
+          }}
+        />
+      )}
       {props.project && (
         <div
           ref={terminalSlot}

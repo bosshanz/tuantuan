@@ -32,7 +32,13 @@ bun run e2e        # 浏览器冒烟 + 对齐断言（需先 build，需要本�
 
 浏览器冒烟可用 `SHOTS_DIR=/tmp/tuantuan-shots` 保存截图；加上 `TERMINAL_VIDEO_DIR=/tmp/tuantuan-shots` 会保存终端动效录像 `project-terminal-motion.webm`，便于按原速检查展开、收起与快速反向操作。
 
-图文回归已纳入 `bun run e2e`：覆盖流程图、时序图、源码回退与流式修正、明暗主题、图表与各类图片预览、键盘焦点及窄屏布局。`SHOTS_DIR` 同时保存 `mermaid-preview-light.png`、`mermaid-preview-dark.png` 和 `image-preview-narrow-dark.png` 等截图。场景使用持久化测试消息与确定性 ACP 数据，不调用付费模型。
+图文回归已纳入 `bun run e2e`：覆盖流程图、时序图、源码回退与流式修正、明暗主题、图表与各类图片预览、滚轮 / 按钮 / 双击缩放、拖动和方向键平移、横向小图与长图、加载失败重试、键盘焦点及中英日文 320–390px 窄屏布局。`SHOTS_DIR` 同时保存 `mermaid-preview-light.png`、`mermaid-preview-dark.png` 和 `image-preview-narrow-dark.png` 等截图。场景使用持久化测试消息与确定性 ACP 数据，不调用付费模型。
+
+聊天搜索与待处理回归位于 `scripts/e2e-v025.ts`，纳入完整浏览器冒烟：覆盖跨 / 当前会话全文搜索、两页以上历史定位、返回阅读位置及草稿、真实 mock ACP 授权 / 提问的创建和解决、失败跳转与手动处理持久化。后端及状态边界另见 `tests/message-search.test.ts`、`tests/attention*.test.ts`；不调用付费模型。
+
+`scripts/e2e-onboarding-layout.ts` 验证首次引导卡片在四种语言、320 / 390 / 1024 / 1440px 下名称完整、实验标记与安装状态不重叠，以及键盘选择状态。使用展示数据夹具，不安装或登录真实 Harness。
+
+`scripts/e2e-conversation-files.ts` 覆盖历史文件分页、图片预览、原件下载、失效状态和来源消息定位；后端 `tests/conversation-files.test.ts` 覆盖持久化来源、跨会话隔离、路径范围与下载内容边界。
 
 ## 宣传落地页（site/）
 
