@@ -828,6 +828,7 @@ export class Store {
     limit: number,
     exactKey: string | null = null,
     includeData = false,
+    dataMaxBytes = 20 * 1024 * 1024,
   ): ConversationFileSource[] {
     return this.db
       .query(
@@ -876,10 +877,19 @@ export class Store {
                                OR instr('AEIMQUYcgkosw048', substr(payload, -2, 1)) > 0)
                      THEN 1 ELSE 0 END AS valid,
                 text,
-                CASE WHEN ? AND length(payload) <= 27962028 THEN payload ELSE NULL END AS data
+                CASE WHEN ? AND length(payload) <= ? THEN payload ELSE NULL END AS data
          FROM sources s WHERE (? IS NULL AND key > ?) OR key = ? ORDER BY key LIMIT ?`,
       )
-      .all(roomId, messageId, includeData ? 1 : 0, exactKey, afterKey, exactKey, limit) as ConversationFileSource[];
+      .all(
+        roomId,
+        messageId,
+        includeData ? 1 : 0,
+        Math.ceil(dataMaxBytes / 3) * 4,
+        exactKey,
+        afterKey,
+        exactKey,
+        limit,
+      ) as ConversationFileSource[];
   }
 
   /** Search the complete persisted body column, returning only a bounded excerpt and source metadata. */

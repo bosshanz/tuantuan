@@ -1,6 +1,82 @@
 import type { MessageCatalog } from "./types";
 
 export const fileMessages = {
+  文件预览: { "zh-TW": "檔案預覽", en: "File preview", ja: "ファイルプレビュー" },
+  "预览文件 {name}": { "zh-TW": "預覽檔案 {name}", en: "Preview file {name}", ja: "ファイルをプレビュー {name}" },
+  关闭文件预览: { "zh-TW": "關閉檔案預覽", en: "Close file preview", ja: "ファイルプレビューを閉じる" },
+  预览模式: { "zh-TW": "預覽模式", en: "Preview mode", ja: "プレビューモード" },
+  阅读视图: { "zh-TW": "閱讀檢視", en: "Reading view", ja: "閲覧表示" },
+  静态页面: { "zh-TW": "靜態頁面", en: "Static page", ja: "静的ページ" },
+  源码: { "zh-TW": "原始碼", en: "Source", ja: "ソース" },
+  文件源码: { "zh-TW": "檔案原始碼", en: "File source", ja: "ファイルのソース" },
+  查看源码: { "zh-TW": "查看原始碼", en: "View source", ja: "ソースを表示" },
+  自动换行: { "zh-TW": "自動換行", en: "Wrap lines", ja: "折り返し" },
+  复制源码: { "zh-TW": "複製原始碼", en: "Copy source", ja: "ソースをコピー" },
+  已复制源码: { "zh-TW": "已複製原始碼", en: "Source copied", ja: "ソースをコピーしました" },
+  重试预览: { "zh-TW": "重試預覽", en: "Retry preview", ja: "プレビューを再試行" },
+  "正在加载预览…": { "zh-TW": "正在載入預覽…", en: "Loading preview…", ja: "プレビューを読み込み中…" },
+  "HTML 静态预览": { "zh-TW": "HTML 靜態預覽", en: "Static HTML preview", ja: "HTMLの静的プレビュー" },
+  "图片未加载：{name}": {
+    "zh-TW": "圖片未載入：{name}",
+    en: "Image not loaded: {name}",
+    ja: "画像を読み込んでいません：{name}",
+  },
+  "单文件静态预览；脚本和外部资源未加载": {
+    "zh-TW": "單檔案靜態預覽；未載入指令碼和外部資源",
+    en: "Single-file static preview; scripts and external resources are not loaded",
+    ja: "単一ファイルの静的プレビューです。スクリプトと外部リソースは読み込みません",
+  },
+  "Markdown 预览不加载图片，链接不可跳转": {
+    "zh-TW": "Markdown 預覽不載入圖片，連結無法跳轉",
+    en: "Markdown preview does not load images or open links",
+    ja: "Markdownプレビューでは画像を読み込まず、リンク先へ移動しません",
+  },
+  "预览最多支持 1 MiB 的 UTF-8 文本": {
+    "zh-TW": "預覽最多支援 1 MiB 的 UTF-8 文字",
+    en: "Preview supports UTF-8 text up to 1 MiB",
+    ja: "1 MiBまでのUTF-8テキストをプレビューできます",
+  },
+  "行数较多，已关闭高亮和自动换行": {
+    "zh-TW": "行數較多，已關閉語法高亮和自動換行",
+    en: "Many lines: highlighting and line wrapping are disabled",
+    ja: "行数が多いため、強調表示と折り返しを無効にしています",
+  },
+  "文件较大，已关闭语法高亮": {
+    "zh-TW": "檔案較大，已關閉語法高亮",
+    en: "Highlighting is disabled for this large file",
+    ja: "ファイルが大きいため、構文の強調表示を無効にしています",
+  },
+  "页面结构过于复杂，请查看源码": {
+    "zh-TW": "頁面結構過於複雜，請查看原始碼",
+    en: "This page is too complex to render. View its source instead",
+    ja: "ページ構造が複雑すぎます。ソースをご覧ください",
+  },
+  文件预览内容无效: {
+    "zh-TW": "檔案預覽內容無效",
+    en: "Invalid file preview response",
+    ja: "ファイルプレビューの応答が無効です",
+  },
+  文件不可用: { "zh-TW": "檔案無法使用", en: "File is unavailable", ja: "ファイルを利用できません" },
+  此文件类型不支持预览: {
+    "zh-TW": "此檔案類型不支援預覽",
+    en: "This file type does not support preview",
+    ja: "このファイル形式はプレビューに対応していません",
+  },
+  "文件超过 1 MiB 预览上限": {
+    "zh-TW": "檔案超過 1 MiB 預覽上限",
+    en: "File exceeds the 1 MiB preview limit",
+    ja: "ファイルがプレビュー上限の1 MiBを超えています",
+  },
+  "文件不是有效的 UTF-8 文本": {
+    "zh-TW": "檔案不是有效的 UTF-8 文字",
+    en: "File is not valid UTF-8 text",
+    ja: "ファイルは有効なUTF-8テキストではありません",
+  },
+  "文件包含二进制或控制字符，无法预览": {
+    "zh-TW": "檔案包含二進位或控制字元，無法預覽",
+    en: "File contains binary data or control characters and cannot be previewed",
+    ja: "バイナリデータまたは制御文字を含むため、プレビューできません",
+  },
   会话文件: { "zh-TW": "對話檔案", en: "Conversation files", ja: "会話のファイル" },
   关闭会话文件: { "zh-TW": "關閉對話檔案", en: "Close conversation files", ja: "会話のファイルを閉じる" },
   刷新文件列表: { "zh-TW": "重新整理檔案列表", en: "Refresh files", ja: "ファイル一覧を更新" },

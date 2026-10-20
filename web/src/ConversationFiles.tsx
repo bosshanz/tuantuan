@@ -7,8 +7,11 @@ import {
   type ConversationFile,
   type ConversationFilesPage,
 } from "../../shared/conversationFiles";
+import { getFilePreviewType } from "../../shared/filePreview";
 import { api } from "./api";
 import { formatAttachmentSize } from "./composerAttachments";
+import { readConversationFile, saveConversationFile } from "./conversationFileDownload";
+import { FilePreview } from "./FilePreview";
 import { ImagePreview } from "./ImagePreview";
 import { intlLocale, translateError, useI18n } from "./i18n";
 import "./conversationFiles.css";
@@ -47,6 +50,7 @@ export function ConversationFiles(props: {
   );
   const [notice, setNotice] = useState("");
   const [preview, setPreview] = useState<{ url: string; name: string; trigger: HTMLButtonElement } | null>(null);
+  const [filePreview, setFilePreview] = useState<{ file: ConversationFile; trigger: HTMLButtonElement } | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef(document.activeElement);
@@ -139,30 +143,16 @@ export function ConversationFiles(props: {
     });
     setNotice("");
     try {
-      const url = new URL(file.downloadUrl, location.origin);
-      const expected = `/api/rooms/${encodeURIComponent(roomId)}/files/${encodeURIComponent(file.id)}/content`;
-      if (url.origin !== location.origin || url.pathname !== expected) throw new Error("文件下载地址无效");
-      const response = await fetch(url, { signal: controller.signal });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error || `HTTP ${response.status}`);
-      }
-      const bytes = await response.arrayBuffer();
+      const bytes = await readConversationFile(roomId, file, controller.signal);
       if (controller.signal.aborted) return;
       // Only known raster types enter the image viewer. All downloads stay inert binary bytes.
       const image = file.image && (IMAGE_MIME_TYPES as readonly string[]).includes(file.mimeType);
       if (action === "preview" && !image) throw new Error("此文件不支持图片预览");
-      const blob = new Blob([bytes], { type: action === "preview" ? file.mimeType : "application/octet-stream" });
-      const objectUrl = URL.createObjectURL(blob);
-      if (action === "preview") setPreview({ url: objectUrl, name: file.name, trigger });
-      else {
-        const link = document.createElement("a");
-        link.href = objectUrl;
-        link.download = file.name;
-        document.body.append(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      if (action === "preview") {
+        const objectUrl = URL.createObjectURL(new Blob([bytes], { type: file.mimeType }));
+        setPreview({ url: objectUrl, name: file.name, trigger });
+      } else {
+        saveConversationFile(bytes, file.name);
         setNotice(t("已开始下载 {name}", { name: file.name }));
       }
     } catch (error) {
@@ -313,6 +303,18 @@ export function ConversationFiles(props: {
                               {t("预览")}
                             </button>
                           )}
+                          {!image && getFilePreviewType(file.name, file.mimeType) && (
+                            <button
+                              type="button"
+                              className="btn ghost sm"
+                              disabled={!canRead || !!running}
+                              aria-label={t("预览文件 {name}", { name: file.name })}
+                              onClick={(event) => setFilePreview({ file, trigger: event.currentTarget })}
+                            >
+                              <File size={14} aria-hidden="true" />
+                              {t("预览")}
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="btn ghost sm"
@@ -398,6 +400,15 @@ export function ConversationFiles(props: {
       </dialog>
       {preview && (
         <ImagePreview src={preview.url} alt={preview.name} trigger={preview.trigger} onClose={() => setPreview(null)} />
+      )}
+      {filePreview && (
+        <FilePreview
+          roomId={roomId}
+          file={filePreview.file}
+          trigger={filePreview.trigger}
+          fallbackTrigger={close.current}
+          onClose={() => setFilePreview(null)}
+        />
       )}
     </>,
     document.body,

@@ -216,7 +216,7 @@ export const COPY: Record<Locale, Copy> = {
         },
         {
           title: "Keep files within reach",
-          body: "Browse attachments and agent files, preview and zoom images, download files, and see their source messages.",
+          body: "Browse attachments and agent files. Preview images, Markdown, code, and static HTML; download files or return to source messages.",
         },
         {
           title: "See what needs you",
@@ -353,7 +353,10 @@ export const COPY: Record<Locale, Copy> = {
           body: "自定义 API 服务商、本机 Skills 和 Claude 插件。团团不改写 ~/.claude 或 ~/.codex。",
         },
         { title: "找回历史消息", body: "搜索已保存的会话正文，定位原消息，查看后返回刚才的阅读位置。" },
-        { title: "集中查看文件", body: "汇总附件与 Agent 文件，缩放预览图片、下载文件，并返回来源消息。" },
+        {
+          title: "集中查看文件",
+          body: "汇总附件与 Agent 文件，预览图片、Markdown、代码与静态 HTML，下载文件或返回来源消息。",
+        },
         { title: "处理等待事项", body: "集中查看各会话的待授权、提问与失败回复，回到具体请求完成处理。" },
       ],
     },
@@ -488,7 +491,10 @@ export const COPY: Record<Locale, Copy> = {
           body: "自訂 API 服務商、本機 Skills 與 Claude 外掛程式。團團不會改寫 ~/.claude 或 ~/.codex。",
         },
         { title: "找回歷史訊息", body: "搜尋已儲存的對話內容，定位原訊息，查看後返回剛才的閱讀位置。" },
-        { title: "集中查看檔案", body: "彙整附件與 Agent 檔案，縮放預覽圖片、下載檔案，並返回來源訊息。" },
+        {
+          title: "集中查看檔案",
+          body: "彙整附件與 Agent 檔案，預覽圖片、Markdown、程式碼與靜態 HTML，下載檔案或返回來源訊息。",
+        },
         { title: "處理等待事項", body: "集中查看各對話的待授權、提問與失敗回覆，回到具體請求完成處理。" },
       ],
     },
@@ -639,7 +645,7 @@ export const COPY: Record<Locale, Copy> = {
         },
         {
           title: "ファイルをまとめて確認",
-          body: "添付や Agent のファイルを一覧表示。画像の拡大、ダウンロード、元のメッセージへの移動に対応します。",
+          body: "添付や Agent のファイルを一覧表示。画像、Markdown、コード、静的 HTML のプレビュー、ダウンロード、出典への移動に対応します。",
         },
         {
           title: "必要な対応を確認",

@@ -116,7 +116,9 @@ test("tabs in one project own independent shells, buffers and lifecycles", async
   input(first.id, "export TT_TAB_VALUE=610000; expr $TT_TAB_VALUE + 13\n");
   input(second.id, "printf '\\nSECOND_%s\\n' READY; test -z \"$TT_TAB_VALUE\" && printf 'not_set\\n'; stty size\n");
   await waitFor(() => output(first.id).includes("610013"), "first tab variable");
-  await waitFor(() => output(second.id).includes("SECOND_READY"), "second tab command");
+  // PTY output can arrive in separate chunks; the leading marker precedes `stty size`.
+  await waitFor(() => output(second.id).includes("29 92"), "second tab commands completed");
+  expect(output(second.id)).toContain("SECOND_READY");
   expect(output(second.id)).toContain("not_set\r\n");
   expect(output(second.id)).toContain("29 92");
   expect(output(second.id)).not.toContain("610013");

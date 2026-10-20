@@ -5,6 +5,7 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  readSync,
   realpathSync,
   statSync,
 } from "node:fs";
@@ -19,6 +20,7 @@ import {
   type ConversationFile,
   type ConversationFilesPage,
 } from "../shared/conversationFiles";
+import { FILE_PREVIEW_MAX_BYTES, type FilePreviewContent, getFilePreviewType } from "../shared/filePreview";
 import {
   type ConversationFileMessage,
   type ConversationFileSource,
@@ -347,73 +349,154 @@ function downloadHeaders(name: string, size: number): Headers {
   });
 }
 
+/** Download and preview share the exact same persisted-reference and current-path grant. */
+function resolveConversationFile(store: Store, roomId: string, fileId: string) {
+  const room = store.getRoom(roomId);
+  if (!room) throw new ValidationError("会话不存在", 404);
+  const identity = decode(fileId);
+  if (!validPosition(identity) || typeof identity.messageId !== "string" || identity.messageId.length > 200)
+    throw new ValidationError("文件不存在", 404);
+  const message = store.conversationFileMessage(roomId, identity.seq as number);
+  if (!message || message.seq !== identity.seq || message.id !== identity.messageId)
+    throw new ValidationError("文件不存在", 404);
+  const source = store.conversationFileSources(roomId, message.id, "", 1, identity.key as string)[0];
+  let reference: FileReference | undefined;
+  if (source) {
+    for (const entry of references(source)) {
+      if (entry.offset === identity.offset) {
+        reference = entry;
+        break;
+      }
+      if (entry.offset > (identity.offset as number)) break;
+    }
+  }
+  if (!source || !reference) throw new ValidationError("文件不存在", 404);
+  const item = fileItem(room, message, source, reference);
+  if (item.id !== fileId) throw new ValidationError("文件不存在", 404);
+  return { room, message, source, reference, item };
+}
+
+function requireAvailableFile(item: ConversationFile) {
+  if (item.state === "available") return;
+  if (item.size !== null && item.size > CONVERSATION_FILE_DOWNLOAD_MAX_BYTES)
+    throw new ValidationError("文件超过 100 MiB 下载上限", 403);
+  throw new ValidationError("文件当前不可用", item.state === "missing" ? 404 : 403);
+}
+
+function openCheckedFile(room: Room, path: string): { fd: number; size: number } {
+  const local = currentFile(room.cwd, path);
+  if (local.state !== "available" || !local.realPath || !local.root)
+    throw new ValidationError("文件当前不可用", local.state === "missing" ? 404 : 403);
+  const fd = openSync(local.realPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    const current = currentFile(room.cwd, path);
+    if (
+      !stat.isFile() ||
+      stat.dev !== local.dev ||
+      stat.ino !== local.ino ||
+      current.state !== "available" ||
+      current.dev !== stat.dev ||
+      current.ino !== stat.ino ||
+      current.root !== local.root
+    )
+      throw new ValidationError("文件当前不可用", 403);
+    return { fd, size: stat.size };
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+}
+
+function inlineFileBytes(
+  store: Store,
+  roomId: string,
+  messageId: string,
+  source: ConversationFileSource,
+  maxBytes = INLINE_BYTES_MAX,
+): Buffer<ArrayBuffer> {
+  const payload = store.conversationFileSources(roomId, messageId, "", 1, source.key, true, maxBytes)[0]?.data;
+  const size = typeof payload === "string" ? attachmentBytes(payload) : null;
+  if (size === null || size > maxBytes) throw new ValidationError("附件内容无效", 403);
+  return Buffer.from(payload as string, "base64");
+}
+
+function fileFailure(error: unknown): Response {
+  if ((error as NodeJS.ErrnoException).code === "ENOENT")
+    return Response.json({ error: "文件不存在" }, { status: 404 });
+  if (["EACCES", "EPERM", "ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? ""))
+    return Response.json({ error: "文件当前不可用" }, { status: 403 });
+  return failure(error);
+}
+
 export function handleConversationFileContent(store: Store, roomId: string, fileId: string): Response {
   let fd: number | undefined;
   try {
-    const room = store.getRoom(roomId);
-    if (!room) throw new ValidationError("会话不存在", 404);
-    const identity = decode(fileId);
-    if (!validPosition(identity) || typeof identity.messageId !== "string" || identity.messageId.length > 200)
-      throw new ValidationError("文件不存在", 404);
-    const message = store.conversationFileMessage(roomId, identity.seq as number);
-    if (!message || message.seq !== identity.seq || message.id !== identity.messageId)
-      throw new ValidationError("文件不存在", 404);
-    const source = store.conversationFileSources(roomId, message.id, "", 1, identity.key as string)[0];
-    let reference: FileReference | undefined;
-    if (source) {
-      for (const entry of references(source)) {
-        if (entry.offset === identity.offset) {
-          reference = entry;
-          break;
-        }
-        if (entry.offset > (identity.offset as number)) break;
-      }
-    }
-    if (!source || !reference) throw new ValidationError("文件不存在", 404);
-    const item = fileItem(room, message, source, reference);
-    if (item.id !== fileId) throw new ValidationError("文件不存在", 404);
-    if (item.state !== "available") {
-      if (item.size !== null && item.size > CONVERSATION_FILE_DOWNLOAD_MAX_BYTES)
-        throw new ValidationError("文件超过 100 MiB 下载上限", 403);
-      throw new ValidationError("文件当前不可用", item.state === "missing" ? 404 : 403);
-    }
+    const { room, message, source, reference, item } = resolveConversationFile(store, roomId, fileId);
+    requireAvailableFile(item);
     if (reference.path) {
-      const local = currentFile(room.cwd, reference.path);
-      if (local.state !== "available" || !local.realPath || !local.root)
-        throw new ValidationError("文件当前不可用", local.state === "missing" ? 404 : 403);
-      fd = openSync(local.realPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-      const stat = fstatSync(fd);
-      const current = currentFile(room.cwd, reference.path);
-      if (
-        !stat.isFile() ||
-        stat.dev !== local.dev ||
-        stat.ino !== local.ino ||
-        current.state !== "available" ||
-        current.dev !== stat.dev ||
-        current.ino !== stat.ino ||
-        current.root !== local.root
-      )
-        throw new ValidationError("文件当前不可用", 403);
-      const headers = downloadHeaders(item.name, stat.size);
-      if (!stat.size) {
+      const opened = openCheckedFile(room, reference.path);
+      fd = opened.fd;
+      const headers = downloadHeaders(item.name, opened.size);
+      if (!opened.size) {
         closeSync(fd);
         fd = undefined;
         return new Response(new Uint8Array(), { headers });
       }
-      const stream = createReadStream(local.realPath, { fd, autoClose: true, start: 0, end: stat.size - 1 });
+      const stream = createReadStream("", { fd, autoClose: true, start: 0, end: opened.size - 1 });
       fd = undefined;
       return new Response(Readable.toWeb(stream) as unknown as ReadableStream<Uint8Array>, { headers });
     }
-    const payload = store.conversationFileSources(roomId, message.id, "", 1, source.key, true)[0]?.data;
-    const size = typeof payload === "string" ? attachmentBytes(payload) : null;
-    if (size === null || size > INLINE_BYTES_MAX) throw new ValidationError("附件内容无效", 403);
-    return new Response(Buffer.from(payload as string, "base64"), { headers: downloadHeaders(item.name, size) });
+    const bytes = inlineFileBytes(store, roomId, message.id, source);
+    return new Response(bytes, { headers: downloadHeaders(item.name, bytes.length) });
   } catch (error) {
     if (fd !== undefined) closeSync(fd);
-    if ((error as NodeJS.ErrnoException).code === "ENOENT")
-      return Response.json({ error: "文件不存在" }, { status: 404 });
-    if (["EACCES", "EPERM", "ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? ""))
-      return Response.json({ error: "文件当前不可用" }, { status: 403 });
-    return failure(error);
+    return fileFailure(error);
+  }
+}
+
+export function handleConversationFilePreview(store: Store, roomId: string, fileId: string): Response {
+  let fd: number | undefined;
+  try {
+    const { room, message, source, reference, item } = resolveConversationFile(store, roomId, fileId);
+    if (item.size !== null && item.size > FILE_PREVIEW_MAX_BYTES)
+      throw new ValidationError("文件超过 1 MiB 预览上限", 413);
+    requireAvailableFile(item);
+    const type = getFilePreviewType(item.name, item.mimeType);
+    if (!type) throw new ValidationError("此文件类型不支持预览", 415);
+    let bytes: Buffer;
+    if (reference.path) {
+      const opened = openCheckedFile(room, reference.path);
+      fd = opened.fd;
+      if (opened.size > FILE_PREVIEW_MAX_BYTES) throw new ValidationError("文件超过 1 MiB 预览上限", 413);
+      // One extra byte detects growth after fstat, without allowing an unbounded read.
+      const buffer = Buffer.alloc(FILE_PREVIEW_MAX_BYTES + 1);
+      let total = 0;
+      while (total <= FILE_PREVIEW_MAX_BYTES) {
+        const count = readSync(fd, buffer, total, buffer.length - total, null);
+        if (!count) break;
+        total += count;
+      }
+      if (total > FILE_PREVIEW_MAX_BYTES) throw new ValidationError("文件超过 1 MiB 预览上限", 413);
+      bytes = buffer.subarray(0, total);
+    } else bytes = inlineFileBytes(store, roomId, message.id, source, FILE_PREVIEW_MAX_BYTES);
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new ValidationError("文件不是有效的 UTF-8 文本", 415);
+    }
+    for (const character of text) {
+      const code = character.charCodeAt(0);
+      if ((code < 32 && code !== 9 && code !== 10 && code !== 13) || (code >= 127 && code <= 159))
+        throw new ValidationError("文件包含二进制或控制字符，无法预览", 415);
+    }
+    return Response.json({ ...type, text, size: bytes.length } satisfies FilePreviewContent, {
+      headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
+    });
+  } catch (error) {
+    return fileFailure(error);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }

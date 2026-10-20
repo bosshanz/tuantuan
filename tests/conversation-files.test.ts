@@ -1,15 +1,21 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { handleConversationFileContent, handleConversationFiles } from "../server/conversation-files";
+import {
+  handleConversationFileContent,
+  handleConversationFilePreview,
+  handleConversationFiles,
+} from "../server/conversation-files";
 import { type Message, Store } from "../server/store";
 import {
   CONVERSATION_FILE_DOWNLOAD_MAX_BYTES,
   type ConversationFile,
   type ConversationFilesPage,
 } from "../shared/conversationFiles";
+import { FILE_PREVIEW_MAX_BYTES, getFilePreviewType } from "../shared/filePreview";
 import { emptyTimeline, type Timeline } from "../shared/timeline";
 
 const cleanup: (() => void)[] = [];
@@ -80,6 +86,7 @@ function fixture() {
     page,
     all,
     download: (item: ConversationFile, roomId = room.id) => handleConversationFileContent(store, roomId, item.id),
+    preview: (item: ConversationFile, roomId = room.id) => handleConversationFilePreview(store, roomId, item.id),
     get store() {
       return store;
     },
@@ -95,6 +102,199 @@ const attachment = (name: string, bytes: Uint8Array | string, mimeType = "applic
   name,
   mimeType,
   data: Buffer.from(bytes).toString("base64"),
+});
+
+describe("conversation file preview", () => {
+  test("classifies Markdown, HTML, common source, MIME hints, text and configuration files", () => {
+    const cases: [string, string, ReturnType<typeof getFilePreviewType>][] = [
+      ["REPORT.MD", "application/octet-stream", { kind: "markdown" }],
+      ["notes.markdown", "", { kind: "markdown" }],
+      ["page.htm", "", { kind: "html" }],
+      ["page.html", "", { kind: "html" }],
+      ["main.tsx", "", { kind: "code", language: "typescript" }],
+      ["script.py", "", { kind: "code", language: "python" }],
+      ["main.rs", "", { kind: "code", language: "rust" }],
+      ["package.json", "", { kind: "code", language: "json" }],
+      ["settings.yaml", "", { kind: "code", language: "yaml" }],
+      ["Dockerfile", "", { kind: "code", language: "dockerfile" }],
+      ["Dockerfile.dev", "", { kind: "code", language: "dockerfile" }],
+      ["Makefile", "", { kind: "code", language: "makefile" }],
+      [".gitignore", "application/octet-stream", { kind: "text" }],
+      [".env.local", "application/octet-stream", { kind: "code", language: "ini" }],
+      [".editorconfig", "", { kind: "code", language: "ini" }],
+      [".bashrc", "", { kind: "code", language: "bash" }],
+      ["server.log", "", { kind: "text" }],
+      ["unknown", "text/markdown; charset=utf-8", { kind: "markdown" }],
+      ["unknown", "text/html", { kind: "html" }],
+      ["unknown", "application/ld+json", { kind: "code", language: "json" }],
+      ["unknown", "text/plain", { kind: "text" }],
+      ["archive.zip", "application/zip", null],
+      ["photo.png", "image/png", null],
+      ["report.pdf", "application/pdf", null],
+      ["unknown.constructor", "application/octet-stream", null],
+    ];
+    for (const [name, mimeType, expected] of cases) expect(getFilePreviewType(name, mimeType)).toEqual(expected);
+  });
+
+  test("returns persisted attachment previews as JSON with strict UTF-8 and BOM support", async () => {
+    const f = fixture();
+    const html = "<!doctype html><script>alert('inert JSON')</script><h1>报告</h1>";
+    const markdown = "# 标题\n\n正文 🌲\t\r\n";
+    const bom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(markdown)]);
+    f.insert([
+      attachment("note.md", bom, "text/markdown"),
+      attachment("page.html", html, "text/html"),
+      attachment("main.ts", "const value = 42;", "application/octet-stream"),
+      attachment("empty.txt", "", "text/plain"),
+    ]);
+    f.reopen();
+    const files = await f.all();
+    const markdownFile = files.find((item) => item.name === "note.md") as ConversationFile;
+    expect(await f.preview(markdownFile).json()).toEqual({ kind: "markdown", text: markdown, size: bom.length });
+    const htmlResponse = f.preview(files.find((item) => item.name === "page.html") as ConversationFile);
+    expect(htmlResponse.headers.get("content-type")).toStartWith("application/json");
+    expect(htmlResponse.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(htmlResponse.headers.get("cache-control")).toBe("no-store");
+    expect(await htmlResponse.json()).toEqual({ kind: "html", text: html, size: Buffer.byteLength(html) });
+    expect(await f.preview(files.find((item) => item.name === "main.ts") as ConversationFile).json()).toEqual({
+      kind: "code",
+      language: "typescript",
+      text: "const value = 42;",
+      size: 17,
+    });
+    expect(await f.preview(files.find((item) => item.name === "empty.txt") as ConversationFile).json()).toEqual({
+      kind: "text",
+      text: "",
+      size: 0,
+    });
+    expect(new Uint8Array(await f.download(markdownFile).arrayBuffer())).toEqual(new Uint8Array(bom));
+  });
+
+  test("rejects binary controls, NUL, invalid UTF-8 and unsupported types without weakening downloads", async () => {
+    const f = fixture();
+    const invalid: [string, Uint8Array | string, string][] = [
+      ["nul.txt", Uint8Array.of(65, 0, 66), "文件包含二进制或控制字符，无法预览"],
+      ["bell.txt", Uint8Array.of(65, 7, 66), "文件包含二进制或控制字符，无法预览"],
+      ["del.txt", Uint8Array.of(65, 127, 66), "文件包含二进制或控制字符，无法预览"],
+      ["c1.txt", "A\u0085B", "文件包含二进制或控制字符，无法预览"],
+      ["invalid.txt", Uint8Array.of(0xc3, 0x28), "文件不是有效的 UTF-8 文本"],
+      ["utf16.txt", Uint8Array.of(0xff, 0xfe, 65, 0), "文件不是有效的 UTF-8 文本"],
+      ["binary.pdf", "%PDF-1.7", "此文件类型不支持预览"],
+    ];
+    f.insert(invalid.map(([name, bytes]) => attachment(name, bytes)));
+    const files = await f.all();
+    for (const [name, bytes, error] of invalid) {
+      const item = files.find((file) => file.name === name) as ConversationFile;
+      const preview = f.preview(item);
+      expect(preview.status).toBe(415);
+      expect(await preview.json()).toEqual({ error });
+      expect(new Uint8Array(await f.download(item).arrayBuffer())).toEqual(new Uint8Array(Buffer.from(bytes)));
+    }
+  });
+
+  test("accepts exactly 1 MiB and rejects oversized metadata before selecting attachment payloads", async () => {
+    const f = fixture();
+    f.insert([
+      attachment("exact.txt", "a".repeat(FILE_PREVIEW_MAX_BYTES)),
+      attachment("large.txt", "a".repeat(FILE_PREVIEW_MAX_BYTES + 1)),
+    ]);
+    const files = await f.all();
+    const exact = files.find((item) => item.name === "exact.txt") as ConversationFile;
+    const large = files.find((item) => item.name === "large.txt") as ConversationFile;
+    const sources = spyOn(f.store, "conversationFileSources");
+    try {
+      const denied = f.preview(large);
+      expect(denied.status).toBe(413);
+      expect(await denied.json()).toEqual({ error: "文件超过 1 MiB 预览上限" });
+      expect(sources.mock.calls.every((args) => args[5] !== true)).toBe(true);
+      const response = f.preview(exact);
+      expect(response.status).toBe(200);
+      const preview = await response.json();
+      expect(preview.size).toBe(FILE_PREVIEW_MAX_BYTES);
+      expect(preview.text).toHaveLength(FILE_PREVIEW_MAX_BYTES);
+      expect(sources.mock.calls.some((args) => args[5] === true && args[6] === FILE_PREVIEW_MAX_BYTES)).toBe(true);
+    } finally {
+      sources.mockRestore();
+    }
+  });
+
+  test("bounds project file reads even when the file grows after its descriptor check", async () => {
+    const f = fixture();
+    const path = join(f.cwd, "growth.txt");
+    writeFileSync(path, "safe");
+    f.insert([], { senderKind: "agent", content: "[growth](growth.txt)" });
+    const file = (await f.all())[0] as ConversationFile;
+    const actualRead = fs.readSync;
+    let grown = false;
+    let requested = 0;
+    const read = spyOn(fs, "readSync").mockImplementation(((
+      fd: number,
+      buffer: NodeJS.ArrayBufferView,
+      offset: number,
+      length: number,
+      position: number | null,
+    ) => {
+      if (!grown) {
+        grown = true;
+        writeFileSync(path, "a".repeat(FILE_PREVIEW_MAX_BYTES + 100));
+      }
+      requested += length;
+      return actualRead(fd, buffer, offset, length, position);
+    }) as typeof fs.readSync);
+    try {
+      expect(f.preview(file).status).toBe(413);
+      expect(grown).toBe(true);
+      expect(requested).toBeLessThanOrEqual(FILE_PREVIEW_MAX_BYTES + 1);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("rejects oversized project file metadata before reading its descriptor", async () => {
+    const f = fixture();
+    writeFileSync(join(f.cwd, "large.txt"), "a".repeat(FILE_PREVIEW_MAX_BYTES + 1));
+    f.insert([], { senderKind: "agent", content: "[large](large.txt)" });
+    const file = (await f.all())[0] as ConversationFile;
+    const read = spyOn(fs, "readSync");
+    try {
+      const response = f.preview(file);
+      expect(response.status).toBe(413);
+      expect(await response.json()).toEqual({ error: "文件超过 1 MiB 预览上限" });
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("reuses exact persisted IDs, room boundaries and current project path checks", async () => {
+    const f = fixture();
+    writeFileSync(join(f.cwd, "note.md"), "current first");
+    writeFileSync(join(f.root, "outside.md"), "outside secret");
+    mkdirSync(join(f.cwd, "directory"));
+    symlinkSync(join(f.root, "outside.md"), join(f.cwd, "escape.md"));
+    f.insert([attachment("note.md", "original attachment")]);
+    const message = f.insert([], {
+      senderKind: "agent",
+      content: `[current](note.md) [outside](<${join(f.root, "outside.md")}>) [linked](escape.md) [missing](missing.md) [dir](directory)`,
+    });
+    const files = await f.all();
+    const current = files.find((item) => item.name === "note.md" && item.source === "agent") as ConversationFile;
+    const original = files.find((item) => item.name === "note.md" && item.source === "attachment") as ConversationFile;
+    writeFileSync(join(f.cwd, "note.md"), "current new");
+    expect(await f.preview(current).json()).toEqual({ kind: "markdown", text: "current new", size: 11 });
+    expect(await f.preview(original).json()).toEqual({ kind: "markdown", text: "original attachment", size: 19 });
+    writeFileSync(join(f.cwd, "note.md"), Uint8Array.of(0xc3, 0x28));
+    expect(f.preview(current).status).toBe(415);
+    expect(f.preview(current, f.other.id).status).toBe(404);
+    for (const file of files.filter((item) => item.name !== "note.md"))
+      expect(f.preview(file).status).toBe(file.name === "missing.md" ? 404 : 403);
+    unlinkSync(join(f.cwd, "note.md"));
+    symlinkSync(join(f.root, "outside.md"), join(f.cwd, "note.md"));
+    expect(f.preview(current).status).toBe(403);
+    expect(handleConversationFilePreview(f.store, f.room.id, "invalid!").status).toBe(400);
+    f.store.db.query("DELETE FROM messages WHERE id = ?").run(message.id);
+    expect(f.preview(current).status).toBe(404);
+  });
 });
 
 describe("conversation file list", () => {

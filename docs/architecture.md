@@ -36,7 +36,7 @@
 | `server/host.ts` | `HarnessHost`：按「房间 + Agent + 工作目录」隔离进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；同房间同 Agent 防重入，权限请求挂起直到用户回答 |
 | `shared/attachments.ts` / `server/attachments.ts` | 附件数量、大小、编码契约；UTF-8 文本内联、二进制原件托管与精确只读路径授权 |
 | `web/src/composerAttachments.ts` / `FileAttachments.tsx` | 按房间串行读取附件、预览与安全下载；草稿仍由 `chatWorkspace.ts` 拥有 |
-| `server/conversation-files.ts` / `shared/conversationFiles.ts` / `web/src/ConversationFiles.tsx` | 从持久化消息派生会话文件元数据并分页；内容接口重新解析来源、验证项目文件范围；前端按需下载 / 预览，来源定位复用聊天导航 |
+| `server/conversation-files.ts` / `shared/conversationFiles.ts` / `shared/filePreview.ts` / `web/src/ConversationFiles.tsx` / `FilePreview.tsx` | 从持久化消息派生会话文件元数据并分页；内容接口重新解析来源、验证项目文件范围；前端按需下载 / 预览，文本预览使用独立的 1 MiB 有界读取与 UTF-8 校验；来源定位复用聊天导航 |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
 | `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
 | `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；直达 / 群主统筹路由、逐轮职责、成员结果收集与群主续轮、单个 Agent 回合、交接预算与定向取消 |
@@ -155,6 +155,8 @@ BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计
 图表从 CSS token 读取主题，监听系统主题与根元素主题变化。相同源码重绘期间保留图像和预览实例，替换地址时不重置原图模式、焦点；重绘失败明确显示上次图表仍在使用。源码变更立即失效旧图，过期结果不能覆盖新内容。
 
 `PreviewImage` 为 Mermaid、Markdown、ACP 时间线及工具图片提供同一个入口。预览通过 portal 和原生 `dialog.showModal()` 进入 top layer，缩略图继续占据消息中的原位置；Tab 保持在弹窗内，关闭时以 `preventScroll` 恢复触发按钮焦点。视口通过 ResizeObserver 测量，适应窗口按自然尺寸计算且不自动放大小图。缩放与平移由组件统一管理，滚轮按指针位置缩放，拖动和方向键平移均限制在图片边界；窗口变化重新计算适配比例与平移边界。暗色背景与固定工具区让图片不被控件遮挡；失败可重试，重试不更改原始资源地址。
+
+`FilePreview` 从独立 JSON 预览接口按需读取文本，与下载复用持久化来源校验及已验证的文件描述符；本地文件最多读取 1 MiB + 1 字节以发现增长，附件查询也限制 base64 投影大小。原件下载继续使用 attachment / octet-stream。Markdown 不执行原始 HTML、不请求图片或跳转链接；源码仅插入转义文本或受控高亮 token。HTML 在 inert template 中解析并移除主动内容和导航属性，插入首置 CSP 后放入空 sandbox 的 iframe，不开放脚本或同源权限；超出 20,000 元素时退回可查看源码的错误状态。超过 100 KiB 或 3,000 行关闭高亮，过多行使用普通文本而不生成逐行 DOM。预览关闭取消请求并恢复列表入口焦点；静态 iframe 获焦点时归还键盘焦点，保留滚轮阅读。`scripts/e2e-file-preview.ts` 验证文档、源码复制、HTML 隔离、错误恢复、焦点和窄屏。
 
 `tests/rich-message.test.tsx` 覆盖 Markdown 分流、图片入口与资源语法；`scripts/e2e-rich-media.ts` 接入全量浏览器冒烟，使用持久化测试消息和 ACP 形状的确定性更新验证实际 SVG、主题、预览与流式恢复。测试夹具不代表真实模型输出质量或各 Harness 的图片输入能力。
 

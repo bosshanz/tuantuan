@@ -14,7 +14,11 @@ import { replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
 import { AttentionService } from "./attention";
 import { AVATAR_SHAPES } from "./avatars";
-import { handleConversationFileContent, handleConversationFiles } from "./conversation-files";
+import {
+  handleConversationFileContent,
+  handleConversationFilePreview,
+  handleConversationFiles,
+} from "./conversation-files";
 import { CUSTOM_FORMATS, CUSTOM_HARNESS, maskKey, testConnection } from "./custom";
 import { listDirs, pickFolderNative, places } from "./dirpicker";
 import {
@@ -1583,6 +1587,8 @@ export function createApp(deps: AppDeps) {
         if (!subId && !action) return handleConversationFiles(store, room.id, url);
         if (subId && action === "content" && parts.length === 5)
           return handleConversationFileContent(store, room.id, subId);
+        if (subId && action === "preview" && parts.length === 5)
+          return handleConversationFilePreview(store, room.id, subId);
       }
       if (room && !sub && method === "DELETE") {
         orchestrator.cancelAll(room.id);

@@ -13,6 +13,7 @@ import { chatHistorySmoke } from "./e2e-chat-history";
 import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { chatToolsSmoke } from "./e2e-chat-tools";
 import { conversationFilesSmoke } from "./e2e-conversation-files";
+import { filePreviewSmoke } from "./e2e-file-preview";
 import { onboardingLayoutSmoke } from "./e2e-onboarding-layout";
 import { quoteReturnSmoke } from "./e2e-quote-return";
 import { registryAuthSmoke } from "./e2e-registry-auth";
@@ -572,6 +573,7 @@ try {
     (message) => server.publish(`room:${message.roomId}`, JSON.stringify({ type: "message", message })),
     shotsDir,
   );
+  await filePreviewSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
   await v025Smoke(
     browser,
     `http://localhost:${server.port}`,
