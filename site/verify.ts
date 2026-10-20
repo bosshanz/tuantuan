@@ -245,7 +245,6 @@ for (const u of sameOrigin) {
   }
 }
 const external = [...new Set([...links.keys()].filter((u) => !u.startsWith(origin)).map((u) => u.replace(/#.*$/, "")))];
-const knownPending: string[] = [];
 if (!process.env.SKIP_EXTERNAL) {
   for (const u of external) {
     let status = 0;
@@ -257,17 +256,13 @@ if (!process.env.SKIP_EXTERNAL) {
       console.log(`  ? ${u}: ${e}`);
     }
     if (status === 200) console.log(`  ✓ ${status} ${u}`);
-    else if (u.endsWith("/releases/tag/v0.2.4")) {
-      knownPending.push(`${u} → ${status} (release not published yet)`);
-      console.log(`  ! ${status} ${u} (release draft)`);
-    } else fail(`external ${u} → ${status}`);
+    else fail(`external ${u} → ${status}`);
   }
 }
 
 await browser.close();
 server.stop();
 console.log(`\nchecked ${sameOrigin.length} internal + ${external.length} external links; shots in ${shots}`);
-for (const k of knownPending) console.log(`pending: ${k}`);
 if (problems.length) {
   console.log(`${problems.length} problem(s)`);
   process.exit(1);

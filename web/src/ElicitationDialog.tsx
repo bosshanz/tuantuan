@@ -78,6 +78,7 @@ export function ElicitationDialog(props: {
   agentName: string;
   pending: boolean;
   error: string | null;
+  revealRequest?: number;
   onAccept: (content: Record<string, ElicitationValue>) => void;
   onCancel: () => void;
 }) {
@@ -94,6 +95,14 @@ export function ElicitationDialog(props: {
   const summary = useRef<HTMLElement>(null);
   const titleId = useId();
   const unsupported = ask.fields.filter((field) => field.kind === "unsupported");
+  useLayoutEffect(() => {
+    if (props.revealRequest === undefined) return;
+    setExpanded(true);
+    const frame = requestAnimationFrame(() => {
+      (form.current?.querySelector<HTMLElement>(controlSelector) ?? summary.current)?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [props.revealRequest]);
   useLayoutEffect(() => {
     const element = card.current;
     return () => {

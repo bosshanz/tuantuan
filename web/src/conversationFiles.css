@@ -1,0 +1,56 @@
+.conversation-files { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 24px; border: 0; overflow: hidden; background: transparent; color: var(--text); -webkit-app-region: no-drag; }
+.conversation-files[open] { display: flex; align-items: center; justify-content: center; }
+.conversation-files::backdrop { background: rgb(0 0 0 / .38); backdrop-filter: blur(3px); }
+.conversation-files-panel { width: min(720px, 100%); max-height: min(800px, 100%); min-height: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--r4); background: var(--surface); box-shadow: var(--shadow-2); }
+.conversation-files-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); padding: var(--s5) var(--s5) var(--s3); flex-shrink: 0; }
+.conversation-files-heading { min-width: 0; }
+.conversation-files-heading h2 { margin: 0; font-size: var(--fs-lg); font-weight: 650; line-height: 1.5; }
+.conversation-files-heading p { margin: var(--s1) 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-xs); }
+.conversation-files-head-actions { display: flex; gap: var(--s1); flex: none; }
+.conversation-files-head-actions .btn.icon { width: 32px; height: 32px; }
+.conversation-files-description { flex-shrink: 0; margin: 0; padding: 0 var(--s5) var(--s4); color: var(--text-2); font-size: var(--fs-xs); line-height: 1.7; border-bottom: 1px solid var(--border); }
+.conversation-files-description > span { display: block; margin-top: var(--s1); }
+.conversation-files-list { min-height: 180px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.conversation-files-list ul { list-style: none; padding: 0; margin: 0; }
+.conversation-file-row { display: flex; gap: var(--s3); padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border); }
+.conversation-file-row:last-child { border-bottom: 0; }
+.conversation-file-icon { flex: none; display: grid; place-items: center; width: 36px; height: 40px; border-radius: var(--r2); background: var(--surface-2); color: var(--text-2); }
+.conversation-file-body { min-width: 0; flex: 1; }
+.conversation-file-name { color: var(--text); font-size: var(--fs-sm); font-weight: 600; line-height: 1.65; overflow-wrap: anywhere; }
+.conversation-file-meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s3); row-gap: var(--s1); margin-top: var(--s1); color: var(--text-3); font-size: 11px; line-height: 1.6; }
+.conversation-file-source { color: var(--text-2); }
+.conversation-file-sender { min-width: 0; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conversation-file-meta time, .conversation-file-meta > span:last-child { font-variant-numeric: tabular-nums; }
+.conversation-file-path { margin-top: var(--s1); color: var(--text-3); font-family: var(--mono); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.conversation-file-actions { display: flex; flex-wrap: wrap; gap: var(--s1); margin-top: var(--s2); margin-left: -8px; }
+.conversation-file-actions .btn.sm { min-height: 30px; padding: 5px 8px; gap: 5px; font-size: 11px; }
+.conversation-file-actions .btn:disabled { cursor: default; }
+.conversation-file-unavailable { margin: var(--s2) 0 0; color: var(--warn); font-size: var(--fs-xs); line-height: 1.7; }
+.conversation-file-error { margin: var(--s2) 0 0; color: var(--danger); font-size: var(--fs-xs); line-height: 1.7; overflow-wrap: anywhere; }
+.conversation-files-status { display: flex; justify-content: center; align-items: center; gap: var(--s2); padding: var(--s5); color: var(--text-3); font-size: var(--fs-sm); }
+.conversation-files-empty { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s3); padding: var(--s8); text-align: center; color: var(--text-3); }
+.conversation-files-empty strong { color: var(--text-2); font-size: var(--fs-sm); font-weight: 550; }
+.conversation-files-empty p { max-width: 360px; margin: 0; font-size: var(--fs-xs); line-height: 1.8; }
+.conversation-files-error { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s4) var(--s5); color: var(--danger); font-size: var(--fs-xs); line-height: 1.7; }
+.conversation-files-error > span { min-width: 0; overflow-wrap: anywhere; }
+.conversation-files-error .btn { flex: none; }
+.conversation-files-more { display: flex; width: calc(100% - 40px); justify-content: center; margin: var(--s2) var(--s5) var(--s4); font-size: var(--fs-xs); }
+.conversation-files-foot { flex-shrink: 0; display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s2); padding: var(--s3) var(--s5); border-top: 1px solid var(--border); color: var(--text-3); font-size: 11px; }
+.conversation-files-spin { animation: conversation-files-spin 1s linear infinite; }
+.chat-head:has(.conversation-files-open) .title-pill { max-width: min(60%, calc(100% - 320px)); }
+@keyframes conversation-files-spin { to { transform: rotate(360deg); } }
+@media (max-width: 600px) {
+  .conversation-files { padding: var(--s2); }
+  .conversation-files-panel { max-height: 100%; border-radius: var(--r3); }
+  .conversation-files-head { padding: var(--s4) var(--s3) var(--s2); }
+  .conversation-files-description { padding: 0 var(--s3) var(--s3); }
+  .conversation-file-row { gap: var(--s2); padding: var(--s4) var(--s3); }
+  .conversation-file-icon { width: 28px; height: 32px; }
+  .conversation-file-meta { column-gap: var(--s2); }
+  .conversation-file-actions { column-gap: 0; }
+  .conversation-file-actions .btn.sm { font-size: 10px; gap: var(--s1); }
+  .conversation-files-foot, .conversation-files-error { padding-inline: var(--s3); }
+  .conversation-files-more { width: calc(100% - 24px); margin-inline: var(--s3); }
+  .chat-head:has(.conversation-files-open) .title-pill { margin-inline: 48px 136px; max-width: calc(100% - 184px); }
+}
+@media (prefers-reduced-motion: reduce) { .conversation-files-spin { animation: none; } }

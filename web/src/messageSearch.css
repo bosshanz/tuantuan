@@ -1,0 +1,45 @@
+.overlay.message-search-overlay { padding: min(12vh, 80px) 16px 16px; }
+.palette.message-search { width: min(660px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - min(12vh, 80px) - 24px)); display: flex; flex-direction: column; }
+.message-search .palette-input { flex-shrink: 0; gap: 10px; }
+.message-search .palette-input input { font-size: 15px; }
+.message-search .btn.icon { flex: 0 0 30px; width: 30px; height: 32px; }
+.message-search-scopes { display: flex; gap: 5px; align-items: center; padding: 10px 14px; margin: 0; min-width: 0; border: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.message-search-scopes button { background: transparent; border: 0; color: var(--text-2); padding: 6px 10px; border-radius: var(--r2); white-space: nowrap; font-size: 12px; }
+.message-search-scopes button[aria-pressed="true"] { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.message-search-scopes button:disabled { opacity: .4; cursor: default; }
+.message-search-room { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; color: var(--text-3); font-size: 12px; }
+.message-search-list { flex: 1 1 auto; min-height: 70px; max-height: 55dvh; overscroll-behavior: contain; }
+.message-search-heading { padding: 8px 10px 6px; color: var(--text-3); font-size: 11px; font-weight: 600; }
+.message-search-quick { width: 100%; }
+.message-search-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.message-search-hint { flex-shrink: 0; color: var(--text-3); font-size: 12px; }
+.message-search-result { display: flex; flex-direction: column; gap: 5px; width: 100%; padding: 12px 10px; border: 0; border-radius: var(--r2); background: transparent; color: var(--text); text-align: left; }
+.message-search-result:hover, .message-search-result[aria-selected="true"] { background: var(--surface-2); }
+.message-search-location { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.message-search-location > span { color: var(--text-3); font-weight: 400; }
+.message-search-meta { display: flex; gap: 12px; align-items: baseline; width: 100%; font-size: 11px; color: var(--text-3); }
+.message-search-meta > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-search-meta time { flex-shrink: 0; }
+.message-search-snippet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 13px; line-height: 1.6; color: var(--text-2); max-width: 100%; }
+.message-search-snippet mark { color: var(--text); background: color-mix(in srgb, var(--accent) 17%, transparent); border-radius: 2px; }
+.message-search-status { padding: 16px 10px; font-size: 13px; color: var(--text-3); }
+.message-search-feedback { flex-shrink: 0; padding: 0 14px; }
+.message-search-feedback:empty { display: none; }
+.message-search-loading { display: flex; gap: 6px; align-items: center; color: var(--text-3); font-size: 12px; padding: 10px 0; }
+.message-search-loading svg { animation: message-search-spin 1s linear infinite; }
+.message-search-error { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 12px; color: var(--danger); padding: 8px 0; }
+.message-search-error > span { min-width: 0; overflow-wrap: anywhere; }
+.message-search-error > button { flex-shrink: 0; }
+.message-search-more { width: 100%; margin: 6px 0 12px; }
+.message-search .palette-foot { flex-shrink: 0; flex-wrap: wrap; gap: 10px 16px; }
+@keyframes message-search-spin { to { transform: rotate(360deg); } }
+@media (max-width: 420px) {
+  .overlay.message-search-overlay { padding: 16px 8px 8px; }
+  .palette.message-search { width: calc(100vw - 16px); max-height: calc(100dvh - 24px); }
+  .message-search .palette-input { padding-left: 12px; padding-right: 8px; gap: 7px; }
+  .message-search .palette-input input { font-size: 13px; }
+  .message-search-scopes { padding: 8px; }
+  .message-search-meta { flex-wrap: wrap; gap: 3px 10px; }
+  .message-search-meta time { font-size: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .message-search-loading svg { animation: none; } }

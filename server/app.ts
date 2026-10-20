@@ -12,7 +12,9 @@ import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
 import { messagePreview } from "../shared/roomPreview";
 import { replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
+import { AttentionService } from "./attention";
 import { AVATAR_SHAPES } from "./avatars";
+import { handleConversationFileContent, handleConversationFiles } from "./conversation-files";
 import { CUSTOM_FORMATS, CUSTOM_HARNESS, maskKey, testConnection } from "./custom";
 import { listDirs, pickFolderNative, places } from "./dirpicker";
 import {
@@ -34,6 +36,7 @@ import { Installer } from "./installer";
 import * as library from "./library";
 import { installManaged, readManifest, setManagedRoot, uninstallManaged } from "./managed";
 import { EVERYONE_NAMES } from "./mentions";
+import { handleMessageSearch } from "./message-search";
 import { Orchestrator, type RoomEvent } from "./orchestrator";
 import { ProfileSchema, readProfile } from "./profile";
 import { PROJECT_TERMINAL_LIMITS, ProjectTerminals } from "./project-terminal";
@@ -202,6 +205,12 @@ export function createApp(deps: AppDeps) {
   const publishAll = (e: GlobalEvent) => server?.publish("all", JSON.stringify(e));
   const publish = (roomId: string, event: RoomEvent) => {
     server?.publish(`room:${roomId}`, JSON.stringify(event));
+    if (
+      event.type === "permission" ||
+      event.type === "elicitation" ||
+      (event.type === "message" && event.message.senderKind === "agent" && event.message.status !== "streaming")
+    )
+      publishAll({ type: "attention.changed" });
     if (event.type === "room.state") publishAll({ type: "activity", roomId, busy: !!event.state.activeRunId });
     else if (event.type === "message") {
       const last = messagePreview(event.message);
@@ -245,6 +254,7 @@ export function createApp(deps: AppDeps) {
     mcp,
   );
   const orchestrator = new Orchestrator(store, host, publish);
+  const attention = new AttentionService(store, host);
   mcp.provider = orchestrator;
 
   // Projects own the directories: make sure 「草稿」 exists and older rooms belong to a project.
@@ -996,6 +1006,26 @@ export function createApp(deps: AppDeps) {
     const method = req.method;
     const body = async () => (method === "GET" || method === "DELETE" ? undefined : await req.json());
 
+    if (resource === "messages" && id === "search" && parts.length === 2 && method === "GET")
+      return handleMessageSearch(store, url);
+    if (resource === "attention") {
+      if (parts.length === 1 && method === "GET") {
+        const rawLimit = url.searchParams.get("limit");
+        if (rawLimit !== null && !/^[1-9]\d*$/.test(rawLimit)) throw new ValidationError("待办每页数量必须为 1 到 50");
+        return json(
+          attention.list({
+            cursor: url.searchParams.get("cursor"),
+            limit: rawLimit === null ? undefined : Number(rawLimit),
+          }),
+        );
+      }
+      if (parts.length === 3 && id && sub === "dismiss" && method === "POST") {
+        const result = attention.dismiss(id);
+        publishAll({ type: "attention.changed" });
+        return json(result);
+      }
+    }
+
     if (resource === "desktop") {
       if (!desktopUpdateToken) return json({ error: "Not found" }, 404);
       if (req.headers.get("authorization") !== `Bearer ${desktopUpdateToken}`)
@@ -1381,6 +1411,7 @@ export function createApp(deps: AppDeps) {
           host.releaseRoom(room.id, id);
         }
         store.deleteAgent(id);
+        publishAll({ type: "attention.changed" });
         return json({ ok: true });
       }
       if (id && sub === "skills" && method === "GET") {
@@ -1529,6 +1560,7 @@ export function createApp(deps: AppDeps) {
               host.releaseRoom(r.id);
             }
           store.deleteProject(project.id);
+          publishAll({ type: "attention.changed" });
           return json({ ok: true });
         } finally {
           changingProjects.delete(project.id);
@@ -1547,10 +1579,16 @@ export function createApp(deps: AppDeps) {
       }
       const room = id ? store.getRoom(id) : null;
       if (id && !room) return json({ error: "房间不存在" }, 404);
+      if (room && sub === "files" && method === "GET") {
+        if (!subId && !action) return handleConversationFiles(store, room.id, url);
+        if (subId && action === "content" && parts.length === 5)
+          return handleConversationFileContent(store, room.id, subId);
+      }
       if (room && !sub && method === "DELETE") {
         orchestrator.cancelAll(room.id);
         host.releaseRoom(room.id);
         store.deleteRoom(room.id);
+        publishAll({ type: "attention.changed" });
         return json({ ok: true });
       }
       if (room && !sub && method === "PATCH") {

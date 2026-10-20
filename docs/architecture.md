@@ -36,6 +36,7 @@
 | `server/host.ts` | `HarnessHost`：按「房间 + Agent + 工作目录」隔离进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；同房间同 Agent 防重入，权限请求挂起直到用户回答 |
 | `shared/attachments.ts` / `server/attachments.ts` | 附件数量、大小、编码契约；UTF-8 文本内联、二进制原件托管与精确只读路径授权 |
 | `web/src/composerAttachments.ts` / `FileAttachments.tsx` | 按房间串行读取附件、预览与安全下载；草稿仍由 `chatWorkspace.ts` 拥有 |
+| `server/conversation-files.ts` / `shared/conversationFiles.ts` / `web/src/ConversationFiles.tsx` | 从持久化消息派生会话文件元数据并分页；内容接口重新解析来源、验证项目文件范围；前端按需下载 / 预览，来源定位复用聊天导航 |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
 | `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
 | `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；直达 / 群主统筹路由、逐轮职责、成员结果收集与群主续轮、单个 Agent 回合、交接预算与定向取消 |
@@ -55,7 +56,7 @@
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
 | `web/src/useChatScroll.ts` | 聊天自动跟随意图与阅读锚点；上滑立即暂停，消息增量和布局变化保持阅读位置，引用导航保存并恢复消息位置，回到底部或点击「回到最新」恢复跟随 |
 | `web/src/ui.tsx` / `MermaidBlock.tsx` / `mermaidRendering.ts` | 稳定的 Markdown renderer；显式 Mermaid 围栏按需加载，串行渲染、资源语法校验、主题重绘与源码回退，见下方「消息渲染」 |
-| `web/src/ImagePreview.tsx` | 图表和各类消息图片共用缩略图、原生模态 dialog、适应窗口 / 原图与键盘焦点管理 |
+| `web/src/ImagePreview.tsx` | 图表和各类消息图片共用缩略图、原生模态 dialog、视口适配、缩放平移与键盘焦点管理 |
 | `shared/roomPreview.ts` / `web/src/roomListState.ts` | 列表快照和全局 `room.preview` 共用摘要规则；按消息 seq 与状态防回退，列表加载期间重放全局事件，重连刷新 |
 | `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，标签页各自连接独立 shell，刷新恢复项目全部终端与选中页；只在显式打开且用户尚未选择其他焦点时聚焦，正常退出状态不被迟到的 PTY 错误覆盖 |
 | `web/src/messageMerge.ts` | 历史快照与实时消息按 id 合并，保留完成态 / 较长流式文本；发送接口返回的消息立即插入 |
@@ -105,7 +106,7 @@ ACP session 的历史与压缩归 Harness，包括通过原生 Harness 使用自
 | 停止任务请求中的状态 / 错误 | `ChatView` | 按 taskId 防重复、失败可重试；任务列表只由服务端 RoomState 更新，HTTP 确认不会覆盖实时任务状态 |
 | 终端面板开合、高度与焦点意图 | `ChatView` | 外层网格裁切连续改变占位，内部 xterm 保持实际尺寸，避免动效逐帧触发 PTY resize；首次加载与结束共用外层，隐藏立即 inert，结束后在退场完成时卸载。减少动态效果直接切换，拖动高度立即响应 |
 | 图表源码、主题与最后一次渲染结果 | `MermaidBlock` | 仅前端派生状态；源码变化不复用旧图，同一源码换主题保留上次结果直至重绘完成；不写数据库 |
-| 图片预览开合、原图模式与加载错误 | `PreviewImage` / `ImagePreview` | 组件局部状态；相同入口更新图片地址时保持预览与焦点，加载错误按地址隔离 |
+| 图片预览开合、缩放平移与加载状态 | `PreviewImage` / `ImagePreview` | 组件局部状态；相同入口更新图片地址时保持预览、缩放选择与焦点；自然尺寸、加载状态按地址与重试次数隔离 |
 
 界面语言默认 `zh-CN`，另支持 `zh-TW`、`en`、`ja`。`App.applyProfile` 在启动读取、保存响应及 `profile.updated` 到达时更新界面语言；个人资料读取带修订号，迟到的旧响应不能覆盖更新事件。前端启动先读取语言缓存，成功读取服务端配置后以服务端为准。`ProfilePage` 保留编辑草稿并串行提交；语言选择立即提交，其他字段合并短时间内的修改，失败保留草稿并提供重试。语言字段复用现有 JSON 设置，无新增数据库迁移。
 
@@ -141,6 +142,10 @@ BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计
 
 ## 消息渲染
 
+聊天正文搜索由 `server/message-search.ts` 校验参数与分页游标，`Store.searchMessages` 参数化查询 SQLite 的完整 `messages.content`，先限制结果条数再提取片段，不加载 timeline。按 `(created_at, id)` 倒序分页，游标绑定关键词与会话范围；本版为本机字面扫描，无语义搜索或 FTS 索引。`MessageSearch` 管理防抖、请求代次与分页；`CommandPalette` 组合现有快速切换。App 发出一次性的目标导航，ChatView 消费后清除，复用连续历史加载和阅读锚点，避免普通返回会话重复跳转。
+
+`AttentionService` 每次快照读取 Host 的真实待授权 / 提问以及 SQLite 中未确认的 error / interrupted 消息，不新增任务运行态。新增迁移 `message_attention_dismissals` 只保存失败消息的明确处理记录，随消息删除级联清理。`GET /api/attention` 分页失败项并始终返回全部活动请求；`POST /api/attention/:messageId/dismiss` 幂等确认失败。Host 请求变化、结束消息、删除与手动处理经全局 `attention.changed` 通知，不依赖当前房间订阅。App 唯一挂载的 `AttentionController` 管理快照、离线状态和请求代次，拒绝迟到响应覆盖较新状态；界面列表不代替原会话的授权 / 回答操作。
+
 `MessageMarkdown` 使用 `react-markdown`、GFM 和 highlight.js，不执行原始 HTML。renderer 定义在模块级，避免流式文本增量让图片预览和图表组件重新挂载；含图片的链接拆为图片按钮与独立外链，避免 `<a>` 嵌套按钮。
 
 `MermaidBlock` 只处理 `language-mermaid` 围栏，延迟 180ms 合并流式片段；`mermaidRendering` 按需加载固定版本的 Mermaid。其主题初始化和渲染依赖全局状态，因此共用一条串行队列；任务在加载前、渲染前和结果提交前检查是否过期。临时测量 DOM 位于屏幕外，成功或失败都会清理。渲染输出补齐 SVG 固有尺寸，再作为图片展示，无需数据库迁移或 ACP 协议扩展。
@@ -149,7 +154,7 @@ BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计
 
 图表从 CSS token 读取主题，监听系统主题与根元素主题变化。相同源码重绘期间保留图像和预览实例，替换地址时不重置原图模式、焦点；重绘失败明确显示上次图表仍在使用。源码变更立即失效旧图，过期结果不能覆盖新内容。
 
-`PreviewImage` 为 Mermaid、Markdown、ACP 时间线及工具图片提供同一个入口。预览通过 portal 和原生 `dialog.showModal()` 进入 top layer，缩略图继续占据消息中的原位置；Tab 保持在弹窗内，关闭时以 `preventScroll` 恢复触发按钮焦点。原图模式使用可滚动区域，适应窗口模式限制在可用视口内。
+`PreviewImage` 为 Mermaid、Markdown、ACP 时间线及工具图片提供同一个入口。预览通过 portal 和原生 `dialog.showModal()` 进入 top layer，缩略图继续占据消息中的原位置；Tab 保持在弹窗内，关闭时以 `preventScroll` 恢复触发按钮焦点。视口通过 ResizeObserver 测量，适应窗口按自然尺寸计算且不自动放大小图。缩放与平移由组件统一管理，滚轮按指针位置缩放，拖动和方向键平移均限制在图片边界；窗口变化重新计算适配比例与平移边界。暗色背景与固定工具区让图片不被控件遮挡；失败可重试，重试不更改原始资源地址。
 
 `tests/rich-message.test.tsx` 覆盖 Markdown 分流、图片入口与资源语法；`scripts/e2e-rich-media.ts` 接入全量浏览器冒烟，使用持久化测试消息和 ACP 形状的确定性更新验证实际 SVG、主题、预览与流式恢复。测试夹具不代表真实模型输出质量或各 Harness 的图片输入能力。
 

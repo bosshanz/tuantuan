@@ -1060,15 +1060,35 @@ export const chatMessages = {
     en: "Close image preview",
     ja: "画像プレビューを閉じる",
   },
-  "图片原图，可滚动查看": {
-    "zh-TW": "原始圖片，可捲動查看",
-    en: "Original image, scroll to view",
-    ja: "元の画像。スクロールして表示できます",
+  "图片预览，可缩放和拖动": {
+    "zh-TW": "圖片預覽，可縮放和拖曳",
+    en: "Image preview, zoom and pan available",
+    ja: "画像プレビュー。ズームとドラッグで移動できます",
   },
-  "图片加载失败，请关闭预览后重试": {
-    "zh-TW": "圖片載入失敗，請關閉預覽後重試",
-    en: "Image failed to load. Close the preview and try again.",
-    ja: "画像を読み込めませんでした。プレビューを閉じて再試行してください。",
+  图片加载失败: {
+    "zh-TW": "圖片載入失敗",
+    en: "Image failed to load",
+    ja: "画像を読み込めませんでした",
+  },
+  "正在加载图片…": {
+    "zh-TW": "正在載入圖片…",
+    en: "Loading image…",
+    ja: "画像を読み込み中…",
+  },
+  图片缩放控制: {
+    "zh-TW": "圖片縮放控制",
+    en: "Image zoom controls",
+    ja: "画像のズーム操作",
+  },
+  缩放比例: {
+    "zh-TW": "縮放比例",
+    en: "Zoom level",
+    ja: "ズーム倍率",
+  },
+  "滚轮缩放 · 双击切换 · 拖动或方向键平移 · Esc 关闭": {
+    "zh-TW": "滾輪縮放 · 按兩下切換 · 拖曳或方向鍵平移 · Esc 關閉",
+    en: "Scroll to zoom · Double-click to toggle · Drag or arrow keys to pan · Esc to close",
+    ja: "ホイールでズーム · ダブルクリックで切替 · ドラッグか矢印キーで移動 · Esc で閉じる",
   },
   "图表更新失败，当前显示上次图表，可查看源码": {
     "zh-TW": "圖表更新失敗，目前顯示上次圖表，可查看原始碼",

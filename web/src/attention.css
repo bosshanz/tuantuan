@@ -1,0 +1,40 @@
+.attention-dialog { width: min(640px, calc(100vw - 32px)); max-height: min(780px, calc(100dvh - 48px)); padding: 0; border: 1px solid var(--border-strong); border-radius: var(--r4); background: var(--surface); color: var(--text); box-shadow: var(--shadow-2); overflow: hidden; }
+.attention-dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+.attention-panel { display: flex; flex-direction: column; max-height: min(780px, calc(100dvh - 50px)); min-width: 0; }
+.attention-header { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s4) var(--s5) var(--s2); }
+.attention-heading { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.attention-heading h2 { margin: 0; font-size: var(--fs-lg); line-height: 1.4; }
+.attention-count { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.attention-count > span { font-size: var(--fs-xs); color: var(--warn); }
+.attention-intro { display: flex; align-items: flex-start; gap: var(--s3); padding: 0 var(--s5) var(--s4); border-bottom: 1px solid var(--border); }
+.attention-intro p { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-sm); color: var(--text-2); line-height: 1.6; }
+.attention-warning { display: flex; align-items: flex-start; gap: var(--s2); padding: var(--s3) var(--s5); background: var(--warn-soft); color: var(--text-2); font-size: var(--fs-sm); line-height: 1.6; }
+.attention-warning > svg { flex: none; margin-top: 3px; color: var(--warn); }
+.attention-warning > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.attention-list { flex: 1; min-height: 120px; overflow-y: auto; overscroll-behavior: contain; }
+.attention-list ul { list-style: none; padding: 0; margin: 0; }
+.attention-item { display: flex; align-items: flex-start; gap: var(--s3); padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border); }
+.attention-kind-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 30px; height: 30px; border-radius: var(--r2); color: var(--danger); background: var(--danger-soft); }
+.attention-item:is([data-kind="permission"], [data-kind="question"]) .attention-kind-icon { color: var(--warn); background: var(--warn-soft); }
+.attention-item-content { flex: 1; min-width: 0; }
+.attention-item-heading { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); min-height: 22px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.attention-location { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; color: var(--text-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.attention-reason { margin: var(--s2) 0 var(--s3); font-size: var(--fs-sm); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.attention-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.attention-dismiss-error { margin: var(--s2) 0 0; color: var(--danger); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.attention-list > .attention-dismiss-error { padding: var(--s3) var(--s5); }
+.attention-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s2); margin: 0; padding: var(--s6) var(--s5); min-height: 170px; color: var(--text-2); font-size: var(--fs-sm); text-align: center; }
+.attention-empty p { margin: 0; }
+.attention-empty > svg { color: var(--ok); }
+.attention-more { display: flex; justify-content: center; padding: var(--s4) var(--s5); }
+.attention-footer { padding: var(--s3) var(--s5); border-top: 1px solid var(--border); font-size: var(--fs-xs); line-height: 1.6; color: var(--text-3); }
+.attention-spinning { animation: attention-spin 1s linear infinite; }
+@keyframes attention-spin { to { transform: rotate(360deg); } }
+@media (max-width: 480px) {
+  .attention-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 24px); }
+  .attention-panel { max-height: calc(100dvh - 26px); }
+  .attention-header, .attention-intro, .attention-warning, .attention-item, .attention-footer { padding-left: var(--s4); padding-right: var(--s4); }
+  .attention-item { gap: var(--s2); }
+  .attention-heading { flex-wrap: wrap; gap: var(--s2); }
+}
+@media (prefers-reduced-motion: reduce) { .attention-spinning { animation: none; } }

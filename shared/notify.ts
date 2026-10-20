@@ -5,6 +5,7 @@ import type { RoomPreview } from "./roomPreview";
 /** Global, room-independent events every UI client gets (sidebar activity + desktop notifications). */
 export type NotifyKind = "reply" | "permission" | "error" | "auth";
 export type GlobalEvent =
+  | { type: "attention.changed" }
   | { type: "profile.updated"; profile: import("../server/profile").Profile }
   | { type: "activity"; roomId: string; busy: boolean }
   | { type: "room.preview"; roomId: string; last: RoomPreview }

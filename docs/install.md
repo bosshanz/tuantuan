@@ -2,18 +2,18 @@
 
 下载桌面安装包，或从源码运行（浏览器 + 本机服务）和构建桌面版。
 
-## 下载桌面版 v0.2.4
+## 下载桌面版 v0.2.5
 
-前往 [GitHub Releases v0.2.4](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.4)，按操作系统和芯片选择安装包：
+前往 [GitHub Releases v0.2.5](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.5)，按操作系统和芯片选择安装包：
 
 | 平台 | 安装包 |
 | --- | --- |
-| macOS · Apple 芯片（arm64） | `Tuantuan-0.2.4-mac-arm64.dmg` |
-| macOS · Intel（x64） | `Tuantuan-0.2.4-mac-x64.dmg` |
-| Windows · x64 | `Tuantuan-0.2.4-win-x64.exe` |
-| Linux · x64 | `Tuantuan-0.2.4-linux-x64.AppImage` |
+| macOS · Apple 芯片（arm64） | `Tuantuan-0.2.5-mac-arm64.dmg` |
+| macOS · Intel（x64） | `Tuantuan-0.2.5-mac-x64.dmg` |
+| Windows · x64 | `Tuantuan-0.2.5-win-x64.exe` |
+| Linux · x64 | `Tuantuan-0.2.5-linux-x64.AppImage` |
 
-macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.2.4 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。v0.2.1 起提供「关于与更新」入口。macOS 当前推荐通过 Homebrew 升级，暂不配置 Apple Developer；从 v0.2.0 首次升级也需 Homebrew 或手动安装。
+macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.2.5 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。v0.2.1 起提供「关于与更新」入口。macOS 当前推荐通过 Homebrew 升级，暂不配置 Apple Developer；从 v0.2.0 首次升级也需 Homebrew 或手动安装。
 
 - **macOS（Homebrew，推荐）**：`brew install --cask bosshanz/tap/tuantuan`。[这个 tap](https://github.com/bosshanz/homebrew-tap) 安装后会自动清除隔离标记，打开时不会被 Gatekeeper 拦截，升级用 `brew upgrade --cask tuantuan`。
 - **macOS**：打开 `.dmg`，把 **tuantuan.app** 拖进「应用程序」后启动（用 `.zip` 时在访达里双击解压，再移到「应用程序」）。不要直接在磁盘映像里运行。因为没有 Developer ID 和公证，第一次打开会被拦截：
@@ -26,8 +26,8 @@ macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需
 - **Linux**：给 `.AppImage` 添加可执行权限后运行：
 
   ```bash
-  chmod +x Tuantuan-0.2.4-linux-x64.AppImage
-  ./Tuantuan-0.2.4-linux-x64.AppImage
+  chmod +x Tuantuan-0.2.5-linux-x64.AppImage
+  ./Tuantuan-0.2.5-linux-x64.AppImage
   ```
 
 ## 从源码运行
@@ -56,7 +56,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-可直接使用 [v0.2.4 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.4)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。DeepSeek 官方预发布版始终按需安装，不捆绑进桌面包。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+可直接使用 [v0.2.5 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.5)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。DeepSeek 官方预发布版始终按需安装，不捆绑进桌面包。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](screenshots/desktop-linux.png)
 
@@ -146,7 +146,7 @@ GitHub Actions 的 Desktop 工作流分为构建、完整性校验、发布、Ho
 
 macOS 的 Bun 运行时需要逐架构准备，因此打包脚本仍分别调用 builder，但会保留 `latest-mac-arm64.yml` / `latest-mac-x64.yml` 中间清单并合并成包含两个架构的 `latest-mac.yml`；中间清单不发布。Linux 文件名固定使用既有下载链接中的 `x64`，更新清单引用同一个实际文件。
 
-每个安装包的实际 SHA-512、大小、清单版本与引用、两个 macOS 架构、外置与内嵌 blockmap 都通过校验后，才生成独立的 `release-ready` 工作流产物。blockmap 校验覆盖锁定 builder 的单个 `file`、零偏移、分块长度总和及 18 字节 base64 校验码格式，不重新计算每块校验码；安装包的完整内容另以整包摘要校验。标签必须与 `desktop/package.json` 的稳定版本完全一致（例如 `v0.2.4` 对应 `0.2.4`）。缺包、混入不同版本、摘要错误或元数据引用缺失都会阻止发布。
+每个安装包的实际 SHA-512、大小、清单版本与引用、两个 macOS 架构、外置与内嵌 blockmap 都通过校验后，才生成独立的 `release-ready` 工作流产物。blockmap 校验覆盖锁定 builder 的单个 `file`、零偏移、分块长度总和及 18 字节 base64 校验码格式，不重新计算每块校验码；安装包的完整内容另以整包摘要校验。标签必须与 `desktop/package.json` 的稳定版本完全一致（例如 `v0.2.5` 对应 `0.2.5`）。缺包、混入不同版本、摘要错误或元数据引用缺失都会阻止发布。
 
 默认工作流只上传构建与校验后的产物。真正发布有两个入口：仓库变量 `TUANTUAN_PUBLISH=github` 启用 `v*` 标签推送后的发布；或手动运行工作流，选择对应 **标签** 并勾选 `publish`。手动选择分支不能发布。发布任务使用仓库自带的 `GITHUB_TOKEN`（仅该任务授予 `contents:write`），先上传到草稿 Release，通过 `gh release view` 取得 ID，再按 ID 核对 GitHub 返回的每个文件名、大小和 SHA-256，全部匹配后才公开。已有同名 Release（包括草稿）会拒绝覆盖；上传或校验失败时检查保留的草稿后再决定恢复方式。不同标签的工作流使用同一个仓库级并发组，串行完成发布与 Homebrew 同步；公开前还会重新读取当前 latest 并比较稳定版本，较旧构建即使较晚完成也不能把更新入口倒退。
 
@@ -154,9 +154,9 @@ macOS 的 Bun 运行时需要逐架构准备，因此打包脚本仍分别调用
 
 ```bash
 # 示例：先将 desktop/package.json 改为计划发布的稳定版本，并准备对应标签。
-bun desktop/scripts/release.ts prepare --tag v0.2.4 --dir desktop/release --output desktop/release-ready
+bun desktop/scripts/release.ts prepare --tag v0.2.5 --dir desktop/release --output desktop/release-ready
 # 仅在决定发布时执行；需要已安装 gh、已推送的版本标签与 GH_TOKEN 的仓库 contents:write 权限。
-bun desktop/scripts/release.ts publish --tag v0.2.4 --dir desktop/release-ready --repo bosshanz/tuantuan
+bun desktop/scripts/release.ts publish --tag v0.2.5 --dir desktop/release-ready --repo bosshanz/tuantuan
 ```
 
 `prepare` 的输出目录必须不存在，防止混入旧版本。需要重试时用新的输出目录，或确认后删除旧目录。正式 macOS 签名和公证仍使用前述证书配置；包内更新源和发布脚本不会绕过系统签名检查。
@@ -180,10 +180,10 @@ bun desktop/scripts/release.ts publish --tag v0.2.4 --dir desktop/release-ready 
 
 ```bash
 git clone https://github.com/bosshanz/homebrew-tap.git /path/to/homebrew-tap
-bun desktop/scripts/sync-homebrew.ts --tag v0.2.4 --tap /path/to/homebrew-tap
+bun desktop/scripts/sync-homebrew.ts --tag v0.2.5 --tap /path/to/homebrew-tap
 git -C /path/to/homebrew-tap diff -- Casks/tuantuan.rb
 git -C /path/to/homebrew-tap add Casks/tuantuan.rb
-git -C /path/to/homebrew-tap commit -m 'Update tuantuan to v0.2.4'
+git -C /path/to/homebrew-tap commit -m 'Update tuantuan to v0.2.5'
 git -C /path/to/homebrew-tap push
 ```
 
