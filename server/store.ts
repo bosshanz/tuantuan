@@ -782,6 +782,29 @@ export class Store {
     return rows.reverse().map(toMessage);
   }
 
+  /**
+   * Agent replies that contain at least one completed edit tool.
+   * Timelines are loaded so callers can extract paths and diffs; listing UIs should
+   * not put every diff on the wire without an explicit detail request.
+   */
+  agentEditMessages(roomId: string): Message[] {
+    const rows = this.db
+      .query(
+        `SELECT * FROM messages m
+         WHERE room_id = ? AND sender_kind = 'agent' AND status = 'done' AND timeline IS NOT NULL
+           AND EXISTS (
+             SELECT 1 FROM json_each(CASE WHEN json_valid(timeline) THEN timeline ELSE '{}' END, '$.tools') t
+             WHERE t.type = 'object' AND json_extract(t.value, '$.status') = 'completed'
+               AND json_extract(t.value, '$.kind') = 'edit'
+               AND (json_array_length(t.value, '$.locations') > 0 OR EXISTS (
+                 SELECT 1 FROM json_each(t.value, '$.content') c
+                 WHERE c.type = 'object' AND json_extract(c.value, '$.type') = 'diff')))
+         ORDER BY seq`,
+      )
+      .all(roomId) as Row[];
+    return rows.map(toMessage);
+  }
+
   /** One persisted message at a time keeps attachment blobs out of file-list memory. */
   conversationFileMessage(roomId: string, beforeSeq = Number.MAX_SAFE_INTEGER): ConversationFileMessage | null {
     const row = this.db
@@ -1173,6 +1196,27 @@ export class Store {
       byModel: group("model"),
       byHarness: group("harness"),
       daily,
+    };
+  }
+
+  /** Room-scoped usage aggregation. Cost stays null when no turn reported a cost. */
+  usageForRoom(roomId: string): UsageTally & { reporting: boolean } {
+    const sums = `COUNT(*) AS turns, SUM(input_tokens) AS input, SUM(output_tokens) AS output,
+      SUM(cache_read_tokens) AS cache_read, SUM(cache_write_tokens) AS cache_write, SUM(thought_tokens) AS thought,
+      SUM(total_tokens) AS total, SUM(cost) AS cost, MAX(cost_currency) AS currency, COUNT(cost) AS costed`;
+    const r = this.db.query(`SELECT ${sums} FROM usage_log WHERE room_id = ?`).get(roomId) as Row;
+    const turns = Number(r?.turns ?? 0);
+    return {
+      turns,
+      input: Number(r?.input ?? 0),
+      output: Number(r?.output ?? 0),
+      cacheRead: Number(r?.cache_read ?? 0),
+      cacheWrite: Number(r?.cache_write ?? 0),
+      thought: Number(r?.thought ?? 0),
+      total: Number(r?.total ?? 0),
+      cost: Number(r?.costed ?? 0) > 0 ? Number(r?.cost ?? 0) : null,
+      currency: (r?.currency as string | null) ?? null,
+      reporting: turns > 0,
     };
   }
 

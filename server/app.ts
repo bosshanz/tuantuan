@@ -70,6 +70,7 @@ import {
   registryUsageSource,
   ZCODE_070_NOTE,
 } from "./registry-usage";
+import { handleSessionChangeDetail, handleSessionChanges } from "./session-changes";
 import * as skills from "./skills";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 import { TuantuanMcp } from "./tuantuan-mcp";
@@ -1589,6 +1590,25 @@ export function createApp(deps: AppDeps) {
           return handleConversationFileContent(store, room.id, subId);
         if (subId && action === "preview" && parts.length === 5)
           return handleConversationFilePreview(store, room.id, subId);
+      }
+      if (room && sub === "changes" && method === "GET") {
+        if (!subId && !action) return handleSessionChanges(store, room.id);
+        if (subId === "detail" && !action) return handleSessionChangeDetail(store, room.id, url);
+      }
+      if (room && sub === "usage" && !subId && method === "GET") {
+        const usage = store.usageForRoom(room.id);
+        return json({
+          turns: usage.turns,
+          input: usage.input,
+          output: usage.output,
+          cacheRead: usage.cacheRead,
+          cacheWrite: usage.cacheWrite,
+          thought: usage.thought,
+          total: usage.total,
+          cost: usage.cost,
+          currency: usage.currency,
+          reporting: usage.reporting,
+        });
       }
       if (room && !sub && method === "DELETE") {
         orchestrator.cancelAll(room.id);
