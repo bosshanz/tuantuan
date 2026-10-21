@@ -583,3 +583,39 @@ describe("read_result is bounded to the current group run", () => {
     await dm.scheduler.idle(dm.room.id);
   });
 });
+
+describe("member reflux includes reported file change paths", () => {
+  test("successful member edit tools attach path counts without diffs", async () => {
+    const f = fixture(["Lead", "Dev"]);
+    f.say("改一下文件");
+    await f.handoff("Dev", "编辑 a.ts");
+    f.host.finish(0, "已安排");
+    await until(() => f.host.calls.length === 2);
+    const member = f.host.calls[1];
+    member?.update({
+      sessionUpdate: "tool_call",
+      toolCallId: "edit-1",
+      title: "Edit a.ts",
+      kind: "edit",
+      status: "completed",
+      locations: [{ path: "a.ts" }],
+      content: [{ type: "diff", path: "a.ts", oldText: "1", newText: "2" }],
+    });
+    member?.update({
+      sessionUpdate: "tool_call",
+      toolCallId: "shell-1",
+      title: "sed",
+      kind: "execute",
+      status: "completed",
+      locations: [{ path: "b.ts" }],
+      content: [],
+    });
+    f.host.finish(1, "改完了");
+    await until(() => f.host.calls.length === 3);
+    const results = f.host.text(2).match(/<tuantuan-results>\n([\s\S]*?)\n<\/tuantuan-results>/)?.[1];
+    const reports = JSON.parse(results ?? "[]") as { fileChanges?: { path: string; count: number }[] }[];
+    expect(reports[0]?.fileChanges).toEqual([{ path: "a.ts", count: 1 }]);
+    expect(JSON.stringify(reports[0])).not.toContain("oldText");
+    expect(f.host.text(2)).toContain("fileChanges 仅列出成员通过 edit 工具报告的路径与次数");
+  });
+});

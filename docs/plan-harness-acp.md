@@ -1,6 +1,6 @@
 # 团团：Harness 与桌面版本计划
 
-更新于 2026-10-20。本文只保留当前里程碑、有效决定与尚未完成的工作；实现细节和使用规则分别见[架构](architecture.md)、[产品规则](product.md)及[文档索引](README.md)。历史调研和逐轮执行记录可从 Git 历史查阅，不在这里重复累积。
+更新于 2026-10-21。本文只保留当前里程碑、有效决定与尚未完成的工作；实现细节和使用规则分别见[架构](architecture.md)、[产品规则](product.md)及[文档索引](README.md)。历史调研和逐轮执行记录可从 Git 历史查阅，不在这里重复累积。
 
 ## 当前状态
 
@@ -12,6 +12,7 @@
 | M4：更多 Harness 与扩展 | 按需求推进 | 官方 Registry 与明确标注的补充目录；DeepSeek Harness 已在 0.2.2 发布 |
 | 0.2.3–0.2.4：文件与图片附件 | 已发布 | 输入框入口、文件传递、BYOK 与 Grok Build 图片支持、草稿恢复及官网更新 |
 | 0.2.5：预览、搜索、待处理与文件列表 | 已发布 | 暗色图片预览与缩放平移；全历史正文搜索与原消息定位；真实授权、提问和失败的全局待处理列表；会话文件列表与 Markdown / 代码 / 静态 HTML 预览；修复首次引导卡片重叠与窄屏布局 |
+| 0.2.6：会话改动汇总 | 进行中 | 按路径聚合 Agent 报告的 edit、重叠标记与 diff；成员回流附路径次数；多 Agent 会话级用量；文档对账；缺 HOMEBREW_TAP_TOKEN 时跳过同步 |
 
 ## 保留的关键决定
 
@@ -42,7 +43,7 @@
 
 当前 macOS 使用 **Homebrew**，Apple Developer、Developer ID 签名和公证暂缓。应用内检查可用，但 Homebrew 升级不等于 macOS 原生 OTA 已验证。升级必须等 Agent 全部结束并正常退出；外部 brew 不受应用内安装锁控制。签名要求、更新流程与 tap 配置集中维护在[安装文档](install.md)。
 
-发布先校验三平台产物及更新清单，再公开 Release，并同步 [Homebrew tap](https://github.com/bosshanz/homebrew-tap) 的版本和 macOS 双架构摘要。当前用校验脚本显式发布、手动推送 tap；尚未配置 `HOMEBREW_TAP_TOKEN`，不将此记为 Actions 自动同步成功。
+发布先校验三平台产物及更新清单，再公开 Release，并同步 [Homebrew tap](https://github.com/bosshanz/homebrew-tap) 的版本和 macOS 双架构摘要。缺 `HOMEBREW_TAP_TOKEN` 时 Actions 以 notice 跳过 tap 同步（Release 仍成功）；配置后自动同步。未配置前仍可手动推送 tap，不把跳过记成自动同步成功。
 
 ### 已完成的实机升级验证
 

@@ -133,29 +133,37 @@ jobs:
     needs: [validate, publish]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - name: Require tap write credential
+      - name: Check tap write credential
+        id: tap
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
           if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "::error::Release is published, but Homebrew sync requires HOMEBREW_TAP_TOKEN with contents:write on bosshanz/homebrew-tap. Manual recovery: clone the tap; bun desktop/scripts/sync-homebrew.ts --tag $RELEASE_TAG --tap /path/to/homebrew-tap; review, commit and push Casks/tuantuan.rb."
-            exit 1
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; skipping Homebrew sync for $RELEASE_TAG. Release stays published. Manual recovery: clone bosshanz/homebrew-tap; bun desktop/scripts/sync-homebrew.ts --tag $RELEASE_TAG --tap /path/to/homebrew-tap; review, commit and push Casks/tuantuan.rb. See docs/install.md."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v5
+      - if: steps.tap.outputs.skip != 'true'
+        uses: actions/checkout@v5
+      - if: steps.tap.outputs.skip != 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - if: steps.tap.outputs.skip != 'true'
+        uses: actions/checkout@v5
         with:
           repository: bosshanz/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
-      - name: Verify published downloads and synchronize cask
+      - if: steps.tap.outputs.skip != 'true'
+        name: Verify published downloads and synchronize cask
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: bun desktop/scripts/sync-homebrew.ts --tag "$RELEASE_TAG" --tap homebrew-tap
-      - name: Commit and push cask update
+      - if: steps.tap.outputs.skip != 'true'
+        name: Commit and push cask update
         working-directory: homebrew-tap
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}

@@ -176,7 +176,7 @@ bun desktop/scripts/release.ts publish --tag v0.2.5 --dir desktop/release-ready 
 
 参考 [GitHub PAT 配置说明](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)与[Actions Secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)。密钥过期或撤销后需替换相同 Secret；这些值不用提供给聊天，也不写入配置文件或 PR。
 
-缺少 token 时，Release 保持已发布，Homebrew 任务会明确失败并给出恢复命令。配置好 token 后可只重跑失败的 Homebrew job；也可手动运行同一脚本：
+缺少 token 时，Release 保持已发布，Homebrew 任务以 `::notice` 跳过并给出手动恢复命令，不再把整个 job 标红。配置好 token 后会自动同步；也可手动运行同一脚本：
 
 ```bash
 git clone https://github.com/bosshanz/homebrew-tap.git /path/to/homebrew-tap

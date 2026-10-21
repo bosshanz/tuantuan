@@ -72,6 +72,7 @@ import { MessageActions } from "./MessageActions";
 import { reducedMotion, usePresence } from "./motion";
 import { PickList } from "./PickList";
 import type { TerminalFocusRequest } from "./ProjectTerminal";
+import { RoomUsage } from "./RoomUsage";
 import { insertSkill, matchingSkills, skillTokenAt } from "./skillCompletion";
 import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
 import { useChatScroll } from "./useChatScroll";
@@ -1010,7 +1011,21 @@ export function ChatView(props: {
               queued={state.queued}
               onStop={() => stopTask && void cancel(stopTask.id)}
               modelPicker={<SessionChips members={members} sessions={sessions} onPick={pickOption} />}
-              usage={primaryView && members.length === 1 ? <CtxUsage view={primaryView} /> : null}
+              usage={
+                members.length === 1 ? (
+                  primaryView ? (
+                    <CtxUsage view={primaryView} />
+                  ) : null
+                ) : (
+                  <RoomUsage
+                    roomId={room.id}
+                    revision={messages
+                      .filter((message) => message.status !== "streaming")
+                      .map((message) => `${message.id}:${message.status}`)
+                      .join("|")}
+                  />
+                )
+              }
             />
           </footer>
         </div>
