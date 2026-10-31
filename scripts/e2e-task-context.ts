@@ -96,6 +96,7 @@ export async function taskContextSmoke(browser: Browser, base: string, store: St
     const received = snapshot.messages.find((message) => message.timeline?.handoffFrom);
     if (!sent || !received || sent.status !== "done" || received.status !== "done")
       throw new Error("structured handoff did not produce successful source and receiver replies");
+    await page.locator(`details[data-collaboration-run="${received.runId}"] > summary`).click();
     for (const handoff of [sent.timeline?.handoffs?.[0], received.timeline?.handoffFrom]) {
       if (handoff?.task !== task || JSON.stringify(handoff.context) !== JSON.stringify(context))
         throw new Error("persisted handoff did not retain the full task and structured snapshot");
@@ -229,7 +230,10 @@ export async function taskContextSmoke(browser: Browser, base: string, store: St
     });
     await page.reload();
     await page.getByRole("heading", { name: "结构化交接回归" }).waitFor();
+    await page.locator(`details[data-collaboration-run="${received.runId}"] > summary`).click();
     for (const message of fixtures) {
+      if (message.status === "error")
+        await page.locator(`details[data-collaboration-run="${message.runId}"] > summary`).click();
       await row(message.id).waitFor();
       if (await row(message.id).locator('.task-context[data-kind="saved"]').count())
         throw new Error(`${message.status} reply incorrectly displays saved task notes`);

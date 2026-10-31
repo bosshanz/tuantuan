@@ -12,6 +12,7 @@ import { attachmentsSmoke } from "./e2e-attachments";
 import { chatHistorySmoke } from "./e2e-chat-history";
 import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { chatToolsSmoke } from "./e2e-chat-tools";
+import { collaborationSmoke } from "./e2e-collaboration";
 import { conversationFilesSmoke } from "./e2e-conversation-files";
 import { filePreviewSmoke } from "./e2e-file-preview";
 import { gitWorkspaceSmoke } from "./e2e-git-workspace";
@@ -524,7 +525,7 @@ try {
   await page
     .locator(".messages")
     .getByText(/^接手 @Bob 的任务「写一份需求文档」/)
-    .waitFor();
+    .waitFor({ state: "attached" });
   if (await page.locator(".messages .handoff-card, .messages .handoff-from").count())
     throw new Error("compact conversation exposed internal handoff records");
   const handoffReplies = app.store.recentMessages(group.id, 30);
@@ -534,12 +535,14 @@ try {
   await showReplyDetails(page.locator(`[data-message-id="${handoffSource.id}"]`));
   await page.locator(".details .handoff-card", { hasText: "交接给 @Alice" }).waitFor();
   await page.getByRole("button", { name: "关闭详情面板" }).click();
+  await page.locator(`details[data-collaboration-run="${handoffReceiver.runId}"] > summary`).click();
   await showReplyDetails(page.locator(`[data-message-id="${handoffReceiver.id}"]`));
   await page.locator(".details .handoff-from", { hasText: "接 @Bob 的交接：写一份需求文档" }).waitFor();
   await page.getByRole("button", { name: "关闭详情面板" }).click();
   await shot("conversation-handoff");
   await taskContextSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
   await chatToolsSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
+  await collaborationSmoke(browser, `http://localhost:${server.port}`, app.store);
   await quoteReturnSmoke(
     browser,
     `http://localhost:${server.port}`,

@@ -759,6 +759,7 @@ export async function coordinationSmoke(browser: Browser, base: string, projectI
       !summary.content.startsWith("群主汇总：")
     )
       throw new Error("coordination did not finish with a leader summary");
+    await page.locator(`details[data-collaboration-run="${summary.runId}"] > summary`).click();
     for (const member of [left, right]) {
       const result = completed.messages.find((message) => message.senderId === member.id && message.status === "done");
       if (!result || !summary.content.includes(`${member.name} [done]：${result.content}`))
