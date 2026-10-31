@@ -153,7 +153,7 @@ export async function taskContextSmoke(browser: Browser, base: string, store: St
 
     await page.getByRole("button", { name: "展开详情面板", exact: true }).click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
-    const compactSwitch = page.getByRole("switch", { name: "精简视图", exact: true });
+    const compactSwitch = page.getByRole("switch", { name: "仅显示回复正文", exact: true });
     if (!(await compactSwitch.isChecked())) throw new Error("task context fixture did not start in compact view");
     await compactSwitch.uncheck();
     await page.waitForFunction(

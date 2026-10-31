@@ -155,9 +155,9 @@ export function ProjectPicker(props: {
   const [open, setOpen] = useState(false);
   const none = props.none ?? {
     id: DRAFTS,
-    label: tr("不选项目"),
-    desc: tr("放进「草稿」，以后可以移到项目里"),
-    hint: tr("放进「草稿」"),
+    label: tr("草稿"),
+    desc: "",
+    hint: "",
   };
   const DRAFTS_ID = none.id;
   const real = props.projects.filter((p) => p.id !== DRAFTS);

@@ -21,6 +21,7 @@ import {
 } from "./conversation-files";
 import { CUSTOM_FORMATS, CUSTOM_HARNESS, maskKey, testConnection } from "./custom";
 import { listDirs, pickFolderNative, places } from "./dirpicker";
+import { handleGitStatus, handleGitStatusDetail } from "./git-status";
 import {
   detectHarness,
   harnessSpec,
@@ -1594,6 +1595,10 @@ export function createApp(deps: AppDeps) {
       if (room && sub === "changes" && method === "GET") {
         if (!subId && !action) return handleSessionChanges(store, room.id);
         if (subId === "detail" && !action) return handleSessionChangeDetail(store, room.id, url);
+      }
+      if (room && sub === "git-status" && method === "GET") {
+        if (!subId && !action) return handleGitStatus(store, room.id);
+        if (subId === "detail" && !action) return handleGitStatusDetail(store, room.id, url);
       }
       if (room && sub === "usage" && !subId && method === "GET") {
         const usage = store.usageForRoom(room.id);

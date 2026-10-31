@@ -361,7 +361,7 @@ try {
   await page.evaluate(() =>
     (window as unknown as TestWindow).updateTest.push({ mode: "disabled", reason: "development", phase: "idle" }),
   );
-  await page.getByText("开发版不提供应用更新。", { exact: true }).waitFor();
+  await page.getByText("开发版", { exact: true }).waitFor();
   assert(
     (await page.getByRole("button", { name: "检查更新", exact: true }).count()) === 0,
     "development build offered updates",
@@ -401,7 +401,7 @@ try {
   await page.getByRole("button", { name: "取消提问", exact: true }).click();
   const web = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await web.goto(`${base}/#/about`);
-  await web.getByText("应用更新仅桌面版支持。浏览器使用当前服务提供的版本。", { exact: true }).waitFor();
+  await web.getByText("浏览器版", { exact: true }).waitFor();
   assert(
     (await web.getByRole("button", { name: "重启更新", exact: true }).count()) === 0,
     "browser offered desktop install",
@@ -412,7 +412,11 @@ try {
   await page.evaluate(() =>
     (window as unknown as TestWindow).updateTest.push({ phase: "ready", activity: "idle", activeTasks: 0 }),
   );
-  await page.waitForFunction(() => document.getElementById("update-install-help")?.classList.contains("muted"));
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll<HTMLButtonElement>("button")].some(
+      (button) => button.textContent?.trim() === "重启更新" && !button.disabled,
+    ),
+  );
   if (process.env.SHOTS_DIR) await page.screenshot({ path: join(process.env.SHOTS_DIR, "updates-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(

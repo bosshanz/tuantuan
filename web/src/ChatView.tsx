@@ -145,6 +145,7 @@ export function ChatView(props: {
   const [sendError, setSendError] = useState<{ source: string; reason: string } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
+  const filesPresence = usePresence(filesOpen, 160);
   // Compact replies keep the agent's words in separate bubbles; raw activity stays in details.
   const [compact, setCompact] = useState(() => localStorage.getItem("tuantuan:compact") !== "0");
   const densityAnimation = useRef<Animation | null>(null);
@@ -1121,9 +1122,10 @@ export function ChatView(props: {
           </>
         )}
       </div>
-      {filesOpen && (
+      {filesPresence.mounted && (
         <ConversationFiles
           key={room.id}
+          open={filesOpen}
           roomId={room.id}
           roomName={room.name}
           revision={messages
@@ -2167,7 +2169,7 @@ function SessionSection(props: { room: Room; agent: Agent; view?: SessionView; s
         </dl>
       ) : (
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          {tr("发第一条消息时启动。")}
+          {tr("尚未启动")}
         </p>
       )}
       {list && (
@@ -2214,7 +2216,6 @@ function RoomInfo(props: {
 }) {
   const { t: tr } = useI18n();
   const { room } = props;
-  const displayHelpId = useId();
   const [error, setError] = useState<string | null>(null);
   const replyCount = new Map<string, number>();
   for (const m of props.messages)
@@ -2340,27 +2341,22 @@ function RoomInfo(props: {
             <span>{props.project?.name ?? "—"}</span>
             <span className="muted mono">{room.cwd}</span>
           </a>
-          <p className="muted d-note">{tr("会话里的 Agent 都在这个文件夹里读写文件。")}</p>
         </section>
       )}
       {tab === "info" && (
         <>
           <section className="d-section">
             <label className="chat-display-setting">
-              <span>{tr("精简视图")}</span>
+              <span>{tr("仅显示回复正文")}</span>
               <input
                 type="checkbox"
                 role="switch"
                 className="tg"
                 checked={props.compact}
                 aria-checked={props.compact}
-                aria-describedby={displayHelpId}
                 onChange={(event) => props.onCompactChange(event.target.checked)}
               />
             </label>
-            <p className="muted d-note" id={displayHelpId}>
-              {tr("折叠思考、工具和计划，保留回复正文。应用于本机所有会话。")}
-            </p>
           </section>
           {props.members.length > 1 && (
             <section className="d-section">

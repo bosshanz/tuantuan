@@ -82,10 +82,6 @@ export function SessionChangesPanel(props: {
 
   return (
     <div className="session-changes" aria-busy={loading}>
-      <p className="conversation-files-description">
-        {t("仅显示 Agent 通过 edit 工具报告的改动，不含 shell 或格式化。")}
-        <span>{t("只读汇总，不表示全部磁盘改动。")}</span>
-      </p>
       <div className="conversation-files-list session-changes-list">
         {items.length > 0 && (
           <ul aria-label={t("会话改动列表")}>
@@ -162,6 +158,17 @@ export function SessionChangesPanel(props: {
                             >
                               <header className="session-change-edit-head">
                                 <strong>{edit.senderName}</strong>
+                                {edit.replyStatus !== "done" && (
+                                  <span>
+                                    {t(
+                                      edit.replyStatus === "error"
+                                        ? "回复失败"
+                                        : edit.replyStatus === "cancelled"
+                                          ? "已取消"
+                                          : "已中断",
+                                    )}
+                                  </span>
+                                )}
                                 <time dateTime={new Date(edit.createdAt).toISOString()}>
                                   {new Date(edit.createdAt).toLocaleString(intlLocale(locale), {
                                     month: "short",
@@ -198,7 +205,6 @@ export function SessionChangesPanel(props: {
           <div className="conversation-files-empty">
             <FileDiff size={30} strokeWidth={1.4} aria-hidden="true" />
             <strong>{t("还没有报告的改动")}</strong>
-            <p>{t("Agent 用 edit 工具改文件后，会按路径汇总出现在这里。")}</p>
           </div>
         )}
         {loading && (

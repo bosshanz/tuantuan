@@ -748,7 +748,7 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
       throw new Error("separate reply phases were combined into one bubble");
     await page.getByRole("button", { name: "展开详情面板" }).click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
-    const densitySwitch = page.getByRole("switch", { name: "精简视图", exact: true });
+    const densitySwitch = page.getByRole("switch", { name: "仅显示回复正文", exact: true });
     await densitySwitch.uncheck();
     const densitySettled = () =>
       page.waitForFunction(() =>

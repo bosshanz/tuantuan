@@ -77,7 +77,7 @@ export async function filePreviewSmoke(browser: Browser, base: string, store: St
     const editor = page.getByRole("textbox", { name: "消息输入框", exact: true });
     await editor.fill("预览后保留草稿");
     await page.getByRole("button", { name: "会话文件", exact: true }).click();
-    const list = page.getByRole("dialog", { name: "会话文件", exact: true });
+    const list = page.getByRole("dialog", { name: "会话文件与改动", exact: true });
     const preview = page.locator("dialog.file-preview[open]");
     const open = async (name: string) => {
       await list.getByRole("button", { name: `预览文件 ${name}`, exact: true }).click();

@@ -126,7 +126,6 @@ export function ProvidersPage(props: { meta: Meta; agents: Agent[]; onAgentsChan
       <header className="main-head">
         <div className="title">
           <h2>{t("服务商与用量")}</h2>
-          <div className="sub">{t("保存 API 服务商，一键给 Agent 切换；查看各 Harness 的额度")}</div>
         </div>
         <button type="button" className="btn ghost sm" onClick={() => void load()}>
           <RefreshCw size={14} />
@@ -142,7 +141,6 @@ export function ProvidersPage(props: { meta: Meta; agents: Agent[]; onAgentsChan
           <section className="card">
             <div className="card-head">
               <h3>{t("额度")}</h3>
-              <p>{t("只读本机记录和 Harness 自己的查询结果，不读钥匙串。")}</p>
             </div>
             <div className="card-body usage-grid">
               {!usage && <Loader2 size={16} className="spin" />}
@@ -163,7 +161,6 @@ export function ProvidersPage(props: { meta: Meta; agents: Agent[]; onAgentsChan
             <div className="card-head card-head-row">
               <div>
                 <h3>{t("服务商")}</h3>
-                <p>{t("Key 只存在团团，只注入给用它的 Agent 进程，不改 ~/.claude、~/.codex。")}</p>
               </div>
               <span className="row" style={{ gap: 6 }}>
                 <button type="button" className="btn sm" onClick={() => setImporting(true)}>
@@ -178,11 +175,7 @@ export function ProvidersPage(props: { meta: Meta; agents: Agent[]; onAgentsChan
             </div>
             <div className="card-body prov-list">
               {!items && <Loader2 size={16} className="spin" />}
-              {items?.length === 0 && (
-                <div className="muted prov-empty">
-                  {t("还没有服务商。不选时，Agent 用「本机配置」（你自己的登录或环境变量）。")}
-                </div>
-              )}
+              {items?.length === 0 && <div className="muted prov-empty">{t("还没有服务商")}</div>}
               {items?.map((p) => (
                 <ProviderRow
                   key={p.id}
@@ -265,11 +258,10 @@ function ModelCatalogControls() {
       <div className="card-head card-head-row">
         <div>
           <h3>{t("模型能力")}</h3>
-          <p>{t("仅手动同步时连接 models.dev；失败时保留本地目录。")}</p>
         </div>
         <button type="button" className="btn sm" disabled={busy} onClick={() => void sync()}>
           <RefreshCw size={13} className={busy ? "spin" : ""} />
-          {busy ? t("同步中…") : t("同步模型能力")}
+          {busy ? t("同步中…") : t("从 models.dev 同步")}
         </button>
       </div>
       <div className="card-body prov-catalog-status" aria-live="polite">
@@ -302,7 +294,7 @@ function ModelCatalogControls() {
             {translateError(error)}
           </div>
         )}
-        <span className="help">{t("更新后的能力用于之后启动的 Agent，现有会话不变。")}</span>
+        {synced && <span className="help">{t("更新后的能力用于之后启动的 Agent，现有会话不变。")}</span>}
       </div>
     </section>
   );
@@ -771,27 +763,19 @@ function ProviderDialog(props: {
             <span className="label">{t("Anthropic 兼容地址")}</span>
             <input
               className="input"
-              aria-describedby="provider-anthropic-help"
               placeholder="https://…/anthropic"
               value={d.anthropicBaseUrl}
               onChange={(e) => set("anthropicBaseUrl", e.target.value)}
             />
-            <span className="help" id="provider-anthropic-help">
-              {t("用于 Claude Code / OpenCode / Pi。")}
-            </span>
           </label>
           <label className="field">
             <span className="label">{t("OpenAI 兼容地址")}</span>
             <input
               className="input"
-              aria-describedby="provider-openai-help"
               placeholder="https://…/v1"
               value={d.openaiBaseUrl}
               onChange={(e) => set("openaiBaseUrl", e.target.value)}
             />
-            <span className="help" id="provider-openai-help">
-              {t("用于 OpenCode / Pi / Codex；Codex 需要 Responses。")}
-            </span>
           </label>
           <div className="field">
             <span className="label">{t("接口格式")}</span>
@@ -807,10 +791,12 @@ function ProviderDialog(props: {
                 Responses
               </button>
             </fieldset>
-            <span className="help">
-              {t("仅作用于 OpenAI 兼容地址；须与服务商实际支持的格式一致，选择不会转换接口。")}
-            </span>
-            <span className="help">{t("两个地址都填写时，OpenCode / Pi 优先使用 OpenAI 兼容地址。")}</span>
+            {d.openaiBaseUrl.trim() && d.wireApi === "chat" && (
+              <span className="help">{t("Codex 需要 Responses。")}</span>
+            )}
+            {d.anthropicBaseUrl.trim() && d.openaiBaseUrl.trim() && (
+              <span className="help">{t("两个地址都填写时，OpenCode / Pi 优先使用 OpenAI 兼容地址。")}</span>
+            )}
           </div>
           <div className="field-pair">
             <label className="field">
@@ -839,8 +825,6 @@ function ProviderDialog(props: {
           <details className="prov-model-sources">
             <summary>{t("模型能力来源")}</summary>
             <div className="prov-model-source-fields">
-              <p className="help">{t("填写 models.dev 的完整 provider/model 引用；留空按预设和接口地址自动识别。")}</p>
-              <p className="help">{t("仅关联思考档位、上下文等能力，不会修改请求中的模型 ID 或接口地址。")}</p>
               <ModelSourceInput
                 label={t("主模型能力来源")}
                 model={d.model.trim()}
@@ -871,7 +855,7 @@ function ProviderDialog(props: {
                   }))
                 }
               />
-              {(!d.smallModel.trim() || d.smallModel.trim() === d.model.trim()) && (
+              {d.smallModel.trim() && d.smallModel.trim() === d.model.trim() && (
                 <span className="help">{t("快速模型与主模型相同时，沿用主模型的能力来源。")}</span>
               )}
             </div>
@@ -944,7 +928,7 @@ function ModelSourceInput(props: {
         className="input"
         aria-label={props.label}
         list={listId}
-        placeholder={t("自动识别（留空）")}
+        placeholder={t("provider/model（留空自动识别）")}
         disabled={props.disabled}
         value={props.value}
         maxLength={400}
@@ -1019,7 +1003,9 @@ function CcSwitchDialog(props: { onClose: (imported: number) => void }) {
           {r && !r.found && <div className="muted">{t("没找到 CC Switch 配置（~/.cc-switch）。")}</div>}
           {r?.found && (
             <>
-              <div className="muted">{t("只读取 {path}，不会修改它。", { path: r.source ?? "" })}</div>
+              <div className="muted">
+                {t("只读")} · {r.source}
+              </div>
               <div className="cc-list">
                 {r.entries.map((e) => (
                   <label key={e.key} className="cc-item">

@@ -20,6 +20,8 @@ export interface SessionEditOccurrence {
   seq: number;
   senderId: string | null;
   senderName: string;
+  /** Final status of the reply that reported this completed edit. */
+  replyStatus: "done" | "error" | "cancelled" | "interrupted";
   createdAt: number;
   oldText: string | null;
   newText: string | null;
@@ -146,11 +148,13 @@ export function occurrencesFromMessage(
     seq: number;
     senderId: string | null;
     senderName: string;
+    status: SessionEditOccurrence["replyStatus"] | "streaming";
     createdAt: number;
     timeline: Timeline | null;
   },
   cwd?: string | null,
 ): SessionEditOccurrence[] {
+  if (message.status === "streaming") return [];
   const out: SessionEditOccurrence[] = [];
   for (const event of editsFromTimeline(message.timeline)) {
     const seen = new Set<string>();
@@ -167,6 +171,7 @@ export function occurrencesFromMessage(
         seq: message.seq,
         senderId: message.senderId,
         senderName: message.senderName,
+        replyStatus: message.status,
         createdAt: message.createdAt,
         oldText: diff ? diff.oldText : null,
         newText: diff ? diff.newText : null,

@@ -54,17 +54,17 @@ export function TaskPowerSettings() {
           </span>
           <span className="grow">
             <b>{t("Agent 任务运行中阻止自动休眠")}</b>
-            <span className="muted" id="task-power-help">
-              {supported
-                ? t("有任务运行时阻止系统自动休眠，屏幕仍可熄灭。所有任务结束后恢复。")
-                : t("仅桌面版支持；浏览器无法控制系统休眠。")}
-            </span>
+            {!supported && (
+              <span className="badge" id="task-power-help">
+                {t("仅桌面版")}
+              </span>
+            )}
           </span>
           <input
             type="checkbox"
             className="tg"
             aria-label={t("Agent 任务运行中阻止自动休眠")}
-            aria-describedby="task-power-help"
+            aria-describedby={!supported ? "task-power-help" : undefined}
             checked={enabled}
             disabled={!supported || busy}
             onChange={(event) => void update(event.target.checked)}

@@ -316,6 +316,21 @@ export const coreMessages = {
     en: "About me",
     ja: "自分について",
   },
+  "提供给 Agent": {
+    "zh-TW": "提供給 Agent",
+    en: "Shared with Agents",
+    ja: "Agent に提供",
+  },
+  "职业、偏好和回答方式": {
+    "zh-TW": "職業、偏好和回答方式",
+    en: "Your role, preferences and response style",
+    ja: "役割、好み、希望する回答スタイル",
+  },
+  "Agent 时区": {
+    "zh-TW": "Agent 時區",
+    en: "Agent time zone",
+    ja: "Agent のタイムゾーン",
+  },
   "你的角色、习惯和想要的回答风格。会附在每个 Agent 的说明里，可在 Agent 编辑页单独关掉。": {
     "zh-TW": "你的角色、習慣和想要的回答風格。會附加到每個 Agent 的說明，可在 Agent 編輯頁個別關閉。",
     en: "Your role, preferences, and preferred response style. Added to each Agent’s instructions; you can disable it per Agent.",

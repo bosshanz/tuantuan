@@ -1,6 +1,7 @@
 import type { MessageCatalog } from "./types";
 
 export const attentionMessages = {
+  "{count} 项待处理": { "zh-TW": "{count} 項待處理", en: "{count} pending", ja: "{count}件の未対応項目" },
   该请求已处理或已结束: {
     "zh-TW": "此請求已處理或已結束",
     en: "This request has been handled or has ended",
@@ -18,6 +19,16 @@ export const attentionMessages = {
   请求失败: { "zh-TW": "請求失敗", en: "Request failed", ja: "リクエスト失敗" },
   请求中断: { "zh-TW": "請求中斷", en: "Request interrupted", ja: "リクエスト中断" },
   标为已处理: { "zh-TW": "標為已處理", en: "Mark as handled", ja: "対応済みにする" },
+  从待办移除: { "zh-TW": "從待辦移除", en: "Remove from list", ja: "一覧から削除" },
+  "移除中…": { "zh-TW": "正在移除…", en: "Removing…", ja: "削除中…" },
+  "移除失败：{reason}": {
+    "zh-TW": "移除失敗：{reason}",
+    en: "Could not remove: {reason}",
+    ja: "削除できませんでした：{reason}",
+  },
+  前往会话批准: { "zh-TW": "前往對話批准", en: "Open conversation to approve", ja: "会話で承認" },
+  前往会话回答: { "zh-TW": "前往對話回答", en: "Open conversation to answer", ja: "会話で回答" },
+  查看问题: { "zh-TW": "查看問題", en: "View issue", ja: "問題を確認" },
   查看: { "zh-TW": "檢視", en: "View", ja: "表示" },
   回复中断: { "zh-TW": "回覆中斷", en: "Reply interrupted", ja: "返信が中断されました" },
   未归属项目: { "zh-TW": "未歸屬專案", en: "No project", ja: "プロジェクト未設定" },

@@ -120,6 +120,47 @@ describe("session edit extraction", () => {
 });
 
 describe("session changes API", () => {
+  test("retains completed edits from unsuccessful replies without treating pending tools as edits", async () => {
+    const f = fixture();
+    const ids = new Map<string, string>();
+    for (const status of ["done", "error", "cancelled", "interrupted", "streaming"] as const) {
+      const message = f.insert(
+        {
+          completed: {
+            ...tool(`completed-${status}`, "edit"),
+            locations: [{ path: `${status}.ts` }],
+            content: [{ type: "diff", path: `${status}.ts`, oldText: "before", newText: "after" }],
+          },
+          pending: {
+            ...tool(`pending-${status}`, "edit", "in_progress"),
+            locations: [{ path: `pending-${status}.ts` }],
+          },
+        },
+        { status },
+      );
+      ids.set(status, message.id);
+    }
+
+    expect((await f.list()).items.map((item) => item.path).sort()).toEqual([
+      "cancelled.ts",
+      "done.ts",
+      "error.ts",
+      "interrupted.ts",
+    ]);
+    for (const status of ["done", "error", "cancelled", "interrupted"] as const) {
+      const detail = (await (await f.detail(`${status}.ts`)).json()) as SessionChangeDetailResponse;
+      expect(detail.edits).toHaveLength(1);
+      expect(detail.edits[0]).toMatchObject({ replyStatus: status, messageId: ids.get(status), newText: "after" });
+    }
+
+    // Reopening the store marks the previously streaming reply interrupted;
+    // its completed edit then becomes visible with the original source message.
+    f.reopen();
+    const interrupted = (await (await f.detail("streaming.ts")).json()) as SessionChangeDetailResponse;
+    expect(interrupted.edits[0]).toMatchObject({ replyStatus: "interrupted", messageId: ids.get("streaming") });
+    expect((await f.list()).items.some((item) => item.path.startsWith("pending-"))).toBe(false);
+  });
+
   test("aggregates authors, marks overlap, exposes diffs, and survives reopen", async () => {
     const f = fixture();
     writeFileSync(join(f.cwd, "a.ts"), "base");
@@ -207,6 +248,7 @@ describe("session changes API", () => {
         seq: 1,
         senderId: "a",
         senderName: "A",
+        status: "done",
         createdAt: 1,
         timeline: {
           ...emptyTimeline(),

@@ -53,11 +53,11 @@ export function AboutUpdates() {
   const progress = Math.round(Math.max(0, Math.min(100, status?.progress ?? 0)));
   const phaseLabel = status
     ? {
-        idle: status.checkedAt ? t("已是最新版本") : t("检查是否有新版本可用。"),
+        idle: status.checkedAt ? t("已是最新版本") : t("尚未检查"),
         checking: t("正在检查更新…"),
         available: t("新版本 {version} 可用", { version: status.availableVersion ?? "" }),
         downloading: t("正在下载更新…"),
-        ready: t("更新已下载，可以重启更新。"),
+        ready: t("更新已就绪"),
         installing: t("正在保存工作并重启…"),
         error: t("更新未完成，请重试。"),
       }[status.phase]
@@ -82,20 +82,14 @@ export function AboutUpdates() {
                 <p className="muted">{t("新版本 {version} 可用", { version: status.availableVersion })}</p>
               )}
               {!desktop ? (
-                <p className="muted">{t("应用更新仅桌面版支持。浏览器使用当前服务提供的版本。")}</p>
+                <span className="badge">{t("浏览器版")}</span>
               ) : status?.mode === "disabled" ? (
-                <p className="muted">
-                  {status.reason === "development" ? t("开发版不提供应用更新。") : t("此版本已停用应用更新。")}
-                </p>
+                <p className="muted">{status.reason === "development" ? t("开发版") : t("更新已停用")}</p>
               ) : (
                 <>
                   {status?.mode === "manual" && (
                     <div className="update-help">
-                      <p className="muted">
-                        {status.reason === "homebrew"
-                          ? t("通过 Homebrew 安装，请在终端运行以下命令升级。")
-                          : t("此安装方式需要手动更新。检查新版本后，可打开下载页面安装。")}
-                      </p>
+                      <span className="badge">{status.reason === "homebrew" ? "Homebrew" : t("手动更新")}</span>
                       {status.reason === "homebrew" && <code>brew upgrade --cask tuantuan</code>}
                     </div>
                   )}
@@ -108,13 +102,11 @@ export function AboutUpdates() {
                       <span>{progress}%</span>
                     </div>
                   )}
-                  {status?.mode === "automatic" && status.phase === "ready" && (
-                    <p className={status.activity === "idle" ? "muted" : "warn-text"} id="update-install-help">
+                  {status?.mode === "automatic" && status.phase === "ready" && status.activity !== "idle" && (
+                    <p className="warn-text" id="update-install-help">
                       {status.activity === "busy"
                         ? t("仍有 {count} 项 Agent 任务，结束后才能重启更新。", { count: status.activeTasks })
-                        : status.activity === "unknown"
-                          ? t("无法确认 Agent 任务状态，恢复连接后才能重启更新。")
-                          : t("重启前会保存聊天草稿、引用和阅读位置。")}
+                        : t("无法确认 Agent 任务状态，恢复连接后才能重启更新。")}
                     </p>
                   )}
                   <div className="row update-actions">
@@ -147,7 +139,7 @@ export function AboutUpdates() {
                           type="button"
                           className="btn primary"
                           disabled={working || !canInstall}
-                          aria-describedby="update-install-help"
+                          aria-describedby={status.activity !== "idle" ? "update-install-help" : undefined}
                           onClick={() => desktop && void run(() => desktop.installUpdate())}
                         >
                           <RotateCcw size={15} />
@@ -203,7 +195,6 @@ export function AboutUpdates() {
                 <label className="notify-row">
                   <span className="grow">
                     <b>{t("自动检查更新")}</b>
-                    <span className="muted">{t("后台检查新版本，下载与重启由你决定。")}</span>
                   </span>
                   <input
                     type="checkbox"

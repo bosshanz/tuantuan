@@ -37,6 +37,8 @@
 | `shared/attachments.ts` / `server/attachments.ts` | 附件数量、大小、编码契约；UTF-8 文本内联、二进制原件托管与精确只读路径授权 |
 | `web/src/composerAttachments.ts` / `FileAttachments.tsx` | 按房间串行读取附件、预览与安全下载；草稿仍由 `chatWorkspace.ts` 拥有 |
 | `server/conversation-files.ts` / `shared/conversationFiles.ts` / `shared/filePreview.ts` / `web/src/ConversationFiles.tsx` / `FilePreview.tsx` | 从持久化消息派生会话文件元数据并分页；内容接口重新解析来源、验证项目文件范围；前端按需下载 / 预览，文本预览使用独立的 1 MiB 有界读取与 UTF-8 校验；来源定位复用聊天导航 |
+| `server/session-changes.ts` / `shared/sessionEdits.ts` / `web/src/SessionChanges.tsx` | 从已结束回复的时间线派生 Agent 报告的已完成编辑与历史 diff，详情保留回复状态和来源消息；不推断实际工作区状态 |
+| `server/git-status.ts` / `shared/gitStatus.ts` / `web/src/GitWorkspace.tsx` | 只读查询会话目录范围内的 Git 工作区状态和按需详情；对比结果不归因会话或 Agent，不修改仓库 |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
 | `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
 | `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；直达 / 群主统筹路由、逐轮职责、成员结果收集与群主续轮、单个 Agent 回合、交接预算与定向取消 |
@@ -158,6 +160,12 @@ BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计
 
 `FilePreview` 从独立 JSON 预览接口按需读取文本，与下载复用持久化来源校验及已验证的文件描述符；本地文件最多读取 1 MiB + 1 字节以发现增长，附件查询也限制 base64 投影大小。原件下载继续使用 attachment / octet-stream。Markdown 不执行原始 HTML、不请求图片或跳转链接；源码仅插入转义文本或受控高亮 token。HTML 在 inert template 中解析并移除主动内容和导航属性，插入首置 CSP 后放入空 sandbox 的 iframe，不开放脚本或同源权限；超出 20,000 元素时退回可查看源码的错误状态。超过 100 KiB 或 3,000 行关闭高亮，过多行使用普通文本而不生成逐行 DOM。预览关闭取消请求并恢复列表入口焦点；静态 iframe 获焦点时归还键盘焦点，保留滚轮阅读。`scripts/e2e-file-preview.ts` 验证文档、源码复制、HTML 隔离、错误恢复、焦点和窄屏。
 
+会话改动从持久化的 Agent 消息时间线派生，只纳入回复已结束且工具状态为 completed 的 edit；失败、取消和中断回复中的已完成 edit 同样保留。每条详情带来源消息与该回复状态；执行中或未完成的编辑不进入汇总。历史报告不证明当前文件状态，也不包含 shell 等未报告的修改。相同路径由两个及以上 Agent 报告时标记重叠，并不推断冲突。
+
+Git 工作区状态独立于历史消息，按需从会话工作目录查询，限制在该目录范围，返回仓库根目录相对路径。已暂存 diff 对比 `HEAD`，无提交仓库明确标识并与空树对比；未暂存 diff 对比暂存区，未跟踪文件读取当前内容。按需查看详情前重新核对当前状态，受输出大小限制，二进制、超限、状态变化或读取失败明确返回而不冒充空 diff；未跟踪文件沿用会话文件的受限读取校验。Git 查询禁用外部 diff 和 textconv，不写暂存区或工作树。该视图不是会话变更快照：可包含原有改动及其他会话或外部工具的改动，不做来源归因。
+
+Git 查询先检查已跟踪路径的 attributes 和配置：使用外部 clean / process filter 的文件或会话目录内的已跟踪子模块会使查询明确失败，避免隐式运行程序；已配置但不适用的 filter 禁用后继续。检查与执行之间的外部并发配置或文件替换不受隔离。
+
 `tests/rich-message.test.tsx` 覆盖 Markdown 分流、图片入口与资源语法；`scripts/e2e-rich-media.ts` 接入全量浏览器冒烟，使用持久化测试消息和 ACP 形状的确定性更新验证实际 SVG、主题、预览与流式恢复。测试夹具不代表真实模型输出质量或各 Harness 的图片输入能力。
 
 ## 编排
@@ -214,7 +222,7 @@ Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio M
 ## 取舍
 
 - **每个房间的每个 Agent 一个进程**：即使工作目录相同也不跨房间共享，避免取消超时强杀误伤；代价是更多进程与内存，原有持久化会话恢复保持。
-- **并行不隔离项目文件**：Agent 仍使用该项目目录，未自动分配 worktree 或给文件写入加全局锁；群主分工需明确职责和边界。调度保证派发、结果回流、预算及取消范围，分工质量与最终内容仍取决于模型和用户配置的身份指令。0.2.6 提供只读的会话改动汇总（从消息时间线中 completed edit 的路径 / diff 派生，重叠标出），并在自动回流中附带路径与次数；不引入写锁或 worktree。
+- **并行不隔离项目文件**：Agent 仍使用该项目目录，未自动分配 worktree 或给文件写入加全局锁；群主分工需明确职责和边界。调度保证派发、结果回流、预算及取消范围，分工质量与最终内容仍取决于模型和用户配置的身份指令。只读会话改动汇总从消息时间线中 completed edit 的路径 / diff 派生，另可只读核对 Git 工作区当前状态；两者来源和范围不同，不引入写锁或 worktree。
 - **身份文档不落盘**：不改用户仓库；拒绝了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 方案，因为它们会把登录态也换掉，每个 Agent 要各自登录。
 - **文件路径校验不等于沙箱**：ACP 文件接口将目标及现存父目录解析为真实路径，拒绝工作目录及当前 Skill 只读授权范围外的目标和符号链接逃逸。终端仅校验初始 cwd；命令可使用绝对路径或自行切换目录，Harness 内置工具也按自身沙箱与权限运行。旧文档将这些都称为「限制在 cwd」过宽；当前不提供操作系统隔离，也不防御路径校验后发生的并发文件系统替换。
 - **未做鉴权 / 多用户**：仅适合本机。

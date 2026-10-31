@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { defaultAvatar } from "../../server/avatars";
-import { type GlobalEvent, NOTIFY_KINDS, NOTIFY_LABEL, type NotifyKind } from "../../shared/notify";
+import { type GlobalEvent, NOTIFY_KINDS, NOTIFY_LABEL } from "../../shared/notify";
 import type { Agent, WsEvent } from "./api";
 import { BotAvatar } from "./BotAvatar";
 import { translate, translateError, useI18n } from "./i18n";
@@ -108,13 +108,6 @@ function titleFor(e: Extract<GlobalEvent, { type: "notify" }>): string {
   return e.agentName;
 }
 
-const KIND_HINT: Record<NotifyKind, string> = {
-  reply: "Agent 回复完成时",
-  permission: "Agent 要执行操作、等你批准时",
-  error: "回复失败时",
-  auth: "需要登录或 API Key 时",
-};
-
 export function NotificationsPage() {
   const { t } = useI18n();
   const [s, setS] = useState<NotifySettings>(loadNotifySettings);
@@ -138,13 +131,7 @@ export function NotificationsPage() {
           <section className="card">
             <div className="card-head">
               <h3>{t("系统通知")}</h3>
-              <p>
-                {support === "desktop"
-                  ? t("团团在后台或你没在看那个会话时提醒你。第一次发送时 macOS 会询问权限。")
-                  : support === "web"
-                    ? t("浏览器里用网页通知；第一次发送时浏览器会询问权限。")
-                    : t("这个环境不支持系统通知。")}
-              </p>
+              {support === "none" && <span className="badge">{t("这个环境不支持系统通知。")}</span>}
             </div>
             <div className="card-body notify-list">
               <label className="notify-row">
@@ -169,7 +156,6 @@ export function NotificationsPage() {
                   </span>
                   <span className="grow">
                     <b>{t(NOTIFY_LABEL[k])}</b>
-                    <span className="muted">{t(KIND_HINT[k])}</span>
                   </span>
                   <input
                     type="checkbox"

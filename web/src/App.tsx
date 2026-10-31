@@ -383,6 +383,40 @@ export function App() {
           <span className="spacer" />
           <button
             type="button"
+            className="side-icon side-attention"
+            aria-label={t("需要我处理")}
+            aria-describedby="attention-pending-description"
+            title={t("需要我处理")}
+            onClick={() => setAttentionOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={attentionOpen}
+          >
+            <Inbox size={18} aria-hidden="true" />
+            <span id="attention-pending-description" className="sr-only">
+              {attention.stale
+                ? t("待确认")
+                : attention.pendingCount === null
+                  ? t("加载中…")
+                  : t("{count} 项待处理", { count: attention.pendingCount })}
+            </span>
+            {((attention.pendingCount ?? 0) > 0 || attention.stale || attention.pendingCount === null) && (
+              <span
+                aria-hidden="true"
+                className="side-attention-count"
+                data-active={(attention.pendingCount ?? 0) > 0 || undefined}
+              >
+                {attention.stale && !attention.loading
+                  ? "!"
+                  : attention.pendingCount === null
+                    ? "…"
+                    : attention.pendingCount > 99
+                      ? "99+"
+                      : attention.pendingCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
             className="side-icon"
             aria-label={t("搜索")}
             title={t("搜索（⌘K / Ctrl+K）")}
@@ -400,30 +434,12 @@ export function App() {
             <Plus size={18} />
           </button>
         </div>
-        <button
-          type="button"
-          className="side-attention"
-          onClick={() => setAttentionOpen(true)}
-          aria-haspopup="dialog"
-          title={attention.stale && !attention.loading ? t("列表可能已过期，请刷新后再处理") : undefined}
-        >
-          <Inbox size={17} />
-          <span>{t("需要我处理")}</span>
-          <span className="side-attention-count" data-active={(attention.pendingCount ?? 0) > 0 || undefined}>
-            {attention.loading
-              ? (attention.pendingCount ?? "…")
-              : attention.stale
-                ? "!"
-                : (attention.pendingCount ?? "…")}
-          </span>
-        </button>
         <div className="side-scroll">
           {section === "rooms" ? (
             <>
               {loaded && agents.length === 0 && (
                 <div className="list-empty first-run">
                   <b>{t("还没有 Agent")}</b>
-                  <span>{t("创建一个，就能开始会话。")}</span>
                   <button type="button" className="btn primary sm" onClick={() => go("a/new")}>
                     {t("创建 Agent")}
                   </button>
@@ -697,7 +713,7 @@ export function App() {
           {projectPage && projectPage !== "new" && loaded && !editingProject && (
             <NotFound what={t("项目")} onBack={() => go("c")} />
           )}
-          {section === "rooms" && !detailId && loaded && <Welcome agents={agents} rooms={rooms} meta={meta} go={go} />}
+          {section === "rooms" && !detailId && loaded && <Welcome agents={agents} go={go} />}
           {route[0] === "c" && detailId === "new" && (
             <NewRoom
               key={route[2] ?? "drafts"}
@@ -935,33 +951,8 @@ function ListPane(props: { title: string; action: React.ReactNode; onSearch: () 
   );
 }
 
-function Welcome({
-  agents,
-  rooms,
-  meta,
-  go,
-}: {
-  agents: Agent[];
-  rooms: Room[];
-  meta: Meta | null;
-  go: (p: string) => void;
-}) {
+function Welcome({ agents, go }: { agents: Agent[]; go: (p: string) => void }) {
   const { t } = useI18n();
-  const steps = [
-    {
-      done: agents.some((a) => a.harness),
-      title: t("接入 Harness，绑定到 Agent"),
-      cta: t("Harness 管理"),
-      path: "harness",
-    },
-    {
-      done: rooms.length > 0,
-      title: t("开始一个会话"),
-      cta: t("新建会话"),
-      path: "c/new",
-      needs: agents.length > 0,
-    },
-  ];
   return (
     <>
       <header className="main-head chat-head">
@@ -975,24 +966,17 @@ function Welcome({
             <Sparkles size={24} />
           </div>
           <h2>{agents.length === 0 ? t("欢迎使用团团") : t("选择一个会话")}</h2>
-          <ol className="steps">
-            {steps.map((s, i) => (
-              <li key={s.title} className={`step ${s.done ? "done" : ""}`}>
-                <span className="num">{s.done ? "✓" : i + 1}</span>
-                <span className="step-body">
-                  <div className="step-title">{s.title}</div>
-                </span>
-                <button
-                  type="button"
-                  className={`btn sm ${!s.done && s.needs !== false ? "primary" : ""}`}
-                  disabled={s.needs === false}
-                  onClick={() => go(s.path)}
-                >
-                  {s.cta}
-                </button>
-              </li>
-            ))}
-          </ol>
+          <div className="welcome-actions">
+            <button type="button" className="btn primary" onClick={() => go(agents.length ? "c/new" : "a/new")}>
+              <Plus size={16} />
+              {agents.length ? t("新建会话") : t("创建 Agent")}
+            </button>
+            {!agents.length && (
+              <button type="button" className="btn" onClick={() => go("harness")}>
+                {t("Harness 管理")}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </>
@@ -1004,7 +988,6 @@ function NotFound({ what, onBack }: { what: string; onBack: () => void }) {
   return (
     <div className="empty">
       <h2>{t("找不到{what}", { what })}</h2>
-      <p>{t("它可能已被删除。")}</p>
       <button type="button" className="btn" onClick={onBack}>
         {t("返回列表")}
       </button>

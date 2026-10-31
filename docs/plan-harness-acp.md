@@ -12,7 +12,8 @@
 | M4：更多 Harness 与扩展 | 按需求推进 | 官方 Registry 与明确标注的补充目录；DeepSeek Harness 已在 0.2.2 发布 |
 | 0.2.3–0.2.4：文件与图片附件 | 已发布 | 输入框入口、文件传递、BYOK 与 Grok Build 图片支持、草稿恢复及官网更新 |
 | 0.2.5：预览、搜索、待处理与文件列表 | 已发布 | 暗色图片预览与缩放平移；全历史正文搜索与原消息定位；真实授权、提问和失败的全局待处理列表；会话文件列表与 Markdown / 代码 / 静态 HTML 预览；修复首次引导卡片重叠与窄屏布局 |
-| 0.2.6：会话改动汇总 | 进行中 | 按路径聚合 Agent 报告的 edit、重叠标记与 diff；成员回流附路径次数；多 Agent 会话级用量；文档对账；缺 HOMEBREW_TAP_TOKEN 时跳过同步 |
+| 0.2.6：会话改动汇总 | 已发布 | 按路径聚合 Agent 报告的 edit、重叠标记与 diff；成员回流附路径次数；多 Agent 会话级用量；缺 HOMEBREW_TAP_TOKEN 时跳过同步 |
+| 0.2.7：协作结果核对与界面精简 | 待发布 | 保留失败、取消、中断回复中已完成的编辑及来源状态；只读查看会话目录范围内的 Git 工作区状态和 diff；改进待办与文件核对的键盘、窄屏操作，精简设置说明并将待办入口移至侧栏顶部 |
 
 ## 保留的关键决定
 
@@ -40,6 +41,7 @@
 | 0.2.3 | 文件与图片上传、下载及草稿恢复 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.3) · [PR #23](https://github.com/bosshanz/tuantuan/pull/23) |
 | 0.2.4 | Grok Build 图片支持与 GitHub Pages 站点同步 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.4) |
 | 0.2.5 | 图片与文件预览、聊天搜索、待处理与会话文件列表；首次引导布局修复 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.5) · [PR #24](https://github.com/bosshanz/tuantuan/pull/24) |
+| 0.2.6 | 会话改动汇总、Agent 编辑重叠与 diff、会话用量 | [Release](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.6) · [PR #25](https://github.com/bosshanz/tuantuan/pull/25) |
 
 当前 macOS 使用 **Homebrew**，Apple Developer、Developer ID 签名和公证暂缓。应用内检查可用，但 Homebrew 升级不等于 macOS 原生 OTA 已验证。升级必须等 Agent 全部结束并正常退出；外部 brew 不受应用内安装锁控制。签名要求、更新流程与 tap 配置集中维护在[安装文档](install.md)。
 

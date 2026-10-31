@@ -1,5 +1,5 @@
-import { AlertCircle, ArrowUpRight, Check, HelpCircle, KeyRound, RefreshCw, ShieldCheck, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { AlertCircle, ArrowUpRight, Check, HelpCircle, Inbox, KeyRound, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
   AttentionFailure,
   AttentionItem,
@@ -211,20 +211,84 @@ export function AttentionCenter(props: {
   const { t } = useI18n();
   const { controller: view } = props;
   const dialog = useRef<HTMLDialogElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const itemButtons = useRef(new Map<string, HTMLButtonElement>());
+  const interaction = useRef(0);
+  const [focusRequest, setFocusRequest] = useState<{
+    id: string;
+    candidates: string[];
+    trigger: HTMLButtonElement;
+    interaction: number;
+  } | null>(null);
+  const returnFocus = useRef<Element | null>(null);
   const titleId = useId();
   useEffect(() => {
     const element = dialog.current;
-    if (!element || !props.open) return;
-    const previous = document.activeElement;
-    element.showModal();
-    closeButton.current?.focus();
+    const content = panel.current;
+    if (!element || !content) return;
+    let frame = 0;
+    let timer = 0;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (props.open) {
+      const alreadyOpen = element.open;
+      if (!alreadyOpen) {
+        returnFocus.current = document.activeElement;
+        element.dataset.visible = "false";
+        element.showModal();
+      }
+      content.inert = false;
+      closeButton.current?.focus({ preventScroll: true });
+      if (alreadyOpen || reducedMotion) element.dataset.visible = "true";
+      else
+        frame = requestAnimationFrame(() => {
+          frame = requestAnimationFrame(() => {
+            element.dataset.visible = "true";
+          });
+        });
+    } else if (element.open) {
+      content.inert = true;
+      element.focus({ preventScroll: true });
+      element.dataset.visible = "false";
+      const close = () => {
+        element.close();
+        const previous = returnFocus.current;
+        if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
+        returnFocus.current = null;
+      };
+      if (reducedMotion) close();
+      else timer = window.setTimeout(close, 160);
+    }
     return () => {
-      element.close();
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
     };
   }, [props.open]);
-  const items: AttentionItem[] = [...view.active, ...view.failures];
+  useEffect(() => {
+    const element = dialog.current;
+    return () => {
+      if (element?.open) element.close();
+      const previous = returnFocus.current;
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, []);
+  const items: AttentionItem[] = useMemo(() => [...view.active, ...view.failures], [view.active, view.failures]);
+  useLayoutEffect(() => {
+    if (!focusRequest || items.some((item) => item.id === focusRequest.id)) return;
+    setFocusRequest(null);
+    if (
+      !props.open ||
+      !dialog.current?.open ||
+      panel.current?.inert ||
+      interaction.current !== focusRequest.interaction
+    )
+      return;
+    const active = document.activeElement;
+    if (active !== focusRequest.trigger && active !== document.body && active !== dialog.current) return;
+    const next = focusRequest.candidates.map((candidate) => itemButtons.current.get(candidate)).find(Boolean);
+    (next ?? heading.current)?.focus({ preventScroll: false });
+  }, [focusRequest, items, props.open]);
   const navigate = (item: AttentionItem) => {
     props.onNavigate(
       "askId" in item
@@ -233,14 +297,35 @@ export function AttentionCenter(props: {
     );
     props.onClose();
   };
+  const dismissAndAdvance = async (messageId: string, id: string, trigger: HTMLButtonElement) => {
+    const index = items.findIndex((item) => item.id === id);
+    const candidates = [...items.slice(index + 1), ...items.slice(0, index).reverse()].map((item) => item.id);
+    const currentInteraction = interaction.current;
+    const succeeded = await view.dismiss(messageId);
+    if (!succeeded) return;
+    setFocusRequest({ id, candidates, trigger, interaction: currentInteraction });
+  };
   return (
     <dialog
       ref={dialog}
       className="attention-dialog"
+      tabIndex={-1}
       aria-labelledby={titleId}
+      onPointerDownCapture={() => {
+        interaction.current += 1;
+      }}
+      onKeyDownCapture={() => {
+        interaction.current += 1;
+      }}
       onCancel={(event) => {
         event.preventDefault();
         props.onClose();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          props.onClose();
+        }
       }}
       onClick={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -253,41 +338,43 @@ export function AttentionCenter(props: {
         )
           props.onClose();
       }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") props.onClose();
-      }}
     >
-      <div className="attention-panel">
+      <div className="attention-panel" ref={panel}>
         <header className="attention-header">
           <div className="attention-heading">
-            <h2 id={titleId}>{t("需要我处理")}</h2>
+            <span className="attention-heading-icon" aria-hidden="true">
+              <Inbox size={19} />
+            </span>
+            <h2 id={titleId} ref={heading} tabIndex={-1}>
+              {t("需要我处理")}
+            </h2>
             <span className="attention-count">
               {view.pendingCount === null ? "—" : view.pendingCount}
               {view.stale && view.pendingCount !== null && <span>{t("待确认")}</span>}
             </span>
           </div>
-          <button
-            ref={closeButton}
-            type="button"
-            className="btn ghost icon"
-            aria-label={t("关闭")}
-            onClick={props.onClose}
-          >
-            <X size={18} />
-          </button>
+          <div className="attention-header-actions">
+            <button
+              type="button"
+              className="btn ghost icon"
+              aria-label={t("刷新")}
+              title={t("刷新")}
+              disabled={!view.connected || view.loading}
+              onClick={() => void view.refresh()}
+            >
+              <RefreshCw size={16} className={view.loading ? "attention-spinning" : undefined} aria-hidden="true" />
+            </button>
+            <button
+              ref={closeButton}
+              type="button"
+              className="btn ghost icon"
+              aria-label={t("关闭")}
+              onClick={props.onClose}
+            >
+              <X size={18} />
+            </button>
+          </div>
         </header>
-        <div className="attention-intro">
-          <p>{t("汇总所有项目中等待你的批准、回答和未处理的失败。")}</p>
-          <button
-            type="button"
-            className="btn sm ghost"
-            disabled={!view.connected || view.loading}
-            onClick={() => void view.refresh()}
-          >
-            <RefreshCw size={13} className={view.loading ? "attention-spinning" : undefined} />
-            {t("刷新")}
-          </button>
-        </div>
         {(!view.connected || view.error) && (
           <div className="attention-warning" role="status">
             <AlertCircle size={15} />
@@ -312,7 +399,9 @@ export function AttentionCenter(props: {
           )}
           {!view.loading && !view.stale && view.pendingCount === 0 && (
             <div className="attention-empty">
-              <Check size={24} />
+              <span className="attention-empty-icon">
+                <Check size={22} aria-hidden="true" />
+              </span>
               <p>{t("暂时没有需要你处理的事项")}</p>
             </div>
           )}
@@ -325,45 +414,62 @@ export function AttentionCenter(props: {
                 const error = messageId ? view.dismissErrors[messageId] : null;
                 return (
                   <li className="attention-item" key={item.id} data-kind={item.kind}>
-                    <span className="attention-kind-icon">
-                      <Icon size={17} />
-                    </span>
-                    <div className="attention-item-content">
-                      <div className="attention-item-heading">
-                        <strong>{item.agentName}</strong>
-                        <span className="badge">{t(kindLabels[item.kind])}</span>
-                      </div>
-                      <div className="attention-location">
-                        <span>{item.projectName ?? t("未归属项目")}</span>
-                        <span aria-hidden="true">/</span>
-                        <span>{item.roomName}</span>
-                      </div>
-                      <p className="attention-reason">
-                        {["permission", "question"].includes(item.kind) ? t(item.reason) : translateError(item.reason)}
-                      </p>
+                    <button
+                      type="button"
+                      className="attention-item-main"
+                      ref={(element) => {
+                        if (element) itemButtons.current.set(item.id, element);
+                        else itemButtons.current.delete(item.id);
+                      }}
+                      onClick={() => navigate(item)}
+                    >
+                      <span className="attention-kind-icon" aria-hidden="true">
+                        <Icon size={17} />
+                      </span>
+                      <span className="attention-item-content">
+                        <span className="attention-item-heading">{t(kindLabels[item.kind])}</span>
+                        <span className="attention-reason">
+                          {["permission", "question"].includes(item.kind)
+                            ? t(item.reason)
+                            : translateError(item.reason)}
+                        </span>
+                        <span className="attention-location">
+                          <span>{item.projectName ?? t("未归属项目")}</span>
+                          <span aria-hidden="true">/</span>
+                          <span>{item.roomName}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>{item.agentName}</span>
+                        </span>
+                        <span className="sr-only">
+                          {t(
+                            item.kind === "permission"
+                              ? "前往会话批准"
+                              : item.kind === "question"
+                                ? "前往会话回答"
+                                : "查看问题",
+                          )}
+                        </span>
+                      </span>
+                      <ArrowUpRight className="attention-open-icon" size={17} aria-hidden="true" />
+                    </button>
+                    {messageId && (
                       <div className="attention-actions">
-                        <button type="button" className="btn sm" onClick={() => navigate(item)}>
-                          <ArrowUpRight size={13} />
-                          {t("查看")}
+                        <button
+                          type="button"
+                          className="btn ghost attention-dismiss"
+                          disabled={pending || !view.connected}
+                          onClick={(event) => void dismissAndAdvance(messageId, item.id, event.currentTarget)}
+                        >
+                          <Check size={14} aria-hidden="true" />
+                          {pending ? t("移除中…") : t("从待办移除")}
                         </button>
-                        {messageId && (
-                          <button
-                            type="button"
-                            className="btn sm ghost"
-                            disabled={pending || !view.connected}
-                            onClick={() => void view.dismiss(messageId)}
-                          >
-                            <Check size={13} />
-                            {pending ? t("提交中…") : t("标为已处理")}
-                          </button>
+                        {error && (
+                          <p className="attention-dismiss-error" role="alert">
+                            {t("移除失败：{reason}", { reason: translateError(error) })}
+                          </p>
                         )}
                       </div>
-                      {error && (
-                        <p className="attention-dismiss-error" role="alert">
-                          {t("标记失败：{reason}。请重试。", { reason: translateError(error) })}
-                        </p>
-                      )}
-                    </div>
+                    )}
                   </li>
                 );
               })}
@@ -387,9 +493,6 @@ export function AttentionCenter(props: {
             </div>
           )}
         </div>
-        <footer className="attention-footer">
-          {t("批准和回答请在会话中完成。标为已处理只隐藏失败待办，原消息仍会保留。")}
-        </footer>
       </div>
     </dialog>
   );

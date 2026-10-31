@@ -1,6 +1,7 @@
 import type { MessageCatalog } from "./types";
 
 export const desktopMessages: MessageCatalog = {
+  仅桌面版: { "zh-TW": "僅桌面版", en: "Desktop only", ja: "デスクトップ版のみ" },
   团团: { "zh-TW": "團團", en: "Tuantuan", ja: "Tuantuan" },
   关于团团: { "zh-TW": "關於團團", en: "About Tuantuan", ja: "Tuantuan について" },
   隐藏团团: { "zh-TW": "隱藏團團", en: "Hide Tuantuan", ja: "Tuantuan を隠す" },

@@ -105,7 +105,6 @@ export function LibraryPage({ meta }: { meta: Meta }) {
           <section className="card">
             <div className="card-head">
               <h3>{t("导入")}</h3>
-              <p>{t("从 git 仓库或链接导入到团团自己的目录；本机的 ~/.claude、~/.codex 只读，不会改动。")}</p>
             </div>
             <div className="card-body">
               <div className="lib-import">

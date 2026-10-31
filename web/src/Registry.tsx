@@ -141,11 +141,9 @@ export function RegistrySection(props: { onChanged: () => Promise<void> }) {
         <div className="grow">
           <h3>{t("更多 Agent")}</h3>
           <p>
-            {t("来自")}{" "}
             <a href="https://agentclientprotocol.com/get-started/registry" target="_blank" rel="noreferrer">
               {t("ACP 官方 Registry")}
             </a>{" "}
-            {t("及团团补充目录")}
             {" · "}
             {view ? t("{count} 个", { count: view.agents.filter((a) => !a.curated).length }) : "…"}
             {view &&

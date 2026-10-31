@@ -332,7 +332,7 @@ export async function v025Smoke(
     await openAttention();
     const failureItem = attentionItem(failedRoom.name);
     await failureItem.waitFor();
-    await failureItem.getByRole("button", { name: "查看", exact: true }).click();
+    await failureItem.locator(".attention-item-main").click();
     await row(failed.id).locator(".msg-error").waitFor();
     if ((await row(failed.id).getAttribute("data-flash")) === null)
       throw new Error("v0.2.5 failed message was rendered without consuming the source navigation");
@@ -347,9 +347,14 @@ export async function v025Smoke(
       (response) =>
         response.url() === `${base}/api/attention/${failed.id}/dismiss` && response.request().method() === "POST",
     );
-    await failureItem.getByRole("button", { name: "标为已处理", exact: true }).click();
+    await failureItem.getByRole("button", { name: "从待办移除", exact: true }).click();
     if (!(await dismissed).ok()) throw new Error("v0.2.5 mark as handled failed");
     await failureItem.waitFor({ state: "detached" });
+    await page.waitForFunction(() => {
+      const active = document.activeElement;
+      const next = document.querySelector(".attention-list .attention-item-main");
+      return next ? active?.matches(".attention-list .attention-item-main") : active?.matches(".attention-heading h2");
+    });
     if (
       (await attention()).failures.some((item) => item.messageId === failed.id) ||
       store.getMessage(failed.id)?.status !== "error"
@@ -401,11 +406,11 @@ export async function v025Smoke(
     await permissionItem.waitFor();
     await questionItem.waitFor();
     if (
-      (await permissionItem.getByRole("button", { name: "标为已处理", exact: true }).count()) ||
-      (await questionItem.getByRole("button", { name: "标为已处理", exact: true }).count())
+      (await permissionItem.getByRole("button", { name: "从待办移除", exact: true }).count()) ||
+      (await questionItem.getByRole("button", { name: "从待办移除", exact: true }).count())
     )
       throw new Error("v0.2.5 live requests incorrectly allow manual dismissal");
-    await permissionItem.getByRole("button", { name: "查看", exact: true }).click();
+    await permissionItem.locator(".attention-item-main").click();
     const permissionDialog = page.getByRole("alertdialog");
     await permissionDialog.waitFor();
     if (
@@ -423,7 +428,7 @@ export async function v025Smoke(
     );
     await openAttention();
     await permissionItem.waitFor({ state: "detached" });
-    await questionItem.getByRole("button", { name: "查看", exact: true }).click();
+    await questionItem.locator(".attention-item-main").click();
     const questionDetails = page.locator("details.elicit");
     await questionDetails.locator("form").waitFor({ state: "visible" });
     if (
@@ -467,7 +472,7 @@ export async function v025Smoke(
     const remoteQuestionItem = attentionItem(remoteQuestionRoom.name);
     await remoteQuestionItem.waitFor();
     await shot("v025-attention-unknown-room");
-    await remoteQuestionItem.getByRole("button", { name: "查看", exact: true }).click();
+    await remoteQuestionItem.locator(".attention-item-main").click();
     await page.getByRole("heading", { name: remoteQuestionRoom.name, exact: true }).waitFor();
     await questionDetails.locator("form").waitFor({ state: "visible" });
     if (

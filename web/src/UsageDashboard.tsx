@@ -173,8 +173,10 @@ export function UsageDashboard({ meta, agents }: { meta: Meta; agents: Agent[] }
     <section className="card ud" aria-label={t("Token 统计")}>
       <div className="card-head card-head-row">
         <div>
-          <h3>{t("Token 统计")}</h3>
-          <p>{t("按每轮回复里 Harness 报告的数字统计，不估算。")}</p>
+          <div className="row" style={{ gap: 8 }}>
+            <h3>{t("Token 统计")}</h3>
+            <span className="badge">{t("Harness 上报")}</span>
+          </div>
         </div>
         <fieldset className="segmented" aria-label={t("时间范围")}>
           {RANGES.map((r) => (

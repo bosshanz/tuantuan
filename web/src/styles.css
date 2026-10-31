@@ -1519,19 +1519,17 @@ html[data-desktop] .main-head :is(button, a, input, select, textarea, [role]) { 
 /* ───────── Layout v2 (Grok Bot style): one sidebar, floating title, bubbles, floating composer ───────── */
 .shell, .shell.no-list { grid-template-columns: 272px minmax(0, 1fr) auto; }
 .side { display: flex; flex-direction: column; min-height: 0; background: var(--bg); border-right: 1px solid var(--border); }
-.side-top { display: flex; align-items: center; gap: 6px; height: var(--head-h); padding: 0 12px 0 16px; flex: none; -webkit-app-region: drag; }
+.side-top { display: flex; align-items: center; gap: 4px; height: var(--head-h); padding: 0 12px 0 16px; flex: none; -webkit-app-region: drag; }
 .side-top .spacer { flex: 1; }
 .side-brand { display: inline-flex; }
-.side-icon { -webkit-app-region: no-drag; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); display: inline-grid; place-items: center; box-shadow: var(--shadow-1); transition: background 0.15s var(--ease), transform 0.15s var(--ease); }
+.side-icon { -webkit-app-region: no-drag; width: 44px; height: 44px; flex: none; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); display: inline-grid; place-items: center; box-shadow: var(--shadow-1); transition: background 0.15s var(--ease), transform 0.15s var(--ease); }
 .side-icon:hover { background: var(--surface-hover); color: var(--text); }
 .side-icon:active { transform: scale(0.94); }
 .side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 12px; display: flex; flex-direction: column; gap: 2px; }
-.side-attention { display: flex; align-items: center; gap: 10px; flex: none; margin: 0 8px 8px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text-2); font-size: 13px; text-align: left; }
-.side-attention:hover { background: var(--surface-hover); color: var(--text); }
-.side-attention > svg { flex: none; }
-.side-attention > span:first-of-type { flex: 1; min-width: 0; }
-.side-attention-count { min-width: 22px; padding: 2px 5px; border-radius: 7px; background: var(--surface-2); color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; }
-.side-attention-count[data-active] { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.side-icon.side-attention { position: relative; }
+.side-attention[aria-expanded="true"] { color: var(--accent-text); background: var(--accent-soft); }
+.side-attention-count { position: absolute; top: -3px; right: -3px; min-width: 17px; height: 17px; padding: 0 4px; display: grid; place-items: center; border-radius: 999px; border: 2px solid var(--bg); background: var(--surface-2); color: var(--text-2); font-size: 10px; font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; }
+.side-attention-count[data-active] { color: var(--on-accent); background: var(--accent); }
 .side-room { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 10px; border: none; background: none; border-radius: 14px; text-align: left; min-width: 0; transition: background 0.15s var(--ease); }
 .side-room:hover { background: var(--surface-hover); }
 .side-room[aria-current="page"] { background: color-mix(in srgb, var(--text) 7%, transparent); }
@@ -1929,6 +1927,7 @@ html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region:
 .notify-row[data-off] { opacity: 0.5; }
 .notify-row .grow { flex: 1; display: grid; gap: 2px; min-width: 0; }
 .notify-row .muted { font-size: 12px; }
+.notify-row .badge { justify-self: start; }
 .notify-ico { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--surface-2); color: var(--text-2); flex: none; }
 .tg { appearance: none; flex: none; width: 36px; height: 20px; border-radius: 10px; background: color-mix(in srgb, var(--text) 22%, var(--surface)); box-shadow: inset 0 0 0 1px var(--border-strong); position: relative; cursor: pointer; transition: background-color 150ms var(--ease-out); margin: 0; }
 .tg::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #f7f7f8; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25); transition: transform 150ms var(--ease-out), background-color 150ms var(--ease-out); }
@@ -1993,3 +1992,6 @@ html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region:
 .attachment-download { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 6px; color: inherit; }
 .attachment-download:hover { background: var(--border); }
 .attachment-download[aria-disabled] { pointer-events: none; opacity: 0.5; }
+
+.welcome-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s3); margin-top: var(--s4); }
+.welcome-actions .btn { min-height: 44px; }

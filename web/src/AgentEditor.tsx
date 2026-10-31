@@ -19,16 +19,7 @@ import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import { CUSTOM_FORMATS, DEFAULT_BASE_URL } from "../../server/custom";
 import { providerSupports, supportsProviderProfiles } from "../../shared/providerSupport";
 import { AvatarPicker } from "./AvatarPicker";
-import {
-  type Agent,
-  type AgentInput,
-  api,
-  type CustomInput,
-  IDENTITY_DELIVERY,
-  type McpServer,
-  type Meta,
-  type Project,
-} from "./api";
+import { type Agent, type AgentInput, api, type CustomInput, type McpServer, type Meta, type Project } from "./api";
 import { ChoiceList, OptIcon, Popover } from "./ConfigChips";
 import { describeOptions, type Opt } from "./config";
 import { useFolderPicker } from "./FolderPicker";
@@ -243,12 +234,9 @@ export function AgentEditor(props: {
           </section>
 
           <section className="card">
-            <div className="card-head">
+            <div className="card-head card-head-row">
               <h3>Harness</h3>
-              <p>
-                {t("由哪个编码 Agent 来驱动它；也可选自定义 API（仅对话，无文件/终端）。")}{" "}
-                <a href="#/harness">{t("检测与登录")}</a>
-              </p>
+              <a href="#/harness">{t("检测与登录")}</a>
             </div>
             <div className="card-body">
               <label className="field">
@@ -291,6 +279,11 @@ export function AgentEditor(props: {
                       set("custom", { format: "openai-chat", baseUrl: "", model: "", apiKey: "" });
                   }}
                 />
+              )}
+              {form.harness === "custom" && (
+                <div>
+                  <span className="badge">{t("仅对话（无文件或终端）")}</span>
+                </div>
               )}
               {form.harness === "custom" && form.custom && !form.providerId && (
                 <CustomFields
@@ -336,16 +329,6 @@ export function AgentEditor(props: {
           <section className="card">
             <div className="card-head">
               <h3>{t("身份文档")}</h3>
-              <p>
-                {t("团团独立维护，不写进项目目录。")}
-                {form.harness === "custom"
-                  ? t("作为系统提示发送。")
-                  : harness &&
-                    t("{name}：{delivery}。", {
-                      name: t(harness.name),
-                      delivery: t(IDENTITY_DELIVERY[harness.identity]),
-                    })}
-              </p>
             </div>
             <div className="card-body">
               <textarea
@@ -354,7 +337,7 @@ export function AgentEditor(props: {
                 value={form.identity}
                 onChange={(e) => set("identity", e.target.value)}
                 aria-label={t("身份文档")}
-                placeholder={t("# 角色\n你是团队里的前端工程师……\n\n# 约定\n- 改动前先说明计划")}
+                placeholder={t("角色、职责和工作约定")}
               />
               <label className="profile-optin">
                 <input
@@ -385,7 +368,6 @@ export function AgentEditor(props: {
           <section className="card">
             <div className="card-head">
               <h3>{t("环境变量")}</h3>
-              <p>{t("只给这个 Agent 的 Harness 进程，例如 API Key。每行 KEY=VALUE。")}</p>
             </div>
             <div className="card-body">
               <textarea
@@ -397,7 +379,7 @@ export function AgentEditor(props: {
                   set("env", textToEnv(e.target.value));
                 }}
                 aria-label={t("环境变量")}
-                placeholder="ANTHROPIC_API_KEY=sk-…"
+                placeholder={"KEY=VALUE\nKEY=VALUE"}
                 spellCheck={false}
               />
             </div>
@@ -529,7 +511,6 @@ function McpSection(props: {
       <div className="card-head row" style={{ alignItems: "center" }}>
         <div className="grow">
           <h3>{t("MCP 服务")}</h3>
-          <p>{t("新建 Harness 会话时传给它（session/new 的 mcpServers）。")}</p>
         </div>
         <button type="button" className="btn sm" onClick={() => setAdding((v) => !v)}>
           <Plug size={13} />
@@ -667,9 +648,6 @@ function CustomFields(props: {
           </span>
         )}
       </div>
-      <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-        {t("仅对话；多 Agent 时可交接。无文件与终端。")}
-      </p>
     </>
   );
 }
@@ -982,12 +960,6 @@ function SkillsCard({
             )}
         </ul>
 
-        <div className="muted skill-hint">
-          {t(
-            "原生可用项来自 Harness 已有的全局或项目目录（包括已有链接），不会随此处取消勾选而删除。 可选项仅为这个 Agent 提供按需读取索引；团团不再向共享项目添加技能链接。",
-          )}
-        </div>
-
         {!agentId && <div className="muted skill-hint">{t("保存后可以从链接或文件夹添加 Skill")}</div>}
         {agentId && (
           <div className="skill-add">
@@ -1253,7 +1225,7 @@ function ProviderPick(props: { harness: string; value: string | null; onChange: 
           <span className="prov-icon local-icon">
             <Laptop size={12} />
           </span>
-          <span className="preset-name">{t("本机配置")}</span>
+          <span className="preset-name">{t(props.harness === "custom" ? "直接填写" : "本机配置")}</span>
         </button>
         {fits.map((p) => (
           <button
@@ -1271,11 +1243,6 @@ function ProviderPick(props: { harness: string; value: string | null; onChange: 
         ))}
       </fieldset>
       <span className="help">
-        {props.value
-          ? t("只用于这个 Agent")
-          : props.harness === "custom"
-            ? t("直接填写下面的接口。")
-            : t("沿用你自己的登录和环境变量。")}{" "}
         <a href="#/providers">{t("管理服务商")}</a>
       </span>
     </div>

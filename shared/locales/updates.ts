@@ -1,6 +1,12 @@
 import type { MessageCatalog } from "./types";
 
 export const updateMessages: MessageCatalog = {
+  尚未检查: { "zh-TW": "尚未檢查", en: "Not checked", ja: "未確認" },
+  更新已就绪: { "zh-TW": "更新已就緒", en: "Update ready", ja: "更新の準備完了" },
+  浏览器版: { "zh-TW": "瀏覽器版", en: "Browser", ja: "ブラウザ版" },
+  开发版: { "zh-TW": "開發版", en: "Development build", ja: "開発版" },
+  更新已停用: { "zh-TW": "更新已停用", en: "Updates disabled", ja: "更新は無効" },
+  手动更新: { "zh-TW": "手動更新", en: "Manual updates", ja: "手動更新" },
   "正在恢复上次的工作…": {
     "zh-TW": "正在恢復上次的工作…",
     en: "Restoring your previous work…",

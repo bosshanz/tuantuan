@@ -57,7 +57,7 @@ export async function conversationFilesSmoke(
     return message;
   };
   const row = (name: string) => page.locator(".conversation-file-row").filter({ hasText: name });
-  const dialog = page.getByRole("dialog", { name: "会话文件", exact: true });
+  const dialog = page.getByRole("dialog", { name: "会话文件与改动", exact: true });
   const open = () => page.getByRole("button", { name: "会话文件", exact: true }).click();
   const sourceRow = (id: string) => page.locator(`[data-message-id="${id}"]`);
   try {

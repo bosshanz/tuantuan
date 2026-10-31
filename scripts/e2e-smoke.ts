@@ -14,6 +14,7 @@ import { chatScrollSmoke } from "./e2e-chat-scroll";
 import { chatToolsSmoke } from "./e2e-chat-tools";
 import { conversationFilesSmoke } from "./e2e-conversation-files";
 import { filePreviewSmoke } from "./e2e-file-preview";
+import { gitWorkspaceSmoke } from "./e2e-git-workspace";
 import { onboardingLayoutSmoke } from "./e2e-onboarding-layout";
 import { quoteReturnSmoke } from "./e2e-quote-return";
 import { registryAuthSmoke } from "./e2e-registry-auth";
@@ -461,9 +462,9 @@ try {
 
   await toRooms();
   await page.locator(".side-top").getByRole("button", { name: "新建会话" }).click();
-  // 项目（可选）: defaults to 不选项目 (草稿); styled picker with folder icons.
+  // The default project choice is 草稿; actual projects retain their directory labels.
   const projBtn = page.getByRole("button", { name: "项目", exact: true });
-  await projBtn.filter({ hasText: "不选项目" }).waitFor();
+  await projBtn.filter({ hasText: "草稿" }).waitFor();
   await projBtn.click();
   await page
     .getByRole("listbox", { name: "项目" })
@@ -574,6 +575,7 @@ try {
     shotsDir,
   );
   await filePreviewSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
+  await gitWorkspaceSmoke(browser, `http://localhost:${server.port}`);
   await v025Smoke(
     browser,
     `http://localhost:${server.port}`,
@@ -589,7 +591,7 @@ try {
 
   // No project chosen → 草稿.
   await page.locator(".side-top").getByRole("button", { name: "新建会话" }).click();
-  await projBtn.filter({ hasText: "不选项目" }).waitFor();
+  await projBtn.filter({ hasText: "草稿" }).waitFor();
   await page.getByLabel("会话名称").fill("草稿会话");
   await pick("Bob").check();
   await page.getByRole("button", { name: "创建会话" }).click();
@@ -833,13 +835,13 @@ try {
   if (
     await page
       .locator(".chat-head")
-      .getByRole("button", { name: /精简视图/ })
+      .getByRole("button", { name: /仅显示回复正文/ })
       .count()
   )
     throw new Error("density preference still clutters the conversation toolbar");
   await page.getByRole("button", { name: "展开详情面板" }).click();
   await page.getByRole("tab", { name: "详情", exact: true }).click();
-  const compactSwitch = page.getByRole("switch", { name: "精简视图", exact: true });
+  const compactSwitch = page.getByRole("switch", { name: "仅显示回复正文", exact: true });
   await compactSwitch.dblclick({ delay: 35 });
   if (!(await compactSwitch.isChecked()) || !(await compactSwitch.evaluate((el) => el === document.activeElement)))
     throw new Error("rapid density reversal lost a click or keyboard focus");
@@ -1283,9 +1285,11 @@ for await (const line of createInterface({input:process.stdin})) {
   await dlg.getByRole("button", { name: "Responses", exact: true }).focus();
   await page.keyboard.press("Enter");
   await compatibility.getByText("Codex", { exact: true }).waitFor();
-  await dlg.getByText(/选择不会转换接口/).waitFor();
+  if ((await dlg.getByRole("button", { name: "Responses", exact: true }).getAttribute("aria-pressed")) !== "true")
+    throw new Error("keyboard selection did not activate Responses");
   await dlg.getByRole("button", { name: "Chat Completions", exact: true }).click();
   await compatibility.getByText("Codex", { exact: true }).waitFor({ state: "hidden" });
+  await dlg.getByText("Codex 需要 Responses。", { exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await compatibility.scrollIntoViewIfNeeded();
   const formOverflow = await dlg.evaluate((el) => {
@@ -1512,7 +1516,7 @@ for await (const line of createInterface({input:process.stdin})) {
     const notificationCard = page.locator(".card", { has: page.getByRole("heading", { name: "系统通知" }) });
     const taskPower = page.getByRole("checkbox", { name: "Agent 任务运行中阻止自动休眠" });
     if (!(await taskPower.isDisabled())) throw new Error("browser must not offer system sleep control");
-    await page.getByText("仅桌面版支持；浏览器无法控制系统休眠。").waitFor();
+    await page.getByText("仅桌面版", { exact: true }).waitFor();
     await replyNotify.waitFor();
     await notifyEnabled.uncheck();
     if ((await notificationCard.locator(".notify-row input:disabled").count()) !== 4)

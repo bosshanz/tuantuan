@@ -383,7 +383,7 @@ function requireAvailableFile(item: ConversationFile) {
   throw new ValidationError("文件当前不可用", item.state === "missing" ? 404 : 403);
 }
 
-function openCheckedFile(room: Room, path: string): { fd: number; size: number } {
+export function openCheckedFile(room: Room, path: string): { fd: number; size: number } {
   const local = currentFile(room.cwd, path);
   if (local.state !== "available" || !local.realPath || !local.root)
     throw new ValidationError("文件当前不可用", local.state === "missing" ? 404 : 403);

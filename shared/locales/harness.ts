@@ -145,6 +145,21 @@ export const harnessMessages = {
     en: "Environment variables",
     ja: "環境変数",
   },
+  "角色、职责和工作约定": {
+    "zh-TW": "角色、職責和工作約定",
+    en: "Role, responsibilities and working agreements",
+    ja: "役割、責任、作業上の取り決め",
+  },
+  "仅对话（无文件或终端）": {
+    "zh-TW": "僅對話（無檔案或終端）",
+    en: "Chat only (no files or terminal)",
+    ja: "会話のみ（ファイル・ターミナルなし）",
+  },
+  直接填写: {
+    "zh-TW": "直接填寫",
+    en: "Enter directly",
+    ja: "直接入力",
+  },
   "只给这个 Agent 的 Harness 进程，例如 API Key。每行 KEY=VALUE。": {
     "zh-TW": "僅提供給這個 Agent 的 Harness 程序，例如 API Key。每行一組 KEY=VALUE。",
     en: "Passed only to this Agent's Harness process, e.g. API keys. One KEY=VALUE per line.",
@@ -1872,4 +1887,17 @@ export const harnessMessages = {
     en: "Suggestions are temporarily unavailable. You can enter a full reference manually.",
     ja: "候補を読み込めません。完全な参照を手動で入力できます。",
   },
+  "从 models.dev 同步": { "zh-TW": "從 models.dev 同步", en: "Sync from models.dev", ja: "models.dev から同期" },
+  "Codex 需要 Responses。": {
+    "zh-TW": "Codex 需要 Responses。",
+    en: "Codex requires Responses.",
+    ja: "Codex には Responses が必要です。",
+  },
+  "provider/model（留空自动识别）": {
+    "zh-TW": "provider/model（留空自動識別）",
+    en: "provider/model (auto-detect if blank)",
+    ja: "provider/model（空欄は自動判定）",
+  },
+  "Harness 上报": { "zh-TW": "Harness 回報", en: "Harness-reported", ja: "Harness の報告値" },
+  还没有服务商: { "zh-TW": "還沒有服務商", en: "No providers yet", ja: "プロバイダーはまだありません" },
 } satisfies MessageCatalog;

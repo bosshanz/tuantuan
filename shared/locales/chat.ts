@@ -206,6 +206,8 @@ export const chatMessages = {
     en: "Thinking",
     ja: "思考中",
   },
+  仅显示回复正文: { "zh-TW": "僅顯示回覆正文", en: "Show replies only", ja: "返信本文のみ表示" },
+  尚未启动: { "zh-TW": "尚未啟動", en: "Not started", ja: "未起動" },
   精简视图: { "zh-TW": "精簡檢視", en: "Compact view", ja: "コンパクト表示" },
   "折叠思考、工具和计划，保留回复正文。应用于本机所有会话。": {
     "zh-TW": "收合思考、工具和計畫，保留回覆內文。套用至本機所有對話。",

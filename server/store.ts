@@ -783,7 +783,8 @@ export class Store {
   }
 
   /**
-   * Agent replies that contain at least one completed edit tool.
+   * Finished Agent replies that contain at least one completed edit tool,
+   * including replies that failed, were cancelled, or were interrupted.
    * Timelines are loaded so callers can extract paths and diffs; listing UIs should
    * not put every diff on the wire without an explicit detail request.
    */
@@ -791,7 +792,7 @@ export class Store {
     const rows = this.db
       .query(
         `SELECT * FROM messages m
-         WHERE room_id = ? AND sender_kind = 'agent' AND status = 'done' AND timeline IS NOT NULL
+         WHERE room_id = ? AND sender_kind = 'agent' AND status IN ('done','error','cancelled','interrupted') AND timeline IS NOT NULL
            AND EXISTS (
              SELECT 1 FROM json_each(CASE WHEN json_valid(timeline) THEN timeline ELSE '{}' END, '$.tools') t
              WHERE t.type = 'object' AND json_extract(t.value, '$.status') = 'completed'

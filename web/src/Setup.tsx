@@ -103,7 +103,6 @@ export function SetupPage(props: {
         <PlugZap size={18} />
         <div className="title">
           <h2>{props.onFinish ? t("新手引导") : t("Harness 管理")}</h2>
-          <div className="sub">{t("接入编码 Agent（Harness），再把它们分给团团里的 Agent")}</div>
         </div>
         {props.onFinish && (
           <button type="button" className="btn ghost sm" onClick={() => void props.onFinish?.()}>
@@ -121,11 +120,6 @@ export function SetupPage(props: {
           <section className="card">
             <div className="card-head">
               <h3>{t("1 · 安装与登录")}</h3>
-              <p>
-                {t(
-                  "你本机装的版本优先；没有时一键装到团团自己的目录，不需要管理员权限。登录优先用 Harness 自带流程，不支持时复制命令到终端。",
-                )}
-              </p>
             </div>
             <div className="card-body harness-list">
               {!list && <Loader2 size={16} className="spin" />}
@@ -174,7 +168,11 @@ export function SetupPage(props: {
                       <div className="harness-sub muted">{h.path ?? translateError(h.error ?? "")}</div>
                       {(!h.command || h.installers.length > 0) && <InstallPanel h={h} onInstalled={changed} />}
                       {(h.updateAvailable || h.source === "managed") && <ManagedActions h={h} onChanged={changed} />}
-                      <div className="harness-sub">{t("登录：{auth}", { auth: t(h.auth) })}</div>
+                      {h.command &&
+                        (h.id === "deepseek" ||
+                          (result && result !== "running" && (result.loggedIn !== true || result.needsKey))) && (
+                          <div className="harness-sub">{t("登录：{auth}", { auth: t(h.auth) })}</div>
+                        )}
                       {h.path && h.login && <CopyLine label={t("登录")} text={h.login} />}
                       <HarnessAuth
                         harnessId={h.id}
@@ -257,7 +255,6 @@ export function SetupPage(props: {
           <section className="card">
             <div className="card-head">
               <h3>{t("2 · 绑定到 Agent")}</h3>
-              <p>{t("每个 Agent 由一个 Harness 驱动。")}</p>
             </div>
             <div className="card-body">
               {installed.length > 0 && (

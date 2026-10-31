@@ -16,9 +16,6 @@ export const EMPTY_PROFILE: Profile = {
 };
 
 const ACCENTS = ["#e8462b", "#2f6fed", "#16a34a", "#9333ea", "#db2777", "#0d9488", "#18181b"];
-const ABOUT_HINT =
-  "例如：\n我是前端工程师，主要写 React / TypeScript。\n回答请用中文，先给结论，代码给完整可运行的版本。";
-
 /** Apply appearance to the document: data-theme + accent variables (inline beats the stylesheet). */
 export function applyAppearance(p: Pick<Profile, "theme" | "accent">) {
   const root = document.documentElement;
@@ -136,7 +133,6 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
           <section className="card">
             <div className="card-head">
               <h3>{t("界面语言")}</h3>
-              <p>{t("选择后自动保存并切换界面，不改变聊天内容或 Agent 的回答语言。")}</p>
             </div>
             <div className="card-body">
               <select
@@ -156,7 +152,6 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
           <section className="card">
             <div className="card-head">
               <h3>{t("显示名")}</h3>
-              <p>{t("显示在你自己的消息上。")}</p>
             </div>
             <div className="card-body">
               <input
@@ -171,9 +166,9 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
           </section>
 
           <section className="card">
-            <div className="card-head">
+            <div className="card-head card-head-row">
               <h3>{t("关于我")}</h3>
-              <p>{t("你的角色、习惯和想要的回答风格。会附在每个 Agent 的说明里，可在 Agent 编辑页单独关掉。")}</p>
+              <span className="badge">{t("提供给 Agent")}</span>
             </div>
             <div className="card-body">
               <textarea
@@ -181,7 +176,7 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
                 rows={5}
                 maxLength={4000}
                 aria-label={t("关于我")}
-                placeholder={t(ABOUT_HINT)}
+                placeholder={t("职业、偏好和回答方式")}
                 value={p.about}
                 onChange={(e) => set("about", e.target.value)}
               />
@@ -241,13 +236,12 @@ export function ProfilePage(props: { profile: Profile; onChange: (p: Profile) =>
 
           <section className="card">
             <div className="card-head">
-              <h3>{t("时区")}</h3>
-              <p>{t("附在「关于我」里，Agent 说“今天”“明天”时按这个时区算。")}</p>
+              <h3>{t("Agent 时区")}</h3>
             </div>
             <div className="card-body">
               <select
                 className="input profile-input"
-                aria-label={t("时区")}
+                aria-label={t("Agent 时区")}
                 value={p.timezone}
                 onChange={(e) => set("timezone", e.target.value)}
               >
