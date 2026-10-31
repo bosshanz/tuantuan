@@ -32,15 +32,15 @@
 
 完整清单见[功能一览](docs/features.md)。
 
-## 下载 v0.2.5
+## 下载 v0.2.7
 
-前往 [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.5) 下载桌面版：
+前往 [GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.7) 下载桌面版：
 
 - **macOS**：Apple 芯片（arm64）或 Intel（x64），提供 `.dmg` 和 `.zip`。
 - **Windows**：x64 `.exe` 安装包。
 - **Linux**：x64 `.AppImage`。
 
-桌面版已包含运行时，无需安装 Bun。v0.2.5 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名。详见[安装与签名说明](docs/install.md)。
+桌面版已包含运行时，无需安装 Bun。v0.2.7 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名。详见[安装与签名说明](docs/install.md)。
 
 ### 用 Homebrew 安装（macOS）
 

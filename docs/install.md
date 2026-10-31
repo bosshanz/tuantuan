@@ -2,18 +2,18 @@
 
 下载桌面安装包，或从源码运行（浏览器 + 本机服务）和构建桌面版。
 
-## 下载桌面版 v0.2.5
+## 下载桌面版 v0.2.7
 
-前往 [GitHub Releases v0.2.5](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.5)，按操作系统和芯片选择安装包：
+前往 [GitHub Releases v0.2.7](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.7)，按操作系统和芯片选择安装包：
 
 | 平台 | 安装包 |
 | --- | --- |
-| macOS · Apple 芯片（arm64） | `Tuantuan-0.2.5-mac-arm64.dmg` |
-| macOS · Intel（x64） | `Tuantuan-0.2.5-mac-x64.dmg` |
-| Windows · x64 | `Tuantuan-0.2.5-win-x64.exe` |
-| Linux · x64 | `Tuantuan-0.2.5-linux-x64.AppImage` |
+| macOS · Apple 芯片（arm64） | `Tuantuan-0.2.7-mac-arm64.dmg` |
+| macOS · Intel（x64） | `Tuantuan-0.2.7-mac-x64.dmg` |
+| Windows · x64 | `Tuantuan-0.2.7-win-x64.exe` |
+| Linux · x64 | `Tuantuan-0.2.7-linux-x64.AppImage` |
 
-macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.2.5 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。v0.2.1 起提供「关于与更新」入口。macOS 当前推荐通过 Homebrew 升级，暂不配置 Apple Developer；从 v0.2.0 首次升级也需 Homebrew 或手动安装。
+macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需安装 Bun。v0.2.7 的 macOS 包使用 ad-hoc 签名，未经 Apple 公证；Windows 安装包未代码签名，因此系统可能显示开发者或发布者验证提示。v0.2.1 起提供「关于与更新」入口。macOS 当前推荐通过 Homebrew 升级，暂不配置 Apple Developer；从 v0.2.0 首次升级也需 Homebrew 或手动安装。
 
 - **macOS（Homebrew，推荐）**：`brew install --cask bosshanz/tap/tuantuan`。[这个 tap](https://github.com/bosshanz/homebrew-tap) 安装后会自动清除隔离标记，打开时不会被 Gatekeeper 拦截，升级用 `brew upgrade --cask tuantuan`。
 - **macOS**：打开 `.dmg`，把 **tuantuan.app** 拖进「应用程序」后启动（用 `.zip` 时在访达里双击解压，再移到「应用程序」）。不要直接在磁盘映像里运行。因为没有 Developer ID 和公证，第一次打开会被拦截：
@@ -26,8 +26,8 @@ macOS 也提供对应架构的 `.zip` 包。桌面版已包含运行时，无需
 - **Linux**：给 `.AppImage` 添加可执行权限后运行：
 
   ```bash
-  chmod +x Tuantuan-0.2.5-linux-x64.AppImage
-  ./Tuantuan-0.2.5-linux-x64.AppImage
+  chmod +x Tuantuan-0.2.7-linux-x64.AppImage
+  ./Tuantuan-0.2.7-linux-x64.AppImage
   ```
 
 ## 从源码运行
@@ -56,7 +56,7 @@ bun dev          # 同时启动 API（:8787）和前端（:5173）
 
 ## 桌面版（Electron）
 
-可直接使用 [v0.2.5 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.5)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。DeepSeek 官方预发布版始终按需安装，不捆绑进桌面包。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
+可直接使用 [v0.2.7 安装包](https://github.com/bosshanz/tuantuan/releases/tag/v0.2.7)，也可按下方步骤自行构建。数据在系统的应用数据目录（macOS `~/Library/Application Support/团团`，菜单「帮助 → 打开数据文件夹」），会话文件夹默认在 `~/Tuantuan`。Claude Code 和 Codex 默认不打进安装包，第一次用时在「Harness」页一键从 ACP Registry 下载；打包时设 `TUANTUAN_BUNDLE_ADAPTERS=1` 可改回内置。DeepSeek 官方预发布版始终按需安装，不捆绑进桌面包。你自己装的 Harness 和 CC Switch 设置的环境变量会从登录 shell 读到。
 
 ![桌面版（Linux，Xvfb 截图）](screenshots/desktop-linux.png)
 
