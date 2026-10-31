@@ -14,4 +14,4 @@
 | [常见问题与已知限制](faq.md) | 排障表、已知限制 |
 | [产品规则](product.md) | 产品规则与验收条件 |
 | [架构](architecture.md) | 模块、状态归属、路由机制与取舍 |
-| [ACP 改造计划](plan-harness-acp.md) | 里程碑状态与决策记录 |
+| [版本与 ACP 计划](plan-harness-acp.md) | 0.3.0 范围、实施顺序与验收；既有里程碑和决策记录 |
