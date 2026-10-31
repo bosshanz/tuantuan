@@ -387,6 +387,12 @@ async function boot() {
     if (r.canceled || !r.filePaths[0]) return { cancelled: true };
     return { path: r.filePaths[0] };
   });
+  // Chat links to paths outside the workspace reveal in the file manager; inside paths preview in-app.
+  ipcMain.handle("tuantuan:reveal-path", (_e, path: unknown) => {
+    if (typeof path !== "string" || !path || path.length > 8192 || path.includes("\0")) return false;
+    shell.showItemInFolder(path);
+    return true;
+  });
   const layout = serverLayout({
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
