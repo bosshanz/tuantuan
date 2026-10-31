@@ -11,6 +11,8 @@ import {
   Inbox,
   Info,
   MessagesSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   PlugZap,
   Plus,
   Search,
@@ -61,6 +63,8 @@ export function App() {
     }
   });
   useEffect(() => localStorage.setItem("tuantuan:collapsed", JSON.stringify(collapsed)), [collapsed]);
+  const [sideCollapsed, setSideCollapsed] = useState(() => localStorage.getItem("tuantuan:sidebar-collapsed") === "1");
+  useEffect(() => localStorage.setItem("tuantuan:sidebar-collapsed", sideCollapsed ? "1" : "0"), [sideCollapsed]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -374,11 +378,15 @@ export function App() {
     );
   if (route[0] === "dev" && route[1] === "avatars") return <AvatarShowcase />;
   return (
-    <div className={`shell ${fullPage ? "no-list" : ""}`} data-mobile={mobileView} inert={preparingUpdate}>
+    <div
+      className={`shell ${fullPage ? "no-list" : ""} ${sideCollapsed ? "side-collapsed" : ""}`}
+      data-mobile={mobileView}
+      inert={preparingUpdate}
+    >
       <aside className="side" aria-label={t("侧栏")}>
         <div className="side-top">
           <span className="side-brand" title={t("团团 Tuantuan")}>
-            <BrandMark size={26} />
+            <BrandMark size={22} />
           </span>
           <span className="spacer" />
           <button
@@ -391,7 +399,7 @@ export function App() {
             aria-haspopup="dialog"
             aria-expanded={attentionOpen}
           >
-            <Inbox size={18} aria-hidden="true" />
+            <Inbox size={15} aria-hidden="true" />
             <span id="attention-pending-description" className="sr-only">
               {attention.stale
                 ? t("待确认")
@@ -422,7 +430,7 @@ export function App() {
             title={t("搜索（⌘K / Ctrl+K）")}
             onClick={() => openSearch("all")}
           >
-            <Search size={17} />
+            <Search size={15} />
           </button>
           <button
             type="button"
@@ -431,7 +439,17 @@ export function App() {
             title={agents.length ? t("新建会话") : t("先创建一个 Agent")}
             onClick={() => go(agents.length ? "c/new" : "a/new")}
           >
-            <Plus size={18} />
+            <Plus size={16} />
+          </button>
+          <button
+            type="button"
+            className="side-icon side-collapse-btn"
+            aria-label={t(sideCollapsed ? "展开侧栏" : "收起侧栏")}
+            title={t(sideCollapsed ? "展开侧栏" : "收起侧栏")}
+            aria-expanded={!sideCollapsed}
+            onClick={() => setSideCollapsed((value) => !value)}
+          >
+            {sideCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
           </button>
         </div>
         <div className="side-scroll">
@@ -536,7 +554,7 @@ export function App() {
             <>
               <button type="button" className="side-back" onClick={() => go("c")}>
                 <ChevronLeft size={15} />
-                {t("会话")}
+                <span className="side-back-label">{t("会话")}</span>
               </button>
               <div className="side-section-title">{t("设置")}</div>
               <SideNav
@@ -645,7 +663,7 @@ export function App() {
             onClick={() => go(section === "rooms" ? "a" : "c")}
           >
             <Settings2 size={15} />
-            {t("设置")}
+            <span className="side-settings-label">{t("设置")}</span>
           </button>
           <span
             className={`dot ${connected ? "ok" : "bad"}`}
@@ -886,11 +904,12 @@ function SideNav(props: {
       type="button"
       className="side-nav"
       aria-current={props.current ? "page" : undefined}
+      title={props.label}
       aria-description={props.badge}
       onClick={props.onClick}
     >
       {props.icon}
-      {props.label}
+      <span className="side-nav-label">{props.label}</span>
       {props.badge && <span className="side-update-dot" title={props.badge} aria-hidden />}
     </button>
   );
@@ -909,6 +928,7 @@ function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; unread: nu
       className="side-room"
       aria-current={props.current ? "page" : undefined}
       data-busy={r.busy ? "" : undefined}
+      title={r.name}
       onClick={props.onOpen}
     >
       <span className="side-room-icon">
