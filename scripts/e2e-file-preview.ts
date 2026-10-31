@@ -4,7 +4,7 @@ import type { Browser } from "playwright-core";
 import type { Store } from "../server/store";
 import { emptyTimeline } from "../shared/timeline";
 
-/** Preview real persisted attachments in the built app, including untrusted active content. */
+/** Preview real persisted attachments in the integrated file workbench viewer, including untrusted active content. */
 export async function filePreviewSmoke(browser: Browser, base: string, store: Store, shotsDir?: string) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
   const errors: string[] = [];
@@ -77,36 +77,25 @@ export async function filePreviewSmoke(browser: Browser, base: string, store: St
     const editor = page.getByRole("textbox", { name: "消息输入框", exact: true });
     await editor.fill("预览后保留草稿");
     await page.getByRole("button", { name: "会话文件", exact: true }).click();
-    const list = page.getByRole("dialog", { name: "会话文件与改动", exact: true });
-    const preview = page.locator("dialog.file-preview[open]");
-    const open = async (name: string) => {
-      await list.getByRole("button", { name: `预览文件 ${name}`, exact: true }).click();
-      await preview.waitFor();
+    const workbench = page.getByRole("complementary", { name: "会话文件与改动", exact: true });
+    await workbench.waitFor();
+    const viewer = workbench.locator(".file-viewer-pane");
+    const selectFile = async (name: string) => {
+      await workbench.locator(".conversation-file-row").filter({ hasText: name }).locator(".file-chat-select").click();
     };
-    const close = async () => {
-      await preview.getByRole("button", { name: "关闭文件预览", exact: true }).click();
-      await preview.waitFor({ state: "hidden" });
-      await list.waitFor();
-    };
-    await open("交付说明.md");
-    await preview.locator(".file-preview-markdown h1").filter({ hasText: "项目交付说明" }).waitFor();
-    await preview.locator(".file-preview-markdown table").waitFor();
+
+    await selectFile("交付说明.md");
+    await viewer.locator(".file-preview-markdown h1").filter({ hasText: "项目交付说明" }).waitFor();
+    await viewer.locator(".file-preview-markdown table").waitFor();
     if (shotsDir) {
       mkdirSync(shotsDir, { recursive: true });
       await page.screenshot({ path: join(shotsDir, "file-preview-markdown.png") });
     }
-    await preview.getByRole("button", { name: "源码", exact: true }).click();
-    await preview.locator(".file-preview-source").waitFor();
-    if (!(await preview.locator(".file-preview-source").innerText()).includes("# 项目交付说明"))
+    await viewer.getByRole("button", { name: "源码", exact: true }).click();
+    await viewer.locator(".file-preview-source").waitFor();
+    if (!(await viewer.locator(".file-preview-source").innerText()).includes("# 项目交付说明"))
       throw new Error("Markdown source was not preserved");
-    await page.keyboard.press("Escape");
-    await preview.waitFor({ state: "hidden" });
-    if (
-      !(await list
-        .getByRole("button", { name: "预览文件 交付说明.md", exact: true })
-        .evaluate((el) => el === document.activeElement))
-    )
-      throw new Error("preview did not restore trigger focus");
+
     let failPreviewOnce = true;
     await page.route("**/files/*/preview", async (route) => {
       if (failPreviewOnce) {
@@ -118,18 +107,18 @@ export async function filePreviewSmoke(browser: Browser, base: string, store: St
         });
       } else await route.continue();
     });
-    await open("版本.ts");
-    await preview.getByRole("alert").waitFor();
-    await preview.getByRole("button", { name: "重试预览", exact: true }).click();
-    await preview.locator(".file-preview-source .hljs-keyword").first().waitFor();
+    await selectFile("版本.ts");
+    await viewer.getByRole("alert").waitFor();
+    await viewer.getByRole("button", { name: "重试预览", exact: true }).click();
+    await viewer.locator(".file-preview-source .hljs-keyword").first().waitFor();
     await page.unroute("**/files/*/preview");
-    await preview.getByRole("button", { name: "自动换行", exact: true }).click();
+    await viewer.getByRole("button", { name: "自动换行", exact: true }).click();
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-    await preview.getByRole("button", { name: "复制源码", exact: true }).click();
+    await viewer.getByRole("button", { name: "复制源码", exact: true }).click();
     const copied = await page.evaluate(() => navigator.clipboard.readText());
     if (copied !== code) throw new Error("copy changed original source bytes");
-    await close();
-    await open("周报.html");
+
+    await selectFile("周报.html");
     const frame = page.frameLocator("iframe.file-preview-html");
     await frame.getByRole("heading", { name: "每一次交付，都清晰可见", exact: true }).waitFor();
     if (
@@ -149,7 +138,7 @@ export async function filePreviewSmoke(browser: Browser, base: string, store: St
       bodyStyle.spacing !== "0.1px"
     )
       throw new Error(`HTML authored body styles changed: ${JSON.stringify(bodyStyle)}`);
-    if ((await preview.locator("iframe").getAttribute("sandbox")) !== "")
+    if ((await viewer.locator("iframe").getAttribute("sandbox")) !== "")
       throw new Error("HTML sandbox grants permissions");
     if (await frame.locator("script,iframe,object,embed,base,meta[http-equiv=refresh]").count())
       throw new Error("active HTML elements survived static preview");
@@ -162,27 +151,33 @@ export async function filePreviewSmoke(browser: Browser, base: string, store: St
       throw new Error(`preview navigated or fetched external resources: ${resourceRequests.join(", ")}`);
     if (await page.evaluate(() => "__filePreviewExecuted" in window)) throw new Error("HTML executed in host");
     if (shotsDir) await page.screenshot({ path: join(shotsDir, "file-preview-html.png") });
-    // Escape must close only the top dialog, even after focus entered the sandboxed frame.
-    await page.keyboard.press("Escape");
-    await preview.waitFor({ state: "hidden" });
-    await list.waitFor();
+
     for (const name of ["过大文件.txt", "二进制.txt", "旧编码.txt"]) {
-      await open(name);
-      await preview.getByRole("alert").waitFor();
-      if (!(await preview.getByRole("button", { name: `下载文件 ${name}`, exact: true }).isEnabled()))
+      await selectFile(name);
+      await viewer.getByRole("alert").waitFor();
+      if (!(await viewer.getByRole("button", { name: `下载文件 ${name}`, exact: true }).isEnabled()))
         throw new Error("preview failure removed original download");
-      await close();
     }
+
     await page.setViewportSize({ width: 320, height: 780 });
     await page.emulateMedia({ colorScheme: "dark" });
-    await open("交付说明.md");
-    await preview.locator(".file-preview-markdown h1").waitFor();
-    if (await preview.evaluate((element) => element.scrollWidth > element.clientWidth + 1))
+    await selectFile("交付说明.md");
+    await viewer.locator(".file-preview-markdown h1").waitFor();
+    if (await workbench.evaluate((element) => element.scrollWidth > element.clientWidth + 1))
       throw new Error("file preview horizontally overflows at 320px");
     if (shotsDir) await page.screenshot({ path: join(shotsDir, "file-preview-narrow.png") });
-    await close();
+
+    const backBtn = viewer.getByRole("button", { name: "文件列表", exact: true });
+    await backBtn.click();
+    const mdBtn = workbench
+      .locator(".conversation-file-row")
+      .filter({ hasText: "交付说明.md" })
+      .locator(".file-chat-select");
+    if (!(await mdBtn.evaluate((el) => el === document.activeElement)))
+      throw new Error("returning from narrow preview did not restore row focus");
+
     await page.keyboard.press("Escape");
-    await list.waitFor({ state: "hidden" });
+    await workbench.waitFor({ state: "hidden" });
     if ((await editor.inputValue()) !== "预览后保留草稿") throw new Error("preview changed draft");
     if (errors.length) throw new Error(`file preview renderer errors: ${errors.join("; ")}`);
     console.log(
