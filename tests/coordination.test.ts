@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type * as acp from "@agentclientprotocol/sdk";
 import type { HarnessHost } from "../server/host";
-import { MAX_AGENT_HOPS, Orchestrator } from "../server/orchestrator";
+import { MAX_AGENT_HOPS, Orchestrator, type RoomEvent } from "../server/orchestrator";
 import { Store } from "../server/store";
 import { agentInput, until } from "./helpers";
 
@@ -47,7 +47,8 @@ function fixture(names = ["Lead", "Dev", "Test"]) {
     { mainAgentId: agents[0]?.id },
   );
   const host = new ControlledHost();
-  const scheduler = new Orchestrator(store, host as unknown as HarnessHost, () => {});
+  const events: RoomEvent[] = [];
+  const scheduler = new Orchestrator(store, host as unknown as HarnessHost, (_roomId, event) => events.push(event));
   const agent = (name: string) => {
     const found = agents.find((a) => a.name === name);
     if (!found) throw new Error(`missing agent ${name}`);
@@ -62,7 +63,7 @@ function fixture(names = ["Lead", "Dev", "Test"]) {
   const say = (text: string) => scheduler.postHumanMessage(room.id, "用户", text);
   const replies = (runId: string) =>
     store.recentMessages(room.id, 100).filter((m) => m.runId === runId && m.senderKind === "agent");
-  const f = { store, agents, agent, room, host, scheduler, context, call, handoff, tasks, task, say, replies };
+  const f = { store, agents, agent, room, host, scheduler, events, context, call, handoff, tasks, task, say, replies };
   fixtures.push(f);
   return f;
 }
@@ -77,6 +78,28 @@ afterEach(async () => {
 });
 
 describe("unmentioned group requests are coordinated by their frozen leader", () => {
+  test("publishes and persists the handoff source on the first streaming message", async () => {
+    const f = fixture();
+    const run = f.say("请完成任务");
+    await f.handoff("Dev", "实现功能");
+    f.host.finish(0);
+    await until(() => f.host.calls.length === 2);
+    const devStarts = f.events.filter(
+      (event) => event.type === "message" && event.message.senderId === f.agent("Dev").id,
+    );
+    expect(devStarts).toHaveLength(1);
+    const start = devStarts[0];
+    expect(start?.type).toBe("message");
+    if (start?.type !== "message") throw new Error("missing delegated message");
+    const source = { agentId: f.agent("Lead").id, agentName: "Lead", task: "实现功能" };
+    expect(start.message).toMatchObject({ runId: run.id, status: "streaming", timeline: { handoffFrom: source } });
+    expect(f.store.getMessage(start.message.id)?.timeline?.handoffFrom).toEqual(source);
+    f.host.finish(1);
+    await until(() => f.host.calls.length === 3);
+    f.host.finish(2);
+    await f.scheduler.idle(f.room.id);
+  });
+
   test("a parallel batch settles completely before exactly one leader review", async () => {
     const f = fixture();
     const run = f.say("实现并验证这个功能");

@@ -94,6 +94,12 @@ import {
   migrateRoomsToProjects,
   workspacesRoot,
 } from "./workspace";
+import {
+  handleWorkspaceFileContent,
+  handleWorkspaceFilePreview,
+  handleWorkspaceSearch,
+  handleWorkspaceTree,
+} from "./workspace-files";
 
 const CustomSchema = z.object({
   format: z.enum(CUSTOM_FORMATS),
@@ -1588,9 +1594,17 @@ export function createApp(deps: AppDeps) {
       if (room && sub === "files" && method === "GET") {
         if (!subId && !action) return handleConversationFiles(store, room.id, url);
         if (subId && action === "content" && parts.length === 5)
-          return handleConversationFileContent(store, room.id, subId);
+          return handleConversationFileContent(store, room.id, subId, url);
         if (subId && action === "preview" && parts.length === 5)
           return handleConversationFilePreview(store, room.id, subId);
+      }
+      if (room && sub === "tree" && method === "GET") {
+        if (!subId && !action) return handleWorkspaceTree(store, room.id, url);
+        if (subId === "search" && !action) return handleWorkspaceSearch(store, room.id, url);
+      }
+      if (room && sub === "workspace-file" && method === "GET") {
+        if (subId === "preview" && !action) return handleWorkspaceFilePreview(store, room.id, url);
+        if (subId === "content" && !action) return handleWorkspaceFileContent(store, room.id, url);
       }
       if (room && sub === "changes" && method === "GET") {
         if (!subId && !action) return handleSessionChanges(store, room.id);
@@ -1755,6 +1769,36 @@ export function createApp(deps: AppDeps) {
             original.id,
             undefined,
             files,
+          ),
+          201,
+        );
+      }
+      // Immediate steer is one coordinated operation: validate, record, then stop the selected
+      // chain and run the new instruction first on that agent's lane.
+      if (room && sub === "steer" && !subId && method === "POST") {
+        const m = z
+          .object({
+            senderName: z.string().max(32).default("我"),
+            content: z.string().max(100000),
+            images: z.array(ImageSchema).max(MAX_ATTACHMENT_COUNT).default([]),
+            files: z.array(FileSchema).max(MAX_ATTACHMENT_COUNT).default([]),
+            replyToId: z.string().min(1).max(200).nullable().optional(),
+            replyToPartIndex: z.number().int().nonnegative().safe().optional(),
+            targetTaskId: z.string().min(1).max(200),
+            requestId: z.string().min(1).max(200).optional(),
+          })
+          .parse(await body());
+        return json(
+          orchestrator.steer(
+            room.id,
+            m.senderName,
+            m.content,
+            m.images,
+            m.files,
+            m.replyToId,
+            m.replyToPartIndex,
+            m.targetTaskId,
+            m.requestId,
           ),
           201,
         );

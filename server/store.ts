@@ -417,6 +417,12 @@ export class Store {
     this.db
       .query("UPDATE messages SET status = 'interrupted', error = '服务重启，回复中断' WHERE status = 'streaming'")
       .run();
+    // The task queue is in-memory: an accepted steer that never delivered is interrupted, not replayed.
+    this.db
+      .query(
+        "UPDATE messages SET timeline = json_set(timeline, '$.steer.stage', 'interrupted') WHERE json_extract(timeline, '$.steer.stage') = 'stopping'",
+      )
+      .run();
   }
 
   private migrate() {
@@ -706,6 +712,7 @@ export class Store {
   insertMessage(
     m: Omit<Message, "id" | "seq" | "createdAt" | "timeline" | "error" | "quote"> & {
       id?: string;
+      initialTimeline?: Timeline;
       replyToId?: string | null;
       replyToPartIndex?: number;
     },
@@ -751,7 +758,7 @@ export class Store {
           m.content,
           m.status,
           Date.now(),
-          m.senderKind === "agent" ? JSON.stringify(emptyTimeline()) : null,
+          m.senderKind === "agent" ? JSON.stringify(m.initialTimeline ?? emptyTimeline()) : null,
           quote ? JSON.stringify(quote) : null,
         );
     })();

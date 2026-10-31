@@ -43,6 +43,8 @@ export interface RoomTask {
   text: string;
   /** Present only for a request entrusted to the group's coordinator. */
   coordination?: "lead" | "work" | "review";
+  /** An accepted immediate steer: this queued task starts once the steered chain fully exits. */
+  steer?: { targetTaskId: string; waits: string[] };
 }
 
 export interface RoomState {
@@ -54,7 +56,7 @@ export interface RoomState {
 
 export type { ImageAttachment } from "../shared/attachments";
 
-interface Task extends Omit<RoomTask, "status"> {
+interface Task extends Omit<RoomTask, "status" | "steer"> {
   status: RoomTask["status"] | "done" | "error" | "cancelled";
   hop: number;
   from?: Handoff;
@@ -64,6 +66,8 @@ interface Task extends Omit<RoomTask, "status"> {
   reviewScheduled?: boolean;
   /** Last successful checkpoint from this task; drafts live only in TurnCtx. */
   context?: TaskContext;
+  /** Immediate steer: reserve the agent's lane and start only after every waits task exits. */
+  steer?: { targetTaskId: string; waits: Set<string> };
 }
 
 interface Run {
@@ -104,6 +108,10 @@ interface RoomRuntime {
   runs: Map<string, Run>;
   executions: Map<string, Promise<void>>;
   idleWaiters: (() => void)[];
+  /** One pending steer per steered chain (keyed by the target task id). */
+  steers: Map<string, { targetTaskId: string; messageId: string; taskId: string }>;
+  /** Client request id → target task id, for idempotent steer retries. */
+  steerRequests: Map<string, string>;
 }
 
 /** Owns the task graph and one FIFO execution lane per (room, agent). */
@@ -128,6 +136,65 @@ export class Orchestrator implements ToolProvider {
     replyToPartIndex?: number,
     files: FileAttachment[] = [],
   ): Message {
+    return this.post(roomId, senderName, content, images, files, replyToId, replyToPartIndex, null);
+  }
+
+  /**
+   * Immediate steer: accept the instruction, reserve the target agent's lane, then stop the
+   * selected chain. The new request starts only after every task in that chain fully exits,
+   * ahead of older queued work on the same agent. One pending steer per chain.
+   */
+  steer(
+    roomId: string,
+    senderName: string,
+    content: string,
+    images: ImageAttachment[] = [],
+    files: FileAttachment[] = [],
+    replyToId?: string | null,
+    replyToPartIndex?: number,
+    targetTaskId = "",
+    requestId?: string,
+  ): Message {
+    if (this.closed) throw new ValidationError("服务正在关闭", 503);
+    const rt = this.rooms.get(roomId);
+    // A retry with the same request id returns the already-accepted instruction.
+    const seen = requestId ? rt?.steerRequests.get(requestId) : undefined;
+    const record = seen !== undefined ? rt?.steers.get(seen) : undefined;
+    const recorded = record ? this.store.getMessage(record.messageId) : null;
+    if (recorded) return recorded;
+    const target = targetTaskId ? rt?.tasks.get(targetTaskId) : undefined;
+    if (!rt || !target || !this.activeVisible(rt).has(target.id))
+      throw new ValidationError("目标任务已结束或不存在，未执行引导；可作为普通消息发送", 409);
+    if (target.status === "queued")
+      throw new ValidationError("目标任务尚未开始，可用「取消排队」移除；引导用于正在执行的任务", 409);
+    // A task owns the descendants of its accepted handoffs, exactly like cancelTasks.
+    const chain = new Set([target.id]);
+    for (const task of rt.tasks.values()) if (task.parentTaskId && chain.has(task.parentTaskId)) chain.add(task.id);
+    // One pending steer per chain: chains conflict when they share any task id, so a still-visible
+    // member of an already-steered chain (or an ancestor containing a steered branch) is rejected.
+    for (const existing of rt.steers.values()) {
+      const waits = rt.tasks.get(existing.taskId)?.steer?.waits;
+      if (waits && [...chain].some((id) => waits.has(id)))
+        throw new ValidationError("该任务已有进行中的引导，请等待其完成或先取消该引导", 409);
+    }
+    return this.post(roomId, senderName, content, images, files, replyToId, replyToPartIndex, {
+      rt,
+      target,
+      chain,
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private post(
+    roomId: string,
+    senderName: string,
+    content: string,
+    images: ImageAttachment[],
+    files: FileAttachment[],
+    replyToId: string | null | undefined,
+    replyToPartIndex: number | undefined,
+    steer: { rt: RoomRuntime; target: Task; chain: Set<string>; requestId?: string } | null,
+  ): Message {
     if (this.closed) throw new ValidationError("服务正在关闭", 503);
     if (this.desktopUpdatePrepared) throw new ValidationError("正在安装桌面更新，请稍后再发送消息", 503);
     const room = this.store.getRoom(roomId);
@@ -146,6 +213,15 @@ export class Orchestrator implements ToolProvider {
           : parseMentions(text, members);
     const coordinated = room.kind === "group" && !everyone && initial.length === 0;
     if (coordinated) initial = [room.mainAgentId ?? members[0]?.id].filter((id): id is string => !!id);
+    if (steer) {
+      if (initial.length !== 1)
+        throw new ValidationError("一次只能引导一个目标；多 @ 或 @所有人 的消息仍按原顺序排队", 409);
+      if (initial[0] !== steer.target.agentId)
+        throw new ValidationError(
+          `新指令需要发给 @${steer.target.agentName} 才能引导该任务，请调整或作为普通消息发送`,
+          409,
+        );
+    }
     for (const member of members.filter((member) => initial.includes(member.id))) {
       if (member.harness === CUSTOM_HARNESS && files.some((file) => attachmentText(file) === null))
         throw new ValidationError("自定义 API 仅支持 UTF-8 文本文件，请移除非文本附件或选择原生 Harness");
@@ -166,7 +242,7 @@ export class Orchestrator implements ToolProvider {
       replyToId,
       replyToPartIndex,
     });
-    if (images.length > 0 || files.length > 0)
+    if (images.length > 0 || files.length > 0 || steer)
       msg = this.store.updateReply(id, {
         content: text,
         status: "done",
@@ -176,10 +252,21 @@ export class Orchestrator implements ToolProvider {
             ...images.map((i) => ({ kind: "image" as const, ...i })),
             ...files.map((file) => ({ kind: "file" as const, ...file })),
           ],
+          ...(steer
+            ? {
+                steer: {
+                  taskId: steer.target.id,
+                  runId: steer.target.runId,
+                  agentId: steer.target.agentId,
+                  agentName: steer.target.agentName,
+                  stage: "stopping" as const,
+                },
+              }
+            : {}),
         },
       });
     this.publish(roomId, { type: "message", message: msg });
-    const rt = this.runtime(roomId);
+    const rt = steer?.rt ?? this.runtime(roomId);
     const run: Run = {
       human: msg,
       images,
@@ -197,9 +284,18 @@ export class Orchestrator implements ToolProvider {
     }
     rt.runs.set(id, run);
     // Register every root before starting any turn, so @所有人 and handoff dedup see the whole run.
+    let root: Task | undefined;
     for (const agentId of initial) {
       const task = this.enqueue(rt, run, agentId, null, 1);
       if (run.coordinatorId === agentId) run.rootTaskId = task.id;
+      root = task;
+    }
+    // The lane is reserved before the old chain is asked to stop, so nothing queued jumps in.
+    if (steer && root) {
+      root.steer = { targetTaskId: steer.target.id, waits: steer.chain };
+      rt.steers.set(steer.target.id, { targetTaskId: steer.target.id, messageId: msg.id, taskId: root.id });
+      if (steer.requestId) rt.steerRequests.set(steer.requestId, steer.target.id);
+      this.cancelTasks(roomId, rt, new Set([steer.target.id]), "被新消息打断");
     }
     this.pump(roomId, rt);
     return msg;
@@ -213,7 +309,7 @@ export class Orchestrator implements ToolProvider {
       taskId = [...rt.tasks.values()].find((t) => t.status === "running" || t.status === "cancelling")?.id;
     }
     const task = taskId ? rt.tasks.get(taskId) : undefined;
-    if (!task || !this.visibleTasks(rt).some((t) => t.id === task.id)) return false;
+    if (!task || !this.activeVisible(rt).has(task.id)) return false;
     this.cancelTasks(roomId, rt, new Set([task.id]));
     return true;
   }
@@ -243,7 +339,7 @@ export class Orchestrator implements ToolProvider {
   desktopUpdateActivity(): { activeTasks: number; prepared: boolean } {
     let activeTasks = 0;
     for (const rt of this.rooms.values()) {
-      const ids = new Set(this.visibleTasks(rt).map((task) => task.id));
+      const ids = new Set(this.activeVisible(rt));
       for (const id of rt.executions.keys()) ids.add(id);
       activeTasks += ids.size;
       // A run also owns accepted handoffs and coordinator reviews between executions.
@@ -302,7 +398,14 @@ export class Orchestrator implements ToolProvider {
   private runtime(roomId: string): RoomRuntime {
     let rt = this.rooms.get(roomId);
     if (!rt) {
-      rt = { tasks: new Map(), runs: new Map(), executions: new Map(), idleWaiters: [] };
+      rt = {
+        tasks: new Map(),
+        runs: new Map(),
+        executions: new Map(),
+        idleWaiters: [],
+        steers: new Map(),
+        steerRequests: new Map(),
+      };
       this.rooms.set(roomId, rt);
     }
     return rt;
@@ -333,7 +436,8 @@ export class Orchestrator implements ToolProvider {
     return task.status === "queued" || task.status === "running" || task.status === "cancelling";
   }
 
-  private visibleTasks(rt: RoomRuntime): RoomTask[] {
+  /** Active tasks plus their finished ancestors; what counts as steer/cancel/activity targets. */
+  private activeVisible(rt: RoomRuntime): Set<string> {
     const visible = new Set<string>();
     for (const task of rt.tasks.values()) {
       if (!this.isActive(task)) continue;
@@ -341,6 +445,24 @@ export class Orchestrator implements ToolProvider {
       while (ancestor && !visible.has(ancestor.id)) {
         visible.add(ancestor.id);
         ancestor = ancestor.parentTaskId ? rt.tasks.get(ancestor.parentTaskId) : undefined;
+      }
+    }
+    return visible;
+  }
+
+  private visibleTasks(rt: RoomRuntime): RoomTask[] {
+    const visible = this.activeVisible(rt);
+    // Tasks a pending steer still waits on stay published (with ancestry) until the steer record
+    // is removed, so clients resolve candidate chains against the same task set as acceptance.
+    for (const steer of rt.steers.values()) {
+      const waits = rt.tasks.get(steer.taskId)?.steer?.waits;
+      if (!waits) continue;
+      for (const id of waits) {
+        let ancestor = rt.tasks.get(id);
+        while (ancestor && !visible.has(ancestor.id)) {
+          visible.add(ancestor.id);
+          ancestor = ancestor.parentTaskId ? rt.tasks.get(ancestor.parentTaskId) : undefined;
+        }
       }
     }
     return [...rt.tasks.values()]
@@ -355,6 +477,7 @@ export class Orchestrator implements ToolProvider {
         text: t.text,
         status: this.isActive(t) ? (t.status as RoomTask["status"]) : "waiting",
         ...(t.coordination ? { coordination: t.coordination } : {}),
+        ...(t.steer ? { steer: { targetTaskId: t.steer.targetTaskId, waits: [...t.steer.waits] } } : {}),
       }));
   }
 
@@ -362,17 +485,35 @@ export class Orchestrator implements ToolProvider {
     this.publish(roomId, { type: "room.state", roomId, state: this.state(roomId) });
   }
 
-  private cancelTasks(roomId: string, rt: RoomRuntime, ids: Set<string>) {
+  private cancelTasks(roomId: string, rt: RoomRuntime, ids: Set<string>, reason = "用户取消") {
     // A task owns only descendants created from its accepted handoffs, never sibling roots.
     for (const task of rt.tasks.values()) if (task.parentTaskId && ids.has(task.parentTaskId)) ids.add(task.id);
     for (const id of ids) {
       const task = rt.tasks.get(id);
       if (!task) continue;
-      task.abort.abort(new DOMException("用户取消", "AbortError"));
-      if (task.status === "queued") task.status = "cancelled";
-      else if (task.status === "running") task.status = "cancelling";
+      task.abort.abort(new DOMException(reason, "AbortError"));
+      if (task.status === "queued") {
+        task.status = "cancelled";
+        this.setSteerStage(roomId, rt, task, "interrupted");
+      } else if (task.status === "running") task.status = "cancelling";
     }
     this.pump(roomId, rt);
+  }
+
+  /** Record how far an accepted steer got on its human message; missing or sent stays as recorded. */
+  private setSteerStage(roomId: string, rt: RoomRuntime, task: Task, stage: "sent" | "interrupted") {
+    if (!task.steer) return;
+    const run = rt.runs.get(task.runId);
+    const steer = run?.human.timeline?.steer;
+    if (!run || !steer || steer.stage !== "stopping") return;
+    const timeline = { ...emptyTimeline(), ...run.human.timeline, steer: { ...steer, stage } };
+    run.human = this.store.updateReply(run.human.id, {
+      content: run.human.content,
+      status: "done",
+      timeline,
+    });
+    // Connected clients must see the stage change too, not only the original POST caller.
+    this.publish(roomId, { type: "message", message: run.human });
   }
 
   private pump(roomId: string, rt: RoomRuntime) {
@@ -381,23 +522,40 @@ export class Orchestrator implements ToolProvider {
         .filter((t) => t.status === "running" || t.status === "cancelling" || rt.executions.has(t.id))
         .map((t) => t.agentId),
     );
-    for (const task of rt.tasks.values()) {
-      if (task.status !== "queued" || busy.has(task.agentId)) continue;
+    const start = (task: Task) => {
       const room = this.store.getRoom(roomId);
       const agent = this.store.getAgent(task.agentId);
       const run = rt.runs.get(task.runId);
       if (this.closed || !room || !agent || !room.agentIds.includes(task.agentId) || !run) {
         task.status = "cancelled";
-        continue;
+        this.setSteerStage(roomId, rt, task, "interrupted");
+        return;
       }
       task.status = "running";
       busy.add(task.agentId);
+      this.setSteerStage(roomId, rt, task, "sent");
       const execution = this.execute(room, agent, run, task, rt);
       rt.executions.set(task.id, execution);
       void execution.finally(() => {
         rt.executions.delete(task.id);
         this.pump(roomId, rt);
       });
+    };
+    const steerWaiting = (task: Task) =>
+      !!task.steer &&
+      [...task.steer.waits].some((id) => {
+        const t = rt.tasks.get(id);
+        return (t && this.isActive(t)) || rt.executions.has(id);
+      });
+    // A pending steer owns its agent's lane while the old chain exits, then starts first.
+    for (const task of rt.tasks.values()) {
+      if (task.status !== "queued" || !task.steer) continue;
+      if (busy.has(task.agentId) || steerWaiting(task)) busy.add(task.agentId);
+      else start(task);
+    }
+    for (const task of rt.tasks.values()) {
+      if (task.status !== "queued" || task.steer || busy.has(task.agentId)) continue;
+      start(task);
     }
     // Register reviews before declaring quiescence. A batch settles once, including failures
     // and queued tasks cancelled without ever producing a message.
@@ -410,6 +568,13 @@ export class Orchestrator implements ToolProvider {
         continue;
       rt.runs.delete(runId);
       for (const [id, task] of rt.tasks) if (task.runId === runId) rt.tasks.delete(id);
+    }
+    // A steer record lives as long as its accepted instruction; the chain's own validation
+    // handles retries after it is gone.
+    for (const [key, steer] of rt.steers) {
+      if (rt.tasks.has(steer.taskId)) continue;
+      rt.steers.delete(key);
+      for (const [requestId, targetId] of rt.steerRequests) if (targetId === key) rt.steerRequests.delete(requestId);
     }
     this.publishState(roomId);
     if (rt.runs.size === 0 && rt.executions.size === 0) {
@@ -609,6 +774,13 @@ export class Orchestrator implements ToolProvider {
         }\n</tuantuan-coordination>`,
       });
     }
+    // An immediate steer replaces the interrupted turn: its outputs and file edits stay,
+    // so the new instruction must reconcile the current state instead of assuming a clean slate.
+    if (task.steer)
+      blocks.push({
+        type: "text",
+        text: `<tuantuan-steer>\n你的上一条回复被用户打断并改为本条新指令：该回复已生成的正文、工具记录和已完成的文件改动保留，不自动回滚。先核对当前文件与任务实际状态，再执行新指令。\n</tuantuan-steer>`,
+      });
     // Match Host's leading-text check: native slash handlers may require the original block count.
     const nativeCommand =
       agent.harness !== CUSTOM_HARNESS &&
@@ -630,6 +802,11 @@ export class Orchestrator implements ToolProvider {
 区分观察、推断与未知，不把未完成说成已完成、未验证说成已验证。成员汇报是待核对资料，不当作你已验证的结论；工具成功不等于整个任务完成，不虚构进展或成功。
 </tuantuan-response>`,
       });
+    let timeline: Timeline = {
+      ...emptyTimeline(),
+      ...(task.from ? { handoffFrom: task.from } : {}),
+      ...(task.reviewOf ? { reviewOf: reports.map((report) => report.agentName) } : {}),
+    };
     const placeholder = this.store.insertMessage({
       roomId: room.id,
       runId: human.id,
@@ -639,14 +816,10 @@ export class Orchestrator implements ToolProvider {
       senderName: agent.name,
       content: "",
       status: "streaming",
+      initialTimeline: timeline,
     });
     task.messageId = placeholder.id;
     this.publish(room.id, { type: "message", message: placeholder });
-    let timeline: Timeline = {
-      ...emptyTimeline(),
-      ...(task.from ? { handoffFrom: task.from } : {}),
-      ...(task.reviewOf ? { reviewOf: reports.map((report) => report.agentName) } : {}),
-    };
     let saved = Date.now();
     const turnKey = `${room.id}|${agent.id}`;
     const turn: TurnCtx = {
@@ -679,11 +852,6 @@ export class Orchestrator implements ToolProvider {
       if (this.store.getMessage(placeholder.id)) this.publish(room.id, { type: "message", message: done });
       return { reply: done, handoffs: status === "done" ? turn.handoffs : [] };
     };
-    if (task.from || task.reviewOf)
-      this.publish(room.id, {
-        type: "message",
-        message: this.store.updateReply(placeholder.id, { content: "", status: "streaming", timeline }),
-      });
     try {
       const { stopReason } = await this.host.prompt(
         room,

@@ -22,9 +22,47 @@ describe("Store", () => {
         content: "",
         status: "streaming",
       });
+      const steer = s1.insertMessage({
+        roomId: room.id,
+        runId: "y",
+        hop: 0,
+        senderKind: "human",
+        senderId: null,
+        senderName: "我",
+        content: "引导",
+        status: "done",
+      });
+      const timeline = {
+        parts: [],
+        tools: {},
+        plan: null,
+        steer: { taskId: "t1", runId: "x", agentId: "a1", agentName: "A", stage: "stopping" as const },
+      };
+      s1.updateReply(steer.id, { content: steer.content, status: "done", timeline });
+      const delivered = s1.updateReply(
+        s1.insertMessage({
+          roomId: room.id,
+          runId: "z",
+          hop: 0,
+          senderKind: "human",
+          senderId: null,
+          senderName: "我",
+          content: "已送达引导",
+          status: "done",
+        }).id,
+        {
+          content: "已送达引导",
+          status: "done",
+          timeline: { ...timeline, steer: { ...timeline.steer, stage: "sent" } },
+        },
+      );
       s1.db.close();
       const s2 = new Store(path);
       expect(s2.getMessage(m.id)).toMatchObject({ status: "interrupted", error: "服务重启，回复中断" });
+      // An accepted steer whose task queue did not survive the restart is interrupted, never replayed;
+      // a steer that already reached the agent keeps its recorded stage.
+      expect(s2.getMessage(steer.id)?.timeline?.steer?.stage).toBe("interrupted");
+      expect(s2.getMessage(delivered.id)?.timeline?.steer?.stage).toBe("sent");
       expect(s2.db.query("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
       s2.db.close();
     } finally {
