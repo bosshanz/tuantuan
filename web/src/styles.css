@@ -670,31 +670,60 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 .bot-avatar[data-shape="panda"] .ba-mouth { stroke: var(--fill); }
 .bot-avatar[data-shape="panda"] .ba-dot.ba-mouth { fill: var(--fill); stroke: none; }
 .bot-avatar .ba-eyes line { stroke: #fff; }
-.bot-avatar .ba-root, .bot-avatar .ba-eyes, .bot-avatar .ba-look, .bot-avatar .ba-mouth, .bot-avatar .ba-body { transform-box: fill-box; transform-origin: 50% 50%; }
-.bot-avatar .ba-root { transform-origin: 50% 100%; }
-.bot-avatar[data-anim] .ba-eyes { animation: ba-blink 5.2s var(--blink-delay, 0s) infinite; }
-.bot-avatar[data-anim="full"] .ba-body { animation: ba-breathe 3.6s ease-in-out infinite; }
-.bot-avatar[data-anim="full"][data-expr="idle"] .ba-look { animation: ba-glance 9s calc(var(--blink-delay, 0s) * 2) ease-in-out infinite; }
-.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-root { animation: ba-wobble 1.4s ease-in-out infinite; }
-.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-look { animation: ba-ponder 2.4s ease-in-out infinite; }
-.bot-avatar[data-anim="full"][data-expr="speaking"] .ba-talk { animation: ba-talk 0.28s ease-in-out infinite alternate; }
-.bot-avatar[data-anim="full"][data-expr="speaking"] .ba-body { animation: ba-pulse 0.56s ease-in-out infinite alternate; }
-.bot-avatar[data-anim="full"][data-expr="sad"] .ba-root { animation: ba-shake 0.42s ease-in-out 1; }
-.bot-avatar[data-anim="full"][data-expr="happy"] .ba-root { animation: ba-hop 0.5s var(--ease) 1; }
-.bot-avatar[data-anim="full"] .ba-root[data-hop] { animation: ba-hop 0.5s var(--ease) 1; }
-.bot-avatar[data-anim="full"][data-expr="sleepy"] .ba-body { animation: ba-breathe 6s ease-in-out infinite; }
-.bot-avatar[data-expr="sleepy"] .ba-eyes, .bot-avatar[data-expr="happy"] .ba-eyes { animation: none !important; }
+/*
+ * One coordinated pose per state (single source of truth; table in docs/ui.md).
+ * .ba-pose = resting posture, transitioned between states; .ba-root = the state's loop or one-shot;
+ * .ba-body / .ba-look / .ba-eyes / .ba-talk = secondary motion. Loops need data-anim (live + visible)
+ * and data-tier="full" (>= 28px); "subtle" (20-24px) keeps blink and mouth; "static" (<= 18px) never moves.
+ */
+.bot-avatar :is(.ba-pose, .ba-root, .ba-body, .ba-look, .ba-eyes, .ba-mouth, .ba-face) { transform-box: fill-box; transform-origin: 50% 50%; }
+.bot-avatar :is(.ba-pose, .ba-root) { transform-origin: 50% 100%; }
+.bot-avatar .ba-pose { transition: transform 180ms var(--ease); }
+.bot-avatar .ba-face { animation: ba-face-in 180ms var(--ease) both; }
+.bot-avatar .ba-badge { stroke: var(--bg); stroke-width: 7; }
+.bot-avatar .ba-badge-awaiting { fill: #e8a33a; }
+.bot-avatar .ba-badge-error { fill: var(--danger, #d9534f); }
+
+/* poses */
+.bot-avatar[data-expr="thinking"] .ba-pose { transform: rotate(-6deg); }
+.bot-avatar[data-expr="working"] .ba-pose { transform: translateY(2%) scale(1.02, 0.98); }
+.bot-avatar[data-expr="awaiting"] .ba-pose { transform: translateY(-3%); }
+.bot-avatar[data-expr="sad"] .ba-pose { transform: translateY(4%) scale(1.02, 0.95); }
+.bot-avatar[data-expr="sleepy"] .ba-pose { transform: translateY(3%) scale(1.03, 0.95); }
+.bot-avatar[data-expr="sleepy"] { --fill: color-mix(in srgb, var(--c) 30%, #9aa0a6); }
+
+/* blink: every animated tier except while eyes are closed / curved / focused */
+.bot-avatar[data-anim]:not([data-tier="static"]) .ba-eyes { animation: ba-blink 5.2s var(--blink-delay, 0s) infinite; }
+.bot-avatar:is([data-expr="happy"], [data-expr="sleepy"], [data-expr="working"]) .ba-eyes { animation: none; }
+.bot-avatar[data-anim]:not([data-tier="static"])[data-expr="speaking"] .ba-talk { animation: ba-talk 0.6s ease-in-out infinite alternate; }
+
+/* full tier */
+.bot-avatar[data-anim][data-tier="full"] .ba-body { animation: ba-breathe 4s ease-in-out infinite; }
+.bot-avatar[data-anim][data-tier="full"][data-expr="idle"] .ba-look { animation: ba-glance 9s calc(var(--blink-delay, 0s) * 2) ease-in-out infinite; }
+.bot-avatar[data-anim][data-tier="full"][data-expr="thinking"] .ba-root { animation: ba-ponder 3.2s ease-in-out infinite; }
+.bot-avatar[data-anim][data-tier="full"][data-expr="thinking"] .ba-look { animation: ba-look-up 3.2s ease-in-out infinite; }
+.bot-avatar[data-anim][data-tier="full"][data-expr="working"] .ba-root { animation: ba-nod 0.9s ease-in-out infinite; }
+.bot-avatar[data-anim][data-tier="full"][data-expr="speaking"] .ba-root { animation: ba-bounce 1.2s ease-in-out infinite; }
+.bot-avatar[data-anim][data-tier="full"][data-expr="awaiting"] .ba-root { animation: ba-call 2.6s var(--ease) infinite; }
+.bot-avatar[data-anim][data-tier="full"][data-expr="happy"] .ba-root { animation: ba-hop 0.6s var(--ease) 1; }
+.bot-avatar[data-anim][data-tier="full"][data-expr="sad"] .ba-root { animation: ba-shake 0.45s ease-in-out 1; }
+.bot-avatar[data-tier="full"][data-expr="sleepy"] .ba-body { animation: ba-breathe 6s ease-in-out infinite; }
+.bot-avatar[data-anim][data-tier="full"] .ba-root[data-hop] { animation: ba-hop 0.6s var(--ease) 1; }
+
 .bot-avatar[data-offscreen="true"] *, html[data-tab-hidden] .bot-avatar * { animation-play-state: paused !important; }
+@keyframes ba-face-in { from { opacity: 0; transform: scale(0.9); } }
 @keyframes ba-blink { 0%, 93%, 100% { transform: scaleY(1); } 95.5% { transform: scaleY(0.1); } }
-@keyframes ba-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025, 0.985); } }
+@keyframes ba-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02, 0.985); } }
 @keyframes ba-glance { 0%, 40%, 100% { transform: translateX(0); } 46%, 58% { transform: translateX(4px); } 64%, 74% { transform: translateX(-3px); } }
-@keyframes ba-ponder { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(3px, -2px); } }
-@keyframes ba-wobble { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
-@keyframes ba-talk { from { transform: scaleY(0.45); } to { transform: scaleY(1.15); } }
-@keyframes ba-pulse { from { transform: scale(1); } to { transform: scale(1.03); } }
-@keyframes ba-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
-@keyframes ba-hop { 0% { transform: scale(1, 1); } 25% { transform: scale(1.12, 0.86); } 55% { transform: translateY(-10%) scale(0.92, 1.1); } 80% { transform: translateY(0) scale(1.04, 0.96); } 100% { transform: scale(1, 1); } }
-@media (prefers-reduced-motion: reduce) { .bot-avatar * { animation: none !important; } }
+@keyframes ba-ponder { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg); } }
+@keyframes ba-look-up { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(2px, -2px); } }
+@keyframes ba-nod { 0%, 100% { transform: translateY(0) rotate(0); } 40% { transform: translateY(2.5%) rotate(1.5deg); } }
+@keyframes ba-bounce { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2%) scale(1.015, 0.99); } }
+@keyframes ba-call { 0%, 36%, 100% { transform: translateY(0) rotate(0); } 8% { transform: translateY(-8%) rotate(-6deg); } 16% { transform: translateY(0) rotate(0); } 24% { transform: translateY(-6%) rotate(6deg); } }
+@keyframes ba-talk { from { transform: scaleY(0.5); } to { transform: scaleY(1.1); } }
+@keyframes ba-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 45% { transform: translateX(4px); } 70% { transform: translateX(-2px); } }
+@keyframes ba-hop { 0% { transform: scale(1, 1); } 25% { transform: scale(1.1, 0.88); } 55% { transform: translateY(-10%) scale(0.94, 1.08); } 80% { transform: translateY(0) scale(1.03, 0.97); } 100% { transform: scale(1, 1); } }
+@media (prefers-reduced-motion: reduce) { .bot-avatar * { animation: none !important; transition: none !important; } }
 .showcase { height: 100%; overflow: auto; padding: var(--s6) var(--s8); }
 .showcase-head { display: flex; align-items: center; gap: var(--s4); margin-bottom: var(--s5); }
 .showcase-head h1 { margin: 0; font-size: 24px; }
@@ -1726,8 +1755,6 @@ html[data-desktop="darwin"]:not([data-fullscreen]) .side-brand { display: none; 
 .chat-head .title-pill:not(.static):focus-visible { box-shadow: var(--focus); }
 .chat-head .title-pill:not(.static):active::before { inset: 1px 2px; }
 .title-faces { position: relative; display: grid; flex: none; }
-.title-faces .busy-dot { width: 8px; height: 8px; right: -2px; bottom: -2px; box-shadow: 0 0 0 2px var(--surface); }
-.title-faces:has(.room-stack) .busy-dot { top: -2px; bottom: auto; }
 .title-faces :is(.ba-face-rest, .ba-face-curious) { transition: opacity 180ms var(--ease); }
 .title-faces .ba-face-curious { opacity: 0; }
 .title-pill:focus-visible .ba-face-rest { opacity: 0; }
@@ -2045,18 +2072,9 @@ html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region:
 .chat-display-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 500; }
 .chat-display-setting > span { min-width: 0; }
 .chat-display-setting .segmented { flex: none; }
-/* Sidebar: working avatar, breathing status dot, unread count */
+/* Sidebar: room avatar (shows the live state), unread count */
 .side-room-icon { position: relative; flex: none; display: inline-grid; }
-.busy-dot { position: absolute; right: -1px; bottom: -1px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok, #2a9d63); box-shadow: 0 0 0 2px var(--bg); animation: dot-breathe 1.8s ease-in-out infinite; }
-@keyframes dot-breathe { 0%, 100% { opacity: 0.55; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
 .unread { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 650; display: inline-grid; place-items: center; }
-/* Avatar states: thinking glances side to side, working looks down and bobs, done hops once */
-.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-root { animation: none; }
-.bot-avatar[data-anim="full"][data-expr="thinking"] .ba-look { animation: ba-glance-lr 2.6s ease-in-out infinite; }
-.bot-avatar[data-anim="full"][data-expr="working"] .ba-root { animation: ba-bob 1.3s ease-in-out infinite; }
-.bot-avatar[data-anim="full"][data-expr="working"] .ba-eyes { animation: none; }
-@keyframes ba-glance-lr { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 60% { transform: translateX(4px); } }
-@keyframes ba-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3%); } }
 /* Notifications page */
 .notify-list { display: grid; gap: 2px; }
 .notify-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
@@ -2075,7 +2093,7 @@ html[data-desktop] .side-top :is(button, a, input, [role]) { -webkit-app-region:
 .tg[type="checkbox"]:focus-visible { border-radius: 10px; box-shadow: var(--focus); }
 .tg:disabled { background: color-mix(in srgb, var(--text) 14%, var(--surface)); cursor: not-allowed; }
 .tg:disabled::after { background: color-mix(in srgb, var(--text) 45%, var(--surface)); box-shadow: none; }
-@media (prefers-reduced-motion: reduce) { .busy-dot { animation: none; } .tg, .tg::after { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .tg, .tg::after { transition: none; } }
 /* Message list: soft fade under the floating title pill and above the composer, only when there is more to see */
 .messages-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .messages-wrap > .messages { flex: 1; min-height: 0; padding-bottom: 24px; }

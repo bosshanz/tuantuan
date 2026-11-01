@@ -7,7 +7,8 @@ export type NotifyKind = "reply" | "permission" | "error" | "auth";
 export type GlobalEvent =
   | { type: "attention.changed" }
   | { type: "profile.updated"; profile: import("../server/profile").Profile }
-  | { type: "activity"; roomId: string; busy: boolean }
+  /** `awaiting`: an agent in the room has a pending permission request or question. */
+  | { type: "activity"; roomId: string; busy: boolean; awaiting: boolean }
   | {
       type: "room.preview";
       roomId: string;

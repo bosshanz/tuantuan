@@ -17,7 +17,7 @@ type Action =
 function applyEvent(rooms: Room[], event: RoomListEvent): Room[] {
   return rooms.map((room) => {
     if (room.id !== event.roomId) return room;
-    if (event.type === "activity") return { ...room, busy: event.busy };
+    if (event.type === "activity") return { ...room, busy: event.busy, awaiting: event.awaiting };
     // A withdrawn message must give the sidebar back, including when it was the latest preview.
     if (event.replacesMessageId) {
       if (room.last?.messageId !== event.replacesMessageId) return room;

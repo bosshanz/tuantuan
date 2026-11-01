@@ -147,9 +147,15 @@ describe("room list snapshot versus global events", () => {
   test("an initial slow snapshot replays previews and activity received before the room exists locally", () => {
     let state = roomListReducer(initial([]), { type: "load", id: 1 });
     state = live(state, last({ status: "streaming", content: "" }));
-    state = roomListReducer(state, { type: "event", event: { type: "activity", roomId: "r", busy: true } });
+    state = roomListReducer(state, {
+      type: "event",
+      event: { type: "activity", roomId: "r", busy: true, awaiting: false },
+    });
     state = live(state, last({ content: "finished while loading" }));
-    state = roomListReducer(state, { type: "event", event: { type: "activity", roomId: "r", busy: false } });
+    state = roomListReducer(state, {
+      type: "event",
+      event: { type: "activity", roomId: "r", busy: false, awaiting: false },
+    });
     state = roomListReducer(state, { type: "snapshot", id: 1, rooms: [room()] });
     expect(state.rooms[0]).toMatchObject({ busy: false, last: { text: "finished while loading", status: "done" } });
     expect(state.loading).toBeNull();

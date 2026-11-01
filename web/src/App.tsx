@@ -29,6 +29,7 @@ import { AgentEditor } from "./AgentEditor";
 import { AttentionCenter, useAttention } from "./AttentionCenter";
 import { AvatarShowcase } from "./AvatarShowcase";
 import { type Agent, api, connectWs, type McpServer, type Meta, type Project, type Room, type WsEvent } from "./api";
+import { roomAvatarState } from "./avatarState";
 import { BrandMark } from "./BrandMark";
 import { type ChatNavigationTarget, ChatView } from "./ChatView";
 import { CommandPalette } from "./CommandPalette";
@@ -936,8 +937,7 @@ function RoomRow(props: { r: Room; agents: Agent[]; current: boolean; unread: nu
       onClick={props.onOpen}
     >
       <span className="side-room-icon">
-        <RoomIcon room={r} agents={props.agents} size={40} busy={!!r.busy} />
-        {r.busy && <span className="busy-dot" title={t("正在回复")} />}
+        <RoomIcon room={r} agents={props.agents} size={40} state={roomAvatarState(r)} />
       </span>
       <span className="li-body">
         <span className="li-title">{r.name}</span>

@@ -214,6 +214,11 @@ export function createApp(deps: AppDeps) {
   const dataDir =
     deps.dbPath === ":memory:" ? join(tmpdir(), `tuantuan-data-${process.pid}`) : dirname(resolve(deps.dbPath));
   let server: Server<WsData> | null = null;
+  // Sidebar activity: a running chain, and whether an agent is waiting on the user.
+  const roomActivity = (roomId: string) => ({
+    busy: !!orchestrator.state(roomId).activeRunId,
+    awaiting: host.pendingAsks(roomId).length > 0 || host.pendingElicitations(roomId).length > 0,
+  });
   const publishAll = (e: GlobalEvent) => server?.publish("all", JSON.stringify(e));
   const publish = (roomId: string, event: RoomEvent) => {
     server?.publish(`room:${roomId}`, JSON.stringify(event));
@@ -223,8 +228,9 @@ export function createApp(deps: AppDeps) {
       (event.type === "message" && event.message.senderKind === "agent" && event.message.status !== "streaming")
     )
       publishAll({ type: "attention.changed" });
-    if (event.type === "room.state") publishAll({ type: "activity", roomId, busy: !!event.state.activeRunId });
-    else if (event.type === "message") {
+    if (event.type === "room.state" || event.type === "permission" || event.type === "elicitation")
+      publishAll({ type: "activity", roomId, ...roomActivity(roomId) });
+    if (event.type === "message") {
       const last = messagePreview(event.message);
       if (last) publishAll({ type: "room.preview", roomId, last });
       else if (messageWithdrawn(event.message.timeline))
@@ -1588,8 +1594,7 @@ export function createApp(deps: AppDeps) {
     }
 
     if (resource === "rooms") {
-      if (!id && method === "GET")
-        return json(store.listRooms().map((r) => ({ ...r, busy: !!orchestrator.state(r.id).activeRunId })));
+      if (!id && method === "GET") return json(store.listRooms().map((r) => ({ ...r, ...roomActivity(r.id) })));
       if (!id && method === "POST") {
         const r = RoomInputSchema.parse(await body());
         const projectId = r.projectId || ensureDrafts(store).id;
