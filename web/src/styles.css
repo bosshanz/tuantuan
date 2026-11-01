@@ -314,17 +314,6 @@ kbd.combo { gap: 3px; }
 .pop-item[aria-selected="true"], .pop-item:hover { background: var(--accent-soft); }
 
 /* ---------- immediate steer (立即引导) ---------- */
-.steer-pop { max-height: min(300px, 50dvh); overflow-y: auto; min-width: 280px; }
-.steer-option { flex-direction: column; align-items: stretch; gap: 2px; }
-.steer-option-head { display: flex; align-items: center; gap: 8px; }
-.steer-option-head .muted { margin-left: auto; flex: none; font-size: 11px; }
-.steer-option-scope { font-size: 11.5px; }
-.steer-option-task { font-size: 11px; }
-.composer-steer { align-items: center; }
-.composer-steer > svg { flex: none; color: var(--accent); }
-.composer-steer-text { flex: 1; min-width: 0; font-size: var(--fs-xs); line-height: 1.5; overflow-wrap: anywhere; }
-.composer-steer-warn { color: var(--warn); }
-.composer-steer-open { gap: 4px; color: var(--accent-text); }
 .msg-steer { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; font-size: 11.5px; color: var(--text-3); }
 .msg-steer > svg { color: var(--accent); }
 .msg-steer[data-stage="interrupted"] { color: var(--warn); }
@@ -1924,7 +1913,7 @@ fieldset.segmented { padding: 2px; min-inline-size: 0; }
 .composer-box .send-btn:disabled { background: var(--surface-2); color: var(--text-3); }
 .send-ico { grid-area: 1 / 1; display: grid; place-items: center; transition: opacity 140ms var(--ease-out), transform 140ms var(--ease-out); }
 .send-ico-stop i { display: block; width: 10px; height: 10px; border-radius: 2.5px; background: currentColor; }
-.send-btn[data-mode="send"] .send-ico-stop, .send-btn[data-mode="steer"] .send-ico-stop, .send-btn[data-mode="stop"] .send-ico-arrow { opacity: 0; transform: scale(0.6); }
+.send-btn[data-mode="send"] .send-ico-stop, .send-btn[data-mode="stop"] .send-ico-arrow { opacity: 0; transform: scale(0.6); }
 .send-btn[data-mode="stop"] .send-ico-stop i { animation: stop-breathe 1.6s ease-in-out infinite; }
 @keyframes stop-breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.85; transform: scale(0.85); } }
 @media (prefers-reduced-motion: reduce) { .send-btn[data-mode="stop"] .send-ico-stop i { animation: none; } .send-ico { transition: none; } }

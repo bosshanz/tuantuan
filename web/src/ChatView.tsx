@@ -13,6 +13,7 @@ import {
   History,
   Loader2,
   PanelRight,
+  Pencil,
   Pin,
   Plus,
   RotateCcw,
@@ -148,6 +149,7 @@ export function ChatView(props: {
   const pendingRetries = useRef(new Set<string>());
   const [cancellations, setCancellations] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingCancellations = useRef(new Set<string>());
+  const pendingPromotes = useRef(new Set<string>());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [jumpError, setJumpError] = useState<{ source: string; reason?: string } | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<ChatNavigationTarget | null>(null);
@@ -163,10 +165,8 @@ export function ChatView(props: {
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<{ source: string; reason: string } | null>(null);
-  // An armed immediate steer: pick one running/waiting chain, then the send button commits it.
-  const [steerTarget, setSteerTarget] = useState<RoomState["tasks"][number] | null>(null);
-  const [steerOpen, setSteerOpen] = useState(false);
-  const steerRequest = useRef<string | null>(null);
+  // Queued messages can be promoted in place: 立即发送 turns the queued task into a steer.
+  const [promotes, setPromotes] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [filesJump, setFilesJump] = useState<{ path: string; tick: number } | null>(null);
@@ -510,7 +510,7 @@ export function ChatView(props: {
 
   const tasks = state.tasks;
   // Steer candidates: running/cancelling chains plus waiting coordinators — never queued-only
-  // tasks (those use 取消排队) and never a chain overlapping one that already has a pending steer.
+  // tasks (those use 编辑消息) and never a chain overlapping one that already has a pending steer.
   const steerOptions = useMemo(() => {
     const claimed = new Set(tasks.flatMap((task) => task.steer?.waits ?? []));
     const options: { task: (typeof tasks)[number]; stopped: number }[] = [];
@@ -521,38 +521,13 @@ export function ChatView(props: {
     }
     return options;
   }, [tasks]);
-  // The instruction must route to exactly the steered agent, mirroring the server's rules.
-  const steerMismatch = useMemo(() => {
-    if (!steerTarget) return null;
-    const text = draft.trim();
-    const everyone = room.kind === "group" && mentionsEveryone(text);
-    const named =
-      room.kind === "dm"
-        ? room.agentIds.slice(0, 1)
-        : everyone
-          ? members.map((agent) => agent.id)
-          : parseMentions(text, members);
-    const initial =
-      room.kind === "group" && !everyone && named.length === 0
-        ? [room.mainAgentId ?? members[0]?.id].filter((id): id is string => !!id)
-        : named;
-    if (initial.length !== 1) return "multi";
-    return initial[0] === steerTarget.agentId ? null : "other";
-  }, [steerTarget, draft, room.kind, room.agentIds, room.mainAgentId, members]);
-  // A finished or newly-claimed chain can no longer be steered: keep the draft and offer ordinary send.
-  useEffect(() => {
-    if (!steerTarget || steerOptions.some((option) => option.task.id === steerTarget.id)) return;
-    setSteerTarget(null);
-    steerRequest.current = null;
-    const chain = steerChain(steerTarget, tasks);
-    const claimed = tasks.some((task) => task.steer?.waits.some((id) => chain.has(id)));
-    setSendError({
-      source: claimed
-        ? "该任务已有进行中的引导，请等待其完成或先取消该引导"
-        : "引导目标已结束，未执行引导；可作为普通消息发送",
-      reason: "",
-    });
-  }, [tasks, steerTarget, steerOptions]);
+  // A queued message's steer target is whatever chain currently owns its agent's lane.
+  const laneSteerTarget = useCallback(
+    (task: RoomState["tasks"][number]) =>
+      steerOptions.find((option) => option.task.agentId === task.agentId && option.task.status !== "waiting")?.task ??
+      steerOptions.find((option) => option.task.agentId === task.agentId)?.task,
+    [steerOptions],
+  );
 
   const send = async () => {
     const content = draft.trim();
@@ -564,7 +539,6 @@ export function ChatView(props: {
       (!content && images.length === 0 && files.length === 0)
     )
       return;
-    const steering = steerTarget && !steerMismatch ? steerTarget : null;
     // Sending resumes the tail now; a later upward gesture can revoke it before the HTTP reply arrives.
     followLatest();
     sendingRef.current = true;
@@ -574,18 +548,15 @@ export function ChatView(props: {
     const attachedFiles = files;
     try {
       const sent = await chatWorkspace.track(
-        api<Message>("POST", steering ? `/api/rooms/${room.id}/steer` : `/api/rooms/${room.id}/messages`, {
+        api<Message>("POST", `/api/rooms/${room.id}/messages`, {
           senderName: props.userName,
           content,
           images: imgs,
           files: attachedFiles,
           replyToId: quote?.messageId,
           replyToPartIndex: quote?.partIndex,
-          ...(steering ? { targetTaskId: steering.id, requestId: steerRequest.current ?? crypto.randomUUID() } : {}),
         }),
       );
-      setSteerTarget(null);
-      steerRequest.current = null;
       // Returning to this room can create a newer draft before the old HTTP request finishes.
       const current = chatWorkspace.snapshot(room.id).data;
       if (
@@ -650,6 +621,45 @@ export function ChatView(props: {
     } finally {
       pendingCancellations.current.delete(taskId);
     }
+  };
+
+  // 立即发送: the queued task itself becomes the accepted steer — no duplicate message.
+  const promoteSteer = async (task: RoomState["tasks"][number]) => {
+    const target = laneSteerTarget(task);
+    if (!target || pendingPromotes.current.has(task.id)) return;
+    pendingPromotes.current.add(task.id);
+    setPromotes((current) => ({ ...current, [task.id]: { pending: true, error: null } }));
+    try {
+      const sent = await api<Message>("POST", `/api/rooms/${room.id}/steer/${task.id}`, { targetTaskId: target.id });
+      dispatch({ type: "event", event: { type: "message", message: sent } });
+      setPromotes((current) => {
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+    } catch (e) {
+      setPromotes((current) => ({ ...current, [task.id]: { pending: false, error: (e as Error).message } }));
+    } finally {
+      pendingPromotes.current.delete(task.id);
+    }
+  };
+
+  // 编辑消息 pulls a queued message back into the composer; the sent copy stays in the transcript.
+  const editQueued = async (task: RoomState["tasks"][number]) => {
+    const human = messages.find((m) => m.runId === task.runId && m.senderKind === "human");
+    if (human) {
+      const parts = human.timeline?.parts ?? [];
+      workspace.update({
+        draft: human.content,
+        images: parts.flatMap((part) => (part.kind === "image" ? [{ mimeType: part.mimeType, data: part.data }] : [])),
+        files: parts.flatMap((part) =>
+          part.kind === "file" ? [{ name: part.name, mimeType: part.mimeType, data: part.data }] : [],
+        ),
+        quote: human.quote,
+      });
+    }
+    await cancel(task.id);
+    document.querySelector<HTMLElement>(".composer-box textarea")?.focus();
   };
 
   const answer = useCallback(
@@ -1101,6 +1111,10 @@ export function ChatView(props: {
                   tasks={tasks}
                   agents={agentById}
                   cancellations={cancellations}
+                  promotes={promotes}
+                  steerTarget={laneSteerTarget}
+                  onSteer={(task) => void promoteSteer(task)}
+                  onEdit={(task) => void editQueued(task)}
                   onCancel={(id) => void cancel(id)}
                   conclusion={conclusion}
                   onJump={() => {
@@ -1147,34 +1161,18 @@ export function ChatView(props: {
                 imageNote={imageNote}
                 fileNote={fileNote}
                 imageBlocked={imageBlocked}
-                steer={{
-                  options: steerOptions,
-                  target: steerTarget,
-                  stopped: steerTarget ? (steerOptions.find((o) => o.task.id === steerTarget.id)?.stopped ?? 1) : 0,
-                  open: steerOpen,
-                  mismatch: steerMismatch,
-                  onToggle: () => {
-                    if (steerOptions.length === 1 && steerOptions[0]) {
-                      setSteerTarget(steerOptions[0].task);
-                      steerRequest.current = crypto.randomUUID();
-                    } else {
-                      setSteerOpen((open) => !open);
-                    }
-                  },
-                  onPick: (task) => {
-                    setSteerTarget(task);
-                    setSteerOpen(false);
-                    steerRequest.current = crypto.randomUUID();
-                  },
-                  onClear: () => {
-                    setSteerTarget(null);
-                    steerRequest.current = null;
-                  },
-                }}
                 stopTask={stopTask}
-                stopPending={!!stopTask && (cancellations[stopTask.id]?.pending || stopTask.status === "cancelling")}
+                stopPending={
+                  !!stopTask &&
+                  (cancellations[stopTask.id]?.pending ||
+                    promotes[stopTask.id]?.pending ||
+                    stopTask.status === "cancelling")
+                }
                 queued={state.queued}
-                onStop={() => stopTask && void cancel(stopTask.id)}
+                onStop={() =>
+                  stopTask &&
+                  void (stopTask.status === "queued" && !stopTask.steer ? editQueued(stopTask) : cancel(stopTask.id))
+                }
                 modelPicker={<SessionChips members={members} sessions={sessions} onPick={pickOption} />}
                 usage={
                   members.length === 1 ? (
@@ -2025,6 +2023,10 @@ function ReplyStatus(props: {
   tasks: RoomState["tasks"];
   agents: Map<string, Agent>;
   cancellations: Record<string, { pending: boolean; error: string | null }>;
+  promotes: Record<string, { pending: boolean; error: string | null }>;
+  steerTarget: (task: RoomState["tasks"][number]) => RoomState["tasks"][number] | undefined;
+  onSteer: (task: RoomState["tasks"][number]) => void;
+  onEdit: (task: RoomState["tasks"][number]) => void;
   onCancel: (id: string) => void;
   conclusion: RoomConclusion | null;
   onJump: () => void;
@@ -2136,7 +2138,9 @@ function ReplyStatus(props: {
   });
   const overflow = participants.slice(3);
   const single = props.tasks.length === 1 ? props.tasks[0] : undefined;
-  const singleStopping = !!single && (props.cancellations[single.id]?.pending || single.status === "cancelling");
+  const singleStopping =
+    !!single &&
+    (props.cancellations[single.id]?.pending || props.promotes[single.id]?.pending || single.status === "cancelling");
   return (
     <section ref={root} className="chat-tasks" aria-label={tr("会话任务")} data-expanded={expanded}>
       <div className="chat-activity">
@@ -2196,7 +2200,23 @@ function ReplyStatus(props: {
             <ChevronRight size={13} className="chat-activity-chevron" aria-hidden />
           </button>
         )}
-        {single && (
+        {single && single.status === "queued" && !single.steer && (
+          <button
+            type="button"
+            className="chat-activity-stop"
+            data-hidden={expanded || undefined}
+            aria-hidden={expanded}
+            inert={expanded}
+            aria-label={tr("编辑消息")}
+            title={tr("编辑消息 · 拉回输入框修改")}
+            aria-describedby={summaryId}
+            disabled={singleStopping}
+            onClick={() => props.onEdit(single)}
+          >
+            <Pencil size={11} aria-hidden />
+          </button>
+        )}
+        {single && (single.status !== "queued" || !!single.steer) && (
           <button
             type="button"
             className="chat-activity-stop"
@@ -2257,6 +2277,8 @@ function ReplyStatus(props: {
           <ul className="chat-task-list">
             {props.tasks.map((task) => {
               const cancellation = props.cancellations[task.id];
+              const promote = props.promotes[task.id];
+              const laneTarget = task.status === "queued" && !task.steer ? props.steerTarget(task) : undefined;
               const status =
                 task.steer && task.status === "queued"
                   ? props.tasks.some((item) => item.id === task.steer?.targetTaskId)
@@ -2289,21 +2311,58 @@ function ReplyStatus(props: {
                         {tr("停止失败：{reason}。请重试。", { reason: translateError(cancellation.error) })}
                       </div>
                     )}
+                    {promote?.error && (
+                      <div className="chat-task-error" role="alert">
+                        {tr("立即发送失败：{reason}。请重试。", { reason: translateError(promote.error) })}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    className="btn ghost sm chat-task-stop"
-                    aria-label={task.status === "queued" ? tr("取消排队") : tr("停止任务")}
-                    aria-describedby={`task-summary-${task.id}`}
-                    disabled={cancellation?.pending || task.status === "cancelling"}
-                    onClick={() => props.onCancel(task.id)}
-                  >
-                    {cancellation?.pending || task.status === "cancelling"
-                      ? tr("停止中…")
-                      : task.status === "queued"
-                        ? tr("取消排队")
-                        : tr("停止")}
-                  </button>
+                  {task.status === "queued" && !task.steer ? (
+                    <div className="chat-task-actions">
+                      <button
+                        type="button"
+                        className="btn ghost sm chat-task-send-now"
+                        aria-label={tr("立即发送")}
+                        aria-describedby={`task-summary-${task.id}`}
+                        disabled={promote?.pending || cancellation?.pending || !laneTarget}
+                        title={
+                          laneTarget
+                            ? tr("停止 @{name} 的当前任务并优先发送", { name: laneTarget.agentName })
+                            : tr("当前没有可打断的任务")
+                        }
+                        onClick={() => props.onSteer(task)}
+                      >
+                        <Zap size={13} aria-hidden />
+                        {promote?.pending ? tr("发送中…") : tr("立即发送")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost sm"
+                        aria-label={tr("编辑消息")}
+                        aria-describedby={`task-summary-${task.id}`}
+                        disabled={promote?.pending || cancellation?.pending}
+                        title={tr("拉回输入框修改后重新发送")}
+                        onClick={() => props.onEdit(task)}
+                      >
+                        {tr("编辑消息")}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn ghost sm chat-task-stop"
+                      aria-label={task.status === "queued" ? tr("取消排队") : tr("停止任务")}
+                      aria-describedby={`task-summary-${task.id}`}
+                      disabled={cancellation?.pending || task.status === "cancelling"}
+                      onClick={() => props.onCancel(task.id)}
+                    >
+                      {cancellation?.pending || task.status === "cancelling"
+                        ? tr("停止中…")
+                        : task.status === "queued"
+                          ? tr("取消排队")
+                          : tr("停止")}
+                    </button>
+                  )}
                 </li>
               );
             })}
@@ -2828,17 +2887,6 @@ function Composer(props: {
   imageBlocked: boolean;
   modelPicker?: React.ReactNode;
   usage?: React.ReactNode;
-  /** Immediate steer: pick a chain to stop so this message runs next on that agent's lane. */
-  steer?: {
-    options: { task: RoomState["tasks"][number]; stopped: number }[];
-    target: RoomState["tasks"][number] | null;
-    stopped: number;
-    open: boolean;
-    mismatch: "multi" | "other" | null;
-    onToggle: () => void;
-    onPick: (task: RoomState["tasks"][number]) => void;
-    onClear: () => void;
-  };
   /** A shortcut is safe only when there is exactly one task to cancel. */
   stopTask?: RoomState["tasks"][number];
   stopPending?: boolean;
@@ -2928,23 +2976,6 @@ function Composer(props: {
     });
   };
   const empty = !props.value.trim() && props.images.length === 0 && props.files.length === 0;
-  const steer = props.steer;
-  const steerScope = (task: RoomState["tasks"][number], stopped: number) =>
-    task.coordination === "lead" && stopped > 1
-      ? tr("将停止本轮依赖分工及后续汇总")
-      : stopped > 1
-        ? tr("将停止该任务及 {count} 项依赖任务", { count: stopped - 1 })
-        : tr("将停止其当前任务");
-  const steerStatus = (task: RoomState["tasks"][number]) =>
-    task.status === "cancelling"
-      ? tr("停止中")
-      : task.status === "waiting"
-        ? task.coordination === "lead" || task.coordination === "review"
-          ? tr("统筹中")
-          : tr("交接中")
-        : task.coordination === "review"
-          ? tr("跟进中")
-          : tr("回复中");
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; the attachment button is the accessible path
@@ -3030,27 +3061,6 @@ function Composer(props: {
           ))}
         </section>
       )}
-      {steer?.open && steer.options.length > 1 && (
-        <div className="popover mention-pop steer-pop" role="listbox" aria-label={tr("选择要引导的任务")}>
-          <div className="pop-title">{tr("选择要停止并优先发送的任务")}</div>
-          {steer.options.map(({ task, stopped }) => (
-            <button
-              type="button"
-              role="option"
-              key={task.id}
-              className="pop-item steer-option"
-              onClick={() => steer.onPick(task)}
-            >
-              <span className="steer-option-head">
-                <strong>{task.agentName}</strong>
-                <span className="muted">{steerStatus(task)}</span>
-              </span>
-              <span className="steer-option-scope muted">{steerScope(task, stopped)}</span>
-              {task.text && <span className="steer-option-task muted">{task.text}</span>}
-            </button>
-          ))}
-        </div>
-      )}
       {options.length > 0 && (
         <div className="popover mention-pop" role="listbox" aria-label={tr("选择要 @ 的 Agent")}>
           <div className="pop-title">{tr("提及 Agent")}</div>
@@ -3095,35 +3105,6 @@ function Composer(props: {
           </button>
         </div>
       )}
-      {steer?.target && (
-        <div className="composer-quote composer-steer" data-testid="composer-steer">
-          <Zap size={13} aria-hidden />
-          <span className="composer-steer-text">
-            {tr("立即引导 {name}", { name: `@${steer.target.agentName}` })}
-            <span className="muted"> · {steerScope(steer.target, steer.stopped)}</span>
-            {steer.mismatch && (
-              <span className="composer-steer-warn">
-                {" · "}
-                {steer.mismatch === "multi"
-                  ? tr("一次只能引导一个目标")
-                  : tr("发给 {name} 才能引导该任务", { name: `@${steer.target.agentName}` })}
-              </span>
-            )}
-          </span>
-          <button
-            type="button"
-            className="btn ghost icon sm"
-            aria-label={tr("取消引导")}
-            disabled={props.sending}
-            onClick={() => {
-              steer.onClear();
-              ref.current?.focus();
-            }}
-          >
-            <X size={15} />
-          </button>
-        </div>
-      )}
       <textarea
         readOnly={props.sending}
         ref={ref}
@@ -3156,10 +3137,7 @@ function Composer(props: {
             return;
           }
           if (e.nativeEvent.isComposing) return;
-          if (steer?.open && e.key === "Escape") {
-            e.preventDefault();
-            steer.onToggle();
-          } else if (picker && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+          if (picker && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
             e.preventDefault();
             setActive((i) => (i + (e.key === "ArrowDown" ? 1 : picker.items.length - 1)) % picker.items.length);
           } else if (picker && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
@@ -3232,53 +3210,34 @@ function Composer(props: {
             <Plus size={17} />
           </button>
           {props.modelPicker}
-          {steer && steer.options.length > 0 && !steer.target && !empty && (
-            <button
-              type="button"
-              className="btn ghost sm composer-steer-open"
-              aria-expanded={steer.open}
-              aria-haspopup="listbox"
-              disabled={props.sending}
-              title={tr("立即引导 · 停止所选任务并优先发送")}
-              onClick={steer.onToggle}
-            >
-              <Zap size={15} aria-hidden />
-              {tr("立即引导")}
-            </button>
-          )}
         </div>
         <div className="composer-status">
           {props.usage}
           {(() => {
-            const steering = !!steer?.target;
-            const stop = !steering && !!props.stopTask && !props.sending && !props.pendingAttachments && empty;
-            const label = steering
-              ? tr("立即引导")
-              : stop
-                ? props.stopTask?.status === "queued"
+            const stop = !!props.stopTask && !props.sending && !props.pendingAttachments && empty;
+            const label = stop
+              ? props.stopTask?.status === "queued"
+                ? props.stopTask?.steer
                   ? tr("取消排队")
-                  : tr("停止")
-                : tr("发送");
+                  : tr("编辑消息")
+                : tr("停止")
+              : tr("发送");
             return (
               <button
                 type="button"
                 className="send-btn"
-                data-mode={steering ? "steer" : stop ? "stop" : "send"}
+                data-mode={stop ? "stop" : "send"}
                 onClick={stop ? props.onStop : props.onSubmit}
                 disabled={
-                  stop
-                    ? props.stopPending
-                    : props.sending || !!props.pendingAttachments || props.imageBlocked || empty || !!steer?.mismatch
+                  stop ? props.stopPending : props.sending || !!props.pendingAttachments || props.imageBlocked || empty
                 }
                 aria-label={label}
                 title={
-                  steering
-                    ? tr("停止 @{name} 的当前任务并优先发送", { name: steer?.target?.agentName ?? "" })
-                    : stop
-                      ? `${label} · ${props.stopTask?.agentName} · ${props.stopTask?.text || tr("正在准备回复")}`
-                      : props.queued
-                        ? tr("发送 · {count} 条排队中", { count: props.queued })
-                        : tr("发送")
+                  stop
+                    ? `${label} · ${props.stopTask?.agentName} · ${props.stopTask?.text || tr("正在准备回复")}`
+                    : props.queued
+                      ? tr("发送 · {count} 条排队中", { count: props.queued })
+                      : tr("发送")
                 }
               >
                 <span className="send-ico send-ico-arrow" aria-hidden>

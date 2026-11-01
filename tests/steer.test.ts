@@ -317,6 +317,77 @@ describe("immediate steer", () => {
     await f.scheduler.idle(f.room.id);
   });
 
+  test("promoting a queued message steers the chain ahead of it and jumps older queued work", async () => {
+    const f = fixture(["A"]);
+    const first = f.say("当前任务");
+    f.say("排队B");
+    const queued = f.say("排队C");
+    const running = f.task("A");
+    const queuedTask = f.task("A", queued.id);
+    expect(queuedTask?.status).toBe("queued");
+    const promoted = f.scheduler.steerQueued(f.room.id, queuedTask?.id ?? "", running?.id ?? "");
+    // The queued message is promoted in place: same message, now carrying the steer badge.
+    expect(promoted.id).toBe(queued.id);
+    expect(promoted.timeline?.steer).toMatchObject({
+      taskId: running?.id,
+      runId: first.id,
+      agentName: "A",
+      stage: "stopping",
+    });
+    expect(f.host.calls[0]?.signal.aborted).toBe(true);
+    expect(f.host.calls[0]?.signal.reason).toMatchObject({ message: "被新消息打断" });
+    expect(
+      f.events.some(
+        (e) => e.type === "message" && e.message.id === queued.id && e.message.timeline?.steer?.stage === "stopping",
+      ),
+    ).toBe(true);
+    // Its task stays queued but now waits on the interrupted chain.
+    expect(f.task("A", queued.id)?.steer).toMatchObject({ targetTaskId: running?.id });
+    expect(f.host.calls).toHaveLength(1);
+    f.host.finish(0);
+    await until(() => f.host.calls.length === 2);
+    // The promoted message starts before the earlier queued one on the same lane.
+    expect(f.host.text(1)).toContain("排队C");
+    expect(f.host.text(1)).toContain("<tuantuan-steer>");
+    f.host.finish(1);
+    await until(() => f.host.calls.length === 3);
+    expect(f.host.text(2)).toContain("排队B");
+    f.host.finish(2);
+    await f.scheduler.idle(f.room.id);
+    expect(f.store.getMessage(queued.id)?.timeline?.steer?.stage).toBe("sent");
+  });
+
+  test("queued promotion is limited to the same agent lane and rejectable once claimed", async () => {
+    const f = fixture(["A", "B"]);
+    f.say("@A 任务A");
+    f.say("@B 任务B");
+    await until(() => f.host.calls.length === 2);
+    const queued = f.say("@B 排队B");
+    const taskA = f.task("A");
+    const taskB = f.task("B");
+    const queuedTaskB = f.task("B", queued.id);
+    // A queued message can only interrupt the chain on its own agent's lane.
+    expect(() => f.scheduler.steerQueued(f.room.id, queuedTaskB?.id ?? "", taskA?.id ?? "")).toThrow("同一 Agent");
+    // Nor a target that is itself only queued.
+    const alsoQueued = f.say("@B 排队C");
+    expect(() =>
+      f.scheduler.steerQueued(f.room.id, queuedTaskB?.id ?? "", f.task("B", alsoQueued.id)?.id ?? ""),
+    ).toThrow("尚未开始");
+    f.scheduler.steerQueued(f.room.id, queuedTaskB?.id ?? "", taskB?.id ?? "");
+    // Already promoted — it is a pending steer now, not a plain queued task.
+    expect(() => f.scheduler.steerQueued(f.room.id, queuedTaskB?.id ?? "", taskB?.id ?? "")).toThrow("不在排队中");
+    f.host.finish(1);
+    await until(() => f.host.calls.length === 3);
+    expect(f.host.text(2)).toContain("排队B");
+    f.host.finish(0);
+    f.host.finish(2);
+    // The older queued message then takes B's lane and is finished too.
+    await until(() => f.host.calls.length === 4);
+    expect(f.host.text(3)).toContain("排队C");
+    f.host.finish(3);
+    await f.scheduler.idle(f.room.id);
+  });
+
   test("cancelling a pending steer marks it interrupted and frees the lane", async () => {
     const f = fixture(["A"]);
     f.say("当前");
@@ -405,6 +476,60 @@ describe("steer HTTP route", () => {
       requestId: "req-1",
     });
     expect(retry.data.id).toBe(accepted.data.id);
+    expect(calls[0]?.signal.aborted).toBe(true);
+    calls[0]?.resolve({ stopReason: "end_turn" });
+    await until(() => calls.length === 2);
+    calls[1]?.resolve({ stopReason: "end_turn" });
+    await app.orchestrator.idle(room.id);
+  });
+
+  test("promotes a queued task in place via POST /steer/:taskId", async () => {
+    const { app, server } = serve({ dbPath: ":memory:" }, 0);
+    apis.push({ app, server });
+    const base = `http://127.0.0.1:${server.port}`;
+    const calls: { signal: AbortSignal; resolve: (r: { stopReason: acp.StopReason }) => void }[] = [];
+    app.host.prompt = (...args: PromptArgs) =>
+      new Promise((resolve) => {
+        calls.push({ signal: args[5], resolve });
+      });
+    const api = async <T>(method: string, path: string, body?: unknown) => {
+      const response = await fetch(base + path, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: response.status, data: (await response.json()) as T };
+    };
+    const a = (await api<Agent>("POST", "/api/agents", agentInput("A"))).data;
+    const room = (await api<Message | { id: string }>("POST", "/api/rooms", { name: "dm", agentIds: [a.id] })).data as {
+      id: string;
+    };
+    await api("POST", `/api/rooms/${room.id}/messages`, { content: "当前任务" });
+    const queued = await api<Message>("POST", `/api/rooms/${room.id}/messages`, { content: "排队指令" });
+    await until(() => calls.length === 1);
+    const state = (
+      await api<{ state: { tasks: { id: string; runId: string; status: string }[] } }>(
+        "GET",
+        `/api/rooms/${room.id}/messages`,
+      )
+    ).data.state;
+    const running = state.tasks.find((t) => t.status === "running");
+    const queuedTask = state.tasks.find((t) => t.runId === queued.data.id);
+    expect(queuedTask?.status).toBe("queued");
+    expect((await api("POST", `/api/rooms/${room.id}/steer/${queuedTask?.id}`, {})).status).toBe(400);
+    expect(
+      (await api("POST", `/api/rooms/${room.id}/steer/${queuedTask?.id}`, { targetTaskId: "missing" })).status,
+    ).toBe(409);
+    const promoted = await api<Message>("POST", `/api/rooms/${room.id}/steer/${queuedTask?.id}`, {
+      targetTaskId: running?.id,
+    });
+    expect(promoted.status).toBe(200);
+    // Same message, promoted: the queued task now carries the steer record, no duplicate is created.
+    expect(promoted.data.id).toBe(queued.data.id);
+    expect(promoted.data.timeline?.steer).toMatchObject({ taskId: running?.id, agentName: "A", stage: "stopping" });
+    expect(
+      (await api("POST", `/api/rooms/${room.id}/steer/${queuedTask?.id}`, { targetTaskId: running?.id })).status,
+    ).toBe(409);
     expect(calls[0]?.signal.aborted).toBe(true);
     calls[0]?.resolve({ stopReason: "end_turn" });
     await until(() => calls.length === 2);

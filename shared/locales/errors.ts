@@ -1150,6 +1150,21 @@ export const errorMessages: MessageCatalog = {
     en: "This task already has a steer in progress. Wait for it to finish or cancel it first",
     ja: "このタスクには進行中の指示があります。完了を待つか、先にその指示をキャンセルしてください",
   },
+  "该任务不在排队中，无法立即发送": {
+    "zh-TW": "該任務不在排隊中，無法立即傳送",
+    en: "This task is no longer queued, so it cannot be sent now",
+    ja: "このタスクは待機中ではないため、今すぐ送信できません",
+  },
+  "只能引导同一 Agent 正在执行的任务": {
+    "zh-TW": "只能引導同一 Agent 正在執行的任務",
+    en: "Only a running task of the same agent can be steered",
+    ja: "指示できるのは同じ Agent の実行中タスクだけです",
+  },
+  "该任务属于将要停止的任务链，无法立即发送": {
+    "zh-TW": "該任務屬於將要停止的任務鏈，無法立即傳送",
+    en: "This task belongs to the chain being stopped, so it cannot be sent now",
+    ja: "このタスクは停止対象のチェーンに属するため、今すぐ送信できません",
+  },
   "一次只能引导一个目标；多 @ 或 @所有人 的消息仍按原顺序排队": {
     "zh-TW": "一次只能引導一個目標；多 @ 或 @所有人 的訊息仍按原順序排隊",
     en: "Only one target can be steered at a time. Messages with multiple @mentions or @everyone still queue in order",

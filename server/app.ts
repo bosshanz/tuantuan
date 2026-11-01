@@ -1773,6 +1773,11 @@ export function createApp(deps: AppDeps) {
           201,
         );
       }
+      // A queued message is promoted in place: its own task becomes the accepted steer.
+      if (room && sub === "steer" && subId && !action && method === "POST") {
+        const m = z.object({ targetTaskId: z.string().min(1).max(200) }).parse(await body());
+        return json(orchestrator.steerQueued(room.id, subId, m.targetTaskId));
+      }
       // Immediate steer is one coordinated operation: validate, record, then stop the selected
       // chain and run the new instruction first on that agent's lane.
       if (room && sub === "steer" && !subId && method === "POST") {

@@ -185,6 +185,60 @@ export class Orchestrator implements ToolProvider {
     });
   }
 
+  /**
+   * Promote an already-queued message to an immediate steer of the chain ahead of it on the same
+   * agent lane. The queued task itself becomes the accepted instruction: no second human message
+   * is created, and it still runs only after every task in the interrupted chain fully exits.
+   */
+  steerQueued(roomId: string, taskId: string, targetTaskId: string): Message {
+    if (this.closed) throw new ValidationError("服务正在关闭", 503);
+    const rt = this.rooms.get(roomId);
+    const task = rt?.tasks.get(taskId);
+    if (!rt || !task || task.status !== "queued" || task.steer)
+      throw new ValidationError("该任务不在排队中，无法立即发送", 409);
+    const target = rt.tasks.get(targetTaskId);
+    if (!target || !this.activeVisible(rt).has(target.id))
+      throw new ValidationError("目标任务已结束或不存在，未执行引导；可作为普通消息发送", 409);
+    if (target.status === "queued")
+      throw new ValidationError("目标任务尚未开始，可用「取消排队」移除；引导用于正在执行的任务", 409);
+    if (target.agentId !== task.agentId) throw new ValidationError("只能引导同一 Agent 正在执行的任务", 409);
+    // Same chain rule as steer(): a task owns the descendants of its accepted handoffs.
+    const chain = new Set([target.id]);
+    for (const item of rt.tasks.values()) if (item.parentTaskId && chain.has(item.parentTaskId)) chain.add(item.id);
+    // A queued member of the chain being stopped cannot become the steer that replaces it.
+    if (chain.has(task.id)) throw new ValidationError("该任务属于将要停止的任务链，无法立即发送", 409);
+    for (const existing of rt.steers.values()) {
+      const waits = rt.tasks.get(existing.taskId)?.steer?.waits;
+      if (waits && [...chain].some((id) => waits.has(id)))
+        throw new ValidationError("该任务已有进行中的引导，请等待其完成或先取消该引导", 409);
+    }
+    const run = rt.runs.get(task.runId);
+    if (!run) throw new ValidationError("该任务不在排队中，无法立即发送", 409);
+    task.steer = { targetTaskId: target.id, waits: chain };
+    rt.steers.set(target.id, { targetTaskId: target.id, messageId: run.human.id, taskId: task.id });
+    const timeline = {
+      ...emptyTimeline(),
+      ...run.human.timeline,
+      steer: {
+        taskId: target.id,
+        runId: target.runId,
+        agentId: target.agentId,
+        agentName: target.agentName,
+        stage: "stopping" as const,
+      },
+    };
+    run.human = this.store.updateReply(run.human.id, {
+      content: run.human.content,
+      status: "done",
+      timeline,
+    });
+    // Connected clients see the badge transition immediately, like any other steer stage event.
+    this.publish(roomId, { type: "message", message: run.human });
+    // The lane is already reserved by this queued steer, so nothing else jumps in.
+    this.cancelTasks(roomId, rt, new Set([target.id]), "被新消息打断");
+    return run.human;
+  }
+
   private post(
     roomId: string,
     senderName: string,

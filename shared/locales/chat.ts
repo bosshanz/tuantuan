@@ -356,6 +356,41 @@ export const chatMessages = {
     en: "Cancel queued task",
     ja: "待機をキャンセル",
   },
+  立即发送: {
+    "zh-TW": "立即傳送",
+    en: "Send now",
+    ja: "今すぐ送信",
+  },
+  "发送中…": {
+    "zh-TW": "傳送中…",
+    en: "Sending…",
+    ja: "送信中…",
+  },
+  编辑消息: {
+    "zh-TW": "編輯訊息",
+    en: "Edit message",
+    ja: "メッセージを編集",
+  },
+  "编辑消息 · 拉回输入框修改": {
+    "zh-TW": "編輯訊息 · 拉回輸入框修改",
+    en: "Edit message · pull back into the composer",
+    ja: "メッセージを編集 · 入力欄に戻して修正",
+  },
+  拉回输入框修改后重新发送: {
+    "zh-TW": "拉回輸入框修改後重新傳送",
+    en: "Pull back into the composer, edit, then resend",
+    ja: "入力欄に戻して修正し、再送信",
+  },
+  当前没有可打断的任务: {
+    "zh-TW": "目前沒有可打斷的任務",
+    en: "No running task to interrupt",
+    ja: "中断できるタスクがありません",
+  },
+  "立即发送失败：{reason}。请重试。": {
+    "zh-TW": "立即傳送失敗：{reason}。請重試。",
+    en: "Could not send now: {reason}. Please try again.",
+    ja: "今すぐ送信に失敗しました：{reason}。再試行してください。",
+  },
   停止任务: {
     "zh-TW": "停止任務",
     en: "Stop task",
