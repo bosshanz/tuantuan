@@ -746,7 +746,7 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
       throw new Error("compact phases lost the Agent's original order or exposed process details");
     if ((await phaseRow.locator("[data-reply-phase]").count()) !== phaseTexts.length)
       throw new Error("separate reply phases were combined into one bubble");
-    await page.getByRole("button", { name: "展开详情面板" }).click();
+    await page.locator(".chat-head .title-pill").click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
     const modeButton = (name: "简洁" | "详细") =>
       page.getByRole("group", { name: "详细/简洁模式" }).getByRole("button", { name, exact: true });
@@ -1029,7 +1029,7 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     if ((await savedQuote.textContent()) !== phaseBodies[1]) throw new Error("phase quote changed after refresh");
     await savedQuote.click();
     await expectPhaseHighlight(1);
-    await page.getByRole("button", { name: "展开详情面板" }).click();
+    await page.locator(".chat-head .title-pill").click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
     await modeButton("详细").click();
     await densitySettled();
@@ -1038,7 +1038,7 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     await expectPhaseHighlight(1);
     if (await liveRow.locator(".tool").getByText("handoff", { exact: true }).count())
       throw new Error("preserving phase indices exposed the duplicate handoff tool");
-    await page.getByRole("button", { name: "展开详情面板" }).click();
+    await page.locator(".chat-head .title-pill").click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
     await modeButton("简洁").click();
     await densitySettled();

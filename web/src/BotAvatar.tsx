@@ -184,12 +184,14 @@ function Face({
   y,
   eyeSpacing = 9,
   eyeHeight = 6,
+  mouthOffset = 16,
 }: {
-  e: Expression;
+  e: Expression | "curious";
   x: number;
   y: number;
   eyeSpacing?: number;
   eyeHeight?: number;
+  mouthOffset?: number;
 }) {
   const L = x - 1 - eyeSpacing;
   const R = x - 1 + eyeSpacing;
@@ -197,35 +199,45 @@ function Face({
     case "happy":
       return (
         <g className="ba-eyes">
-          <path d={`M${L - 6} ${y + 3}Q${L} ${y - 7} ${L + 6} ${y + 3}`} />
-          <path d={`M${R - 6} ${y + 3}Q${R} ${y - 7} ${R + 6} ${y + 3}`} />
+          <path d={`M${L - 4.5} ${y + 2}Q${L - 0.5} ${y - 5} ${L + 4.5} ${y + 1}`} />
+          <path d={`M${R - 4.5} ${y + 1}Q${R + 0.5} ${y - 5} ${R + 4.5} ${y + 2}`} />
+        </g>
+      );
+    case "curious":
+      return (
+        <g className="ba-eyes">
+          <path d={`M${L - 4} ${y + 1}Q${L} ${y - 3} ${L + 4} ${y}`} />
+          <path d={`M${R + 2} ${y - eyeHeight - 1}Q${R + 4} ${y - 1} ${R - 1} ${y + eyeHeight}`} />
         </g>
       );
     case "surprised":
       return (
         <>
           <g className="ba-eyes">
-            <circle className="ba-dot" cx={L} cy={y - 1} r="5.5" />
-            <circle className="ba-dot" cx={R} cy={y - 1} r="5.5" />
+            <ellipse className="ba-dot" cx={L} cy={y} rx="3.7" ry="5.5" />
+            <ellipse className="ba-dot" cx={R} cy={y - 1} rx="3.7" ry="6" />
           </g>
-          <circle className="ba-dot ba-mouth" cx={x - 1} cy={y + 15} r="3.5" />
+          <circle className="ba-dot ba-mouth" cx={x - 1} cy={y + mouthOffset - 1} r="2.8" />
         </>
       );
     case "sad":
       return (
         <>
           <g className="ba-eyes">
-            <line x1={L - 3} y1={y - 1} x2={L + 1} y2={y + 8} />
-            <line x1={R + 3} y1={y - 1} x2={R - 1} y2={y + 8} />
+            <path d={`M${L - 1} ${y - 4}Q${L + 1} ${y} ${L + 1} ${y + 5}`} />
+            <path d={`M${R + 1} ${y - 4}Q${R - 1} ${y} ${R - 1} ${y + 5}`} />
           </g>
-          <path className="ba-mouth" d={`M${x - 8} ${y + 20}Q${x - 1} ${y + 14} ${x + 6} ${y + 20}`} />
+          <path
+            className="ba-mouth"
+            d={`M${x - 5} ${y + mouthOffset + 2}Q${x - 1} ${y + mouthOffset - 1} ${x + 3} ${y + mouthOffset + 2}`}
+          />
         </>
       );
     case "sleepy":
       return (
         <g className="ba-eyes">
-          <line x1={L - 5} y1={y + 3} x2={L + 5} y2={y + 3} />
-          <line x1={R - 5} y1={y + 3} x2={R + 5} y2={y + 3} />
+          <path d={`M${L - 4} ${y + 2}Q${L} ${y + 5} ${L + 4} ${y + 2}`} />
+          <path d={`M${R - 4} ${y + 2}Q${R} ${y + 5} ${R + 4} ${y + 2}`} />
         </g>
       );
     case "working":
@@ -233,8 +245,8 @@ function Face({
       return (
         <g className="ba-look">
           <g className="ba-eyes">
-            <line x1={L - 3} y1={y + 3} x2={L + 3} y2={y + 4} />
-            <line x1={R - 3} y1={y + 4} x2={R + 3} y2={y + 3} />
+            <path d={`M${L - 3} ${y + 2}Q${L} ${y + 3} ${L + 3} ${y + 4}`} />
+            <path d={`M${R - 3} ${y + 2}Q${R} ${y + 3} ${R + 3} ${y + 4}`} />
           </g>
         </g>
       );
@@ -242,8 +254,8 @@ function Face({
       return (
         <g className="ba-look">
           <g className="ba-eyes">
-            <line x1={L + 4} y1={y - eyeHeight - 4} x2={L + 2} y2={y + 1} />
-            <line x1={R + 4} y1={y - eyeHeight - 4} x2={R + 2} y2={y + 1} />
+            <path d={`M${L + 3} ${y - eyeHeight + 1}Q${L + 4} ${y - 1} ${L + 1} ${y + 3}`} />
+            <path d={`M${R + 3} ${y - eyeHeight - 4}Q${R + 5} ${y - 3} ${R + 2} ${y + 1}`} />
           </g>
         </g>
       );
@@ -252,11 +264,13 @@ function Face({
         <>
           <g className="ba-look">
             <g className="ba-eyes">
-              <line x1={L + 1} y1={y - eyeHeight} x2={L - 1} y2={y + eyeHeight} />
-              <line x1={R + 1} y1={y - eyeHeight} x2={R - 1} y2={y + eyeHeight} />
+              <path d={`M${L + 1} ${y - eyeHeight}Q${L + 2} ${y} ${L - 1} ${y + eyeHeight}`} />
+              <path d={`M${R + 1} ${y - eyeHeight}Q${R + 2} ${y} ${R - 1} ${y + eyeHeight}`} />
             </g>
           </g>
-          {e === "speaking" && <ellipse className="ba-dot ba-mouth ba-talk" cx={x - 1} cy={y + 16} rx="5" ry="3.5" />}
+          {e === "speaking" && (
+            <ellipse className="ba-dot ba-mouth ba-talk" cx={x - 1} cy={y + mouthOffset} rx="3.5" ry="2.8" />
+          )}
         </>
       );
   }
@@ -267,7 +281,7 @@ let seq = 0;
 /**
  * Bot avatar. Static unless `animate` (blink, breathing, glance and the expression's own loop);
  * `pulse` changes trigger a one-shot hop. Animations pause offscreen / in hidden tabs and are off
- * under prefers-reduced-motion. Below 32px only the blink runs.
+ * under prefers-reduced-motion. Below 24px only the blink runs.
  */
 export function BotAvatar({
   shape,
@@ -275,6 +289,7 @@ export function BotAvatar({
   size = 32,
   expression = "idle",
   animate = false,
+  reactToHover = false,
   pulse,
 }: {
   shape: AvatarShape;
@@ -282,6 +297,7 @@ export function BotAvatar({
   size?: number;
   expression?: Expression;
   animate?: boolean;
+  reactToHover?: boolean;
   /** Change this value to play the squash-and-stretch hop once (e.g. a new reply or hand-off). */
   pulse?: unknown;
 }) {
@@ -343,7 +359,32 @@ export function BotAvatar({
       <g className="ba-root" key={hop} data-hop={hop > 0 ? "" : undefined}>
         <g className="ba-body">{s.body}</g>
         <g className="ba-face">
-          <Face e={shown} x={x} y={y} eyeSpacing={s.eyeSpacing} eyeHeight={s.eyeHeight} />
+          {reactToHover && !animate && shown === "idle" ? (
+            <>
+              <g className="ba-face-rest">
+                <Face
+                  e={shown}
+                  x={x}
+                  y={y}
+                  eyeSpacing={s.eyeSpacing}
+                  eyeHeight={s.eyeHeight}
+                  mouthOffset={shape === "cow" ? 28 : 16}
+                />
+              </g>
+              <g className="ba-face-curious">
+                <Face e="curious" x={x} y={y} eyeSpacing={s.eyeSpacing} eyeHeight={s.eyeHeight} />
+              </g>
+            </>
+          ) : (
+            <Face
+              e={shown}
+              x={x}
+              y={y}
+              eyeSpacing={s.eyeSpacing}
+              eyeHeight={s.eyeHeight}
+              mouthOffset={shape === "cow" ? 28 : 16}
+            />
+          )}
         </g>
       </g>
     </svg>

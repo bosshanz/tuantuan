@@ -1,14 +1,14 @@
 /* ---------- File Workbench (side-by-side resizable panel + narrow overlay) ---------- */
-.chat-head:has(.conversation-files-open) .title-pill { max-width: min(60%, calc(100% - 320px)); }
+.chat-head:has(.conversation-files-open) .title-pill { max-width: min(60%, calc(100% - 280px)); }
 .chat-head-actions .conversation-files-open { min-width: 36px; min-height: 36px; }
 @media (min-width: 1024px) {
   .chat-wrap:has(.file-workbench[data-docked]) .chat-head .title-pill {
-    margin-inline: 16px 172px;
-    max-width: calc(100% - 188px);
+    margin-inline: 16px 136px;
+    max-width: calc(100% - 152px);
   }
 }
 @media (max-width: 600px) {
-  .chat-head:has(.conversation-files-open) .title-pill { margin-inline: 48px 136px; max-width: calc(100% - 184px); }
+  .chat-head:has(.conversation-files-open) .title-pill { margin-inline: 48px 120px; max-width: calc(100% - 168px); }
 }
 
 .room-usage { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
