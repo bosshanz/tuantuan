@@ -1,3 +1,4 @@
+import { messageWithdrawn } from "../../shared/timeline";
 import type { Message } from "./api";
 
 /** Insert or replace one message by id, keeping chronological order. */
@@ -16,11 +17,22 @@ function messageOrder(a: Message, b: Message): number {
   return Number.isSafeInteger(a.seq) && Number.isSafeInteger(b.seq) ? a.seq - b.seq : a.createdAt - b.createdAt;
 }
 
-/** Of two copies of one message, prefer the finished one, then the one with more streamed text. */
+/** How far an immediate steer progressed on its human message; sent/interrupted outrank stopping. */
+function steerRank(m: Message): number {
+  const stage = m.timeline?.steer?.stage;
+  return stage === "sent" || stage === "interrupted" ? 2 : stage === "stopping" ? 1 : 0;
+}
+
+/**
+ * Of two copies of one message, a withdrawn queued message replaces the sent copy.
+ * Otherwise prefer the finished one, then the one with more streamed text.
+ */
 function newer(a: Message, b: Message): Message {
+  if (messageWithdrawn(a.timeline) || messageWithdrawn(b.timeline)) return messageWithdrawn(b.timeline) ? b : a;
   if (a.status === "streaming" && b.status !== "streaming") return b;
   if (b.status === "streaming" && a.status !== "streaming") return a;
-  return b.content.length >= a.content.length ? b : a;
+  if (b.content.length !== a.content.length) return b.content.length > a.content.length ? b : a;
+  return steerRank(b) >= steerRank(a) ? b : a;
 }
 
 /** Merge a fetched snapshot with what live events already delivered for this room. */

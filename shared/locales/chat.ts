@@ -1,6 +1,20 @@
 import type { MessageCatalog } from "./types";
 
 export const chatMessages = {
+  协作详情: { "zh-TW": "協作詳情", en: "Collaboration details", ja: "共同作業の詳細" },
+  展开协作详情: { "zh-TW": "展開協作詳情", en: "Expand collaboration details", ja: "共同作業の詳細を展開" },
+  收起协作详情: { "zh-TW": "收起協作詳情", en: "Collapse collaboration details", ja: "共同作業の詳細を折りたたむ" },
+  未记录回复: { "zh-TW": "未記錄回覆", en: "No recorded reply", ja: "返信の記録なし" },
+  "1 位助手": { "zh-TW": "1 位助手", en: "1 assistant", ja: "アシスタント 1 人" },
+  "{count} 位助手": { "zh-TW": "{count} 位助手", en: "{count} assistants", ja: "アシスタント {count} 人" },
+  协作中: { "zh-TW": "協作中", en: "Collaborating", ja: "共同作業中" },
+  助手已回复: { "zh-TW": "助手已回覆", en: "Assistants have replied", ja: "アシスタントの返信済み" },
+  助手回复失败: { "zh-TW": "助手回覆失敗", en: "Assistant reply failed", ja: "アシスタントの返信に失敗" },
+  助手回复被中断: { "zh-TW": "助手回覆已中斷", en: "Assistant reply interrupted", ja: "アシスタントの返信が中断" },
+  助手已停止: { "zh-TW": "助手已停止", en: "Assistants stopped", ja: "アシスタント停止済み" },
+  "{count} 项失败": { "zh-TW": "{count} 項失敗", en: "{count} failed", ja: "失敗 {count} 件" },
+  "{count} 项中断": { "zh-TW": "{count} 項中斷", en: "{count} interrupted", ja: "中断 {count} 件" },
+  分配任务: { "zh-TW": "分配任務", en: "Assigned task", ja: "割り当てタスク" },
   返回会话列表: {
     "zh-TW": "返回對話清單",
     en: "Back to conversations",
@@ -206,13 +220,15 @@ export const chatMessages = {
     en: "Thinking",
     ja: "思考中",
   },
-  仅显示回复正文: { "zh-TW": "僅顯示回覆正文", en: "Show replies only", ja: "返信本文のみ表示" },
+  "详细/简洁模式": { "zh-TW": "詳細/簡潔模式", en: "Detailed / Concise", ja: "詳細／簡潔" },
+  简洁: { "zh-TW": "簡潔", en: "Concise", ja: "簡潔" },
+  详细: { "zh-TW": "詳細", en: "Detailed", ja: "詳細" },
   尚未启动: { "zh-TW": "尚未啟動", en: "Not started", ja: "未起動" },
   精简视图: { "zh-TW": "精簡檢視", en: "Compact view", ja: "コンパクト表示" },
-  "折叠思考、工具和计划，保留回复正文。应用于本机所有会话。": {
-    "zh-TW": "收合思考、工具和計畫，保留回覆內文。套用至本機所有對話。",
-    en: "Fold thoughts, tools and plans while keeping replies visible. Applies to all conversations on this device.",
-    ja: "思考・ツール・計画を折りたたみ、返答本文を表示します。この端末のすべての会話に適用されます。",
+  "简洁模式只保留回复正文，详细模式显示完整过程。每个会话单独记住。": {
+    "zh-TW": "簡潔模式只保留回覆內文，詳細模式顯示完整過程。每個對話單獨記住。",
+    en: "Concise keeps reply text; Detailed shows the full process. Remembered per conversation.",
+    ja: "簡潔モードは返答本文だけを残し、詳細モードは過程全体を表示します。会話ごとに記憶します。",
   },
   展开提问: { "zh-TW": "展開提問", en: "Open question", ja: "質問を開く" },
   收起提问: { "zh-TW": "收合提問", en: "Collapse question", ja: "質問を折りたたむ" },
@@ -341,6 +357,46 @@ export const chatMessages = {
     "zh-TW": "取消排隊",
     en: "Cancel queued task",
     ja: "待機をキャンセル",
+  },
+  立即发送: {
+    "zh-TW": "立即傳送",
+    en: "Send now",
+    ja: "今すぐ送信",
+  },
+  "发送中…": {
+    "zh-TW": "傳送中…",
+    en: "Sending…",
+    ja: "送信中…",
+  },
+  编辑消息: {
+    "zh-TW": "編輯訊息",
+    en: "Edit message",
+    ja: "メッセージを編集",
+  },
+  "编辑消息 · 拉回输入框修改": {
+    "zh-TW": "編輯訊息 · 拉回輸入框修改",
+    en: "Edit message · pull back into the composer",
+    ja: "メッセージを編集 · 入力欄に戻して修正",
+  },
+  拉回输入框修改后重新发送: {
+    "zh-TW": "拉回輸入框修改後重新傳送",
+    en: "Pull back into the composer, edit, then resend",
+    ja: "入力欄に戻して修正し、再送信",
+  },
+  当前没有可打断的任务: {
+    "zh-TW": "目前沒有可打斷的任務",
+    en: "No running task to interrupt",
+    ja: "中断できるタスクがありません",
+  },
+  "立即发送失败：{reason}。请重试。": {
+    "zh-TW": "立即傳送失敗：{reason}。請重試。",
+    en: "Could not send now: {reason}. Please try again.",
+    ja: "今すぐ送信に失敗しました：{reason}。再試行してください。",
+  },
+  "编辑失败：{reason}。请重试。": {
+    "zh-TW": "編輯失敗：{reason}。請重試。",
+    en: "Could not edit: {reason}. Please try again.",
+    ja: "編集に失敗しました：{reason}。再試行してください。",
   },
   停止任务: {
     "zh-TW": "停止任務",
@@ -1560,5 +1616,95 @@ export const chatMessages = {
     "zh-TW": "{count} 個附件",
     en: "{count} attachments",
     ja: "{count} 個の添付ファイル",
+  },
+  立即引导: {
+    "zh-TW": "立即引導",
+    en: "Steer now",
+    ja: "今すぐ指示",
+  },
+  "立即引导 · 停止所选任务并优先发送": {
+    "zh-TW": "立即引導 · 停止所選任務並優先傳送",
+    en: "Steer now · stop the selected task and send first",
+    ja: "今すぐ指示 · 選択したタスクを停止して優先送信",
+  },
+  "立即引导 {name}": {
+    "zh-TW": "立即引導 {name}",
+    en: "Steer {name} now",
+    ja: "{name} に今すぐ指示",
+  },
+  "停止 @{name} 的当前任务并优先发送": {
+    "zh-TW": "停止 @{name} 的目前任務並優先傳送",
+    en: "Stop @{name}'s current task and send first",
+    ja: "@{name} の現在のタスクを停止して優先送信",
+  },
+  选择要引导的任务: {
+    "zh-TW": "選擇要引導的任務",
+    en: "Choose a task to steer",
+    ja: "指示するタスクを選択",
+  },
+  选择要停止并优先发送的任务: {
+    "zh-TW": "選擇要停止並優先傳送的任務",
+    en: "Choose the task to stop and send first",
+    ja: "停止して優先送信するタスクを選択",
+  },
+  将停止其当前任务: {
+    "zh-TW": "將停止其目前任務",
+    en: "Its current task will be stopped",
+    ja: "現在のタスクが停止されます",
+  },
+  "将停止该任务及 {count} 项依赖任务": {
+    "zh-TW": "將停止該任務及 {count} 項依賴任務",
+    en: "This task and {count} dependent tasks will be stopped",
+    ja: "このタスクと依存タスク {count} 件が停止されます",
+  },
+  将停止本轮依赖分工及后续汇总: {
+    "zh-TW": "將停止本輪依賴分工及後續匯總",
+    en: "This round of delegated work and its follow-up summary will be stopped",
+    ja: "このラウンドの分担作業と後続のまとめが停止されます",
+  },
+  "发给 {name} 才能引导该任务": {
+    "zh-TW": "傳給 {name} 才能引導該任務",
+    en: "Address {name} to steer this task",
+    ja: "{name} 宛にするとこのタスクに指示できます",
+  },
+  一次只能引导一个目标: {
+    "zh-TW": "一次只能引導一個目標",
+    en: "Only one target can be steered at a time",
+    ja: "一度に指示できる対象は 1 つだけです",
+  },
+  取消引导: {
+    "zh-TW": "取消引導",
+    en: "Cancel steer",
+    ja: "指示をキャンセル",
+  },
+  正在停止并引导: {
+    "zh-TW": "正在停止並引導",
+    en: "Stopping and steering",
+    ja: "停止して指示中",
+  },
+  等待优先执行: {
+    "zh-TW": "等待優先執行",
+    en: "Waiting for priority run",
+    ja: "優先実行を待機中",
+  },
+  "引导 {name} 已中断，未执行": {
+    "zh-TW": "引導 {name} 已中斷，未執行",
+    en: "Steer for {name} was interrupted and did not run",
+    ja: "{name} への指示は中断され、実行されませんでした",
+  },
+  "引导目标已结束，未执行引导；可作为普通消息发送": {
+    "zh-TW": "引導目標已結束，未執行引導；可作為普通訊息傳送",
+    en: "The steer target has finished, so the steer was not applied. You can send this as a normal message.",
+    ja: "指示対象は終了したため、指示は実行されませんでした。通常メッセージとして送信できます",
+  },
+  "无法打开：路径不在当前项目工作区": {
+    "zh-TW": "無法打開：路徑不在目前專案工作區",
+    en: "Cannot open: the path is outside the current project workspace",
+    ja: "開けません：そのパスは現在のプロジェクトのワークスペース外です",
+  },
+  "无法打开：会话没有项目目录，无法定位该文件": {
+    "zh-TW": "無法打開：會話沒有專案目錄，無法定位該檔案",
+    en: "Cannot open: this conversation has no project folder, so the file cannot be located",
+    ja: "開けません：この会話にはプロジェクトフォルダがないため、ファイルを特定できません",
   },
 } satisfies MessageCatalog;

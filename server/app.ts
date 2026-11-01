@@ -10,7 +10,7 @@ import { missingKeyVar } from "../shared/auth";
 import { translate } from "../shared/i18n";
 import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
 import { messagePreview } from "../shared/roomPreview";
-import { replayTurns } from "../shared/timeline";
+import { messageWithdrawn, replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
 import { AttentionService } from "./attention";
 import { AVATAR_SHAPES } from "./avatars";
@@ -94,6 +94,12 @@ import {
   migrateRoomsToProjects,
   workspacesRoot,
 } from "./workspace";
+import {
+  handleWorkspaceFileContent,
+  handleWorkspaceFilePreview,
+  handleWorkspaceSearch,
+  handleWorkspaceTree,
+} from "./workspace-files";
 
 const CustomSchema = z.object({
   format: z.enum(CUSTOM_FORMATS),
@@ -221,6 +227,13 @@ export function createApp(deps: AppDeps) {
     else if (event.type === "message") {
       const last = messagePreview(event.message);
       if (last) publishAll({ type: "room.preview", roomId, last });
+      else if (messageWithdrawn(event.message.timeline))
+        publishAll({
+          type: "room.preview",
+          roomId,
+          last: store.latestPreview(roomId),
+          replacesMessageId: event.message.id,
+        });
       const n = notifyForMessage(roomId, event.message, readProfile(store.getSetting("profile", {})).language);
       if (n) publishAll(n);
     } else if (event.type === "permission" && event.ask) {
@@ -1588,9 +1601,17 @@ export function createApp(deps: AppDeps) {
       if (room && sub === "files" && method === "GET") {
         if (!subId && !action) return handleConversationFiles(store, room.id, url);
         if (subId && action === "content" && parts.length === 5)
-          return handleConversationFileContent(store, room.id, subId);
+          return handleConversationFileContent(store, room.id, subId, url);
         if (subId && action === "preview" && parts.length === 5)
           return handleConversationFilePreview(store, room.id, subId);
+      }
+      if (room && sub === "tree" && method === "GET") {
+        if (!subId && !action) return handleWorkspaceTree(store, room.id, url);
+        if (subId === "search" && !action) return handleWorkspaceSearch(store, room.id, url);
+      }
+      if (room && sub === "workspace-file" && method === "GET") {
+        if (subId === "preview" && !action) return handleWorkspaceFilePreview(store, room.id, url);
+        if (subId === "content" && !action) return handleWorkspaceFileContent(store, room.id, url);
       }
       if (room && sub === "changes" && method === "GET") {
         if (!subId && !action) return handleSessionChanges(store, room.id);
@@ -1662,7 +1683,7 @@ export function createApp(deps: AppDeps) {
           const seen = new Set(
             store
               .recentMessages(t.room.id, 500)
-              .filter((m) => m.senderKind === "human")
+              .filter((m) => m.senderKind === "human" && !messageWithdrawn(m.timeline))
               .map((m) => m.content.trim()),
           );
           return json(replayTurns(host.replay(t.room.id, t.agent.id)).filter((x) => !seen.has(x.user)));
@@ -1755,6 +1776,44 @@ export function createApp(deps: AppDeps) {
             original.id,
             undefined,
             files,
+          ),
+          201,
+        );
+      }
+      // 编辑消息: a not-yet-started queued message leaves the transcript and returns to the composer.
+      if (room && sub === "retract" && subId && !action && method === "POST")
+        return json(orchestrator.retractQueued(room.id, subId));
+      // A queued message is promoted in place: its own task becomes the accepted steer.
+      if (room && sub === "steer" && subId && !action && method === "POST") {
+        const m = z.object({ targetTaskId: z.string().min(1).max(200) }).parse(await body());
+        return json(orchestrator.steerQueued(room.id, subId, m.targetTaskId));
+      }
+      // Immediate steer is one coordinated operation: validate, record, then stop the selected
+      // chain and run the new instruction first on that agent's lane.
+      if (room && sub === "steer" && !subId && method === "POST") {
+        const m = z
+          .object({
+            senderName: z.string().max(32).default("我"),
+            content: z.string().max(100000),
+            images: z.array(ImageSchema).max(MAX_ATTACHMENT_COUNT).default([]),
+            files: z.array(FileSchema).max(MAX_ATTACHMENT_COUNT).default([]),
+            replyToId: z.string().min(1).max(200).nullable().optional(),
+            replyToPartIndex: z.number().int().nonnegative().safe().optional(),
+            targetTaskId: z.string().min(1).max(200),
+            requestId: z.string().min(1).max(200).optional(),
+          })
+          .parse(await body());
+        return json(
+          orchestrator.steer(
+            room.id,
+            m.senderName,
+            m.content,
+            m.images,
+            m.files,
+            m.replyToId,
+            m.replyToPartIndex,
+            m.targetTaskId,
+            m.requestId,
           ),
           201,
         );

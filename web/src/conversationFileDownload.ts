@@ -13,6 +13,19 @@ export async function readConversationFile(roomId: string, file: ConversationFil
   return response.arrayBuffer();
 }
 
+export async function readWorkspaceFile(roomId: string, path: string, signal: AbortSignal) {
+  if (!path) throw new Error("文件不可用");
+  const expected = `/api/rooms/${encodeURIComponent(roomId)}/workspace-file/content`;
+  const url = new URL(expected, location.origin);
+  url.searchParams.set("path", path);
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error || `HTTP ${response.status}`);
+  }
+  return response.arrayBuffer();
+}
+
 export function saveConversationFile(bytes: ArrayBuffer, name: string) {
   const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
   const link = document.createElement("a");

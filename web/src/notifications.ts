@@ -59,6 +59,8 @@ type Bridge = Partial<DesktopUpdateBridge> & {
   onOpenRoom?: (cb: (roomId: string) => void) => () => void;
   taskPowerStatus?: () => Promise<TaskPowerStatus>;
   setTaskPower?: (enabled: boolean) => Promise<TaskPowerStatus>;
+  /** Reveal an absolute path in the OS file manager (desktop bridge only). */
+  revealPath?: (path: string) => Promise<boolean>;
 };
 export const bridge = (): Bridge | undefined => (window as { tuantuan?: Bridge }).tuantuan;
 

@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("tuantuan", {
   platform: process.platform,
   setLocale: (locale: string) => ipcRenderer.invoke("tuantuan:set-locale", locale),
   pickFolder: (o: { title: string; start?: string }) => ipcRenderer.invoke("tuantuan:pick-folder", o),
+  revealPath: (path: string) => ipcRenderer.invoke("tuantuan:reveal-path", path),
   notify: (p: { title: string; body: string; roomId: string; icon?: string }) =>
     ipcRenderer.invoke("tuantuan:notify", p),
   setBadge: (count: number) => ipcRenderer.invoke("tuantuan:badge", count),

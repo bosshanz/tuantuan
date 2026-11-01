@@ -13,6 +13,7 @@ import {
   History,
   Loader2,
   PanelRight,
+  Pencil,
   Pin,
   Plus,
   RotateCcw,
@@ -22,6 +23,7 @@ import {
   Trash2,
   Users,
   X,
+  Zap,
 } from "lucide-react";
 import {
   lazy,
@@ -39,19 +41,29 @@ import {
 import { flushSync } from "react-dom";
 import { mentionsEveryone, parseMentions } from "../../server/mentions";
 import { attachmentBytes, type FileAttachment } from "../../shared/attachments";
+import { missingKeyVar } from "../../shared/auth";
+import {
+  type CollaborationRun,
+  collaborationAnchors,
+  collaborationRuns,
+  isAssistantMessage,
+} from "../../shared/collaboration";
 import { canQuoteMessage, type MessageQuote, messageQuote } from "../../shared/messageQuote";
 import { intlLocale, translateError, useI18n } from "./i18n";
 import "./messageQuote.css";
 import "./chatTasks.css";
 import "./chatScroll.css";
+import "./collaboration.css";
 import type { ElicitationValue } from "../../shared/elicitation";
-import type { ReplayTurn, RoomConclusion, TaskContext } from "../../shared/timeline";
+import { resolveLocalFileLink } from "../../shared/localFileLink";
+import { messageWithdrawn, type ReplayTurn, type RoomConclusion, type TaskContext } from "../../shared/timeline";
 import {
   type Agent,
   ApiError,
   api,
   type Message,
   type Project,
+  type RetractedQueued,
   type Room,
   type RoomState,
   type SessionView,
@@ -63,6 +75,7 @@ import { SessionChips } from "./ConfigChips";
 import { ConversationFiles } from "./ConversationFiles";
 import { type ChatSnapshot, chatReducer, emptyChat, historyCursor, type MessagePage } from "./chatState";
 import { chatWorkspace, type ImageAttachment } from "./chatWorkspace";
+import { compactForRoom, rememberCompact } from "./compactPreference";
 import { formatAttachmentSize } from "./composerAttachments";
 import type { Opt } from "./config";
 import { ElicitationDialog, forgetElicitationDraft } from "./ElicitationDialog";
@@ -70,11 +83,21 @@ import { CtxUsage, PermissionDialog, TimelineView } from "./Harness";
 import { MissingKey } from "./HarnessAuth";
 import { MessageActions } from "./MessageActions";
 import { reducedMotion, usePresence } from "./motion";
+import { bridge } from "./notifications";
 import { PickList } from "./PickList";
 import type { TerminalFocusRequest } from "./ProjectTerminal";
 import { RoomUsage } from "./RoomUsage";
 import { insertSkill, matchingSkills, skillTokenAt } from "./skillCompletion";
-import { AgentAvatar, formatTime, HumanAvatar, MessageMarkdown, RoomIcon, roomSubtitle, useMediaQuery } from "./ui";
+import {
+  AgentAvatar,
+  formatTime,
+  HumanAvatar,
+  LocalLinkOpen,
+  MessageMarkdown,
+  RoomIcon,
+  roomSubtitle,
+  useMediaQuery,
+} from "./ui";
 import { useChatScroll } from "./useChatScroll";
 import { useChatWorkspace } from "./useChatWorkspace";
 
@@ -86,6 +109,22 @@ export interface ChatNavigationTarget {
   kind: "message" | "permission" | "question";
   id: string;
   nonce: number;
+}
+
+/** Short status for the floating title. Null when the room is idle. */
+function roomTitleActivity(
+  tasks: RoomState["tasks"],
+  cancellations: Record<string, { pending: boolean } | undefined>,
+): "正在停止" | "正在跟进" | "正在回复" | "正在准备" | "等待成员结果" | "等待交接完成" | "排队中" | null {
+  const stopping = tasks.find((task) => task.status === "cancelling" || cancellations[task.id]?.pending);
+  if (stopping) return "正在停止";
+  const running = tasks.find((task) => task.status === "running");
+  if (running) return running.coordination === "review" ? "正在跟进" : running.messageId ? "正在回复" : "正在准备";
+  const waiting = tasks.find((task) => task.status === "waiting");
+  if (waiting)
+    return waiting.coordination === "lead" || waiting.coordination === "review" ? "等待成员结果" : "等待交接完成";
+  if (tasks.some((task) => task.status === "queued" && !cancellations[task.id]?.pending)) return "排队中";
+  return null;
 }
 
 function terminalWasOpen(projectId: string | null) {
@@ -128,6 +167,8 @@ export function ChatView(props: {
   const pendingRetries = useRef(new Set<string>());
   const [cancellations, setCancellations] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingCancellations = useRef(new Set<string>());
+  const pendingPromotes = useRef(new Set<string>());
+  const pendingEdits = useRef(new Set<string>());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [jumpError, setJumpError] = useState<{ source: string; reason?: string } | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<ChatNavigationTarget | null>(null);
@@ -143,15 +184,17 @@ export function ChatView(props: {
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<{ source: string; reason: string } | null>(null);
+  // Queued messages can be promoted in place: 立即发送 turns the queued task into a steer.
+  const [promotes, setPromotes] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
-  const filesPresence = usePresence(filesOpen, 160);
+  const [filesJump, setFilesJump] = useState<{ path: string; tick: number } | null>(null);
+  const filesPresence = usePresence(filesOpen, 150);
+  const filesButton = useRef<HTMLButtonElement>(null);
+  const dockedFiles = useMediaQuery("(min-width: 1024px)");
   // Compact replies keep the agent's words in separate bubbles; raw activity stays in details.
-  const [compact, setCompact] = useState(() => localStorage.getItem("tuantuan:compact") !== "0");
+  const [compact, setCompact] = useState(() => compactForRoom(localStorage, room.id));
   const densityAnimation = useRef<Animation | null>(null);
-  useEffect(() => {
-    localStorage.setItem("tuantuan:compact", compact ? "1" : "0");
-  }, [compact]);
   useEffect(() => {
     const preference = matchMedia("(prefers-reduced-motion: reduce)");
     const stopMotion = () => {
@@ -481,6 +524,27 @@ export function ChatView(props: {
     api<ReplayTurn[]>("GET", `/api/rooms/${room.id}/agents/${primaryId}/replay`).then(setReplay, () => {});
   }, [room.id, primaryId, primarySession]);
 
+  const tasks = state.tasks;
+  // Steer candidates: running/cancelling chains plus waiting coordinators — never queued-only
+  // tasks (those use 编辑消息) and never a chain overlapping one that already has a pending steer.
+  const steerOptions = useMemo(() => {
+    const claimed = new Set(tasks.flatMap((task) => task.steer?.waits ?? []));
+    const options: { task: (typeof tasks)[number]; stopped: number }[] = [];
+    for (const task of tasks) {
+      if (task.status === "queued") continue;
+      const chain = steerChain(task, tasks);
+      if (![...chain].some((id) => claimed.has(id))) options.push({ task, stopped: chain.size });
+    }
+    return options;
+  }, [tasks]);
+  // A queued message's steer target is whatever chain currently owns its agent's lane.
+  const laneSteerTarget = useCallback(
+    (task: RoomState["tasks"][number]) =>
+      steerOptions.find((option) => option.task.agentId === task.agentId && option.task.status !== "waiting")?.task ??
+      steerOptions.find((option) => option.task.agentId === task.agentId)?.task,
+    [steerOptions],
+  );
+
   const send = async () => {
     const content = draft.trim();
     if (
@@ -530,6 +594,29 @@ export function ChatView(props: {
     }
   };
 
+  // A link that names a local file opens in the workbench when inside the workspace; outside
+  // paths go through the OS on desktop, and every failure stays visible instead of no-op.
+  const openLocalLink = (href: string) => {
+    const link = resolveLocalFileLink(room.cwd, href);
+    if (!link) return;
+    if (link.relative !== null) {
+      preserveReadingPosition();
+      setPanel(false);
+      setFilesOpen(true);
+      setFilesJump({ path: link.relative, tick: Date.now() });
+      return;
+    }
+    const reveal = bridge()?.revealPath;
+    if (reveal && (link.absolute.startsWith("/") || /^[a-zA-Z]:\//.test(link.absolute))) {
+      void reveal(link.absolute);
+      return;
+    }
+    setSendError({
+      source: room.cwd ? "无法打开：路径不在当前项目工作区" : "无法打开：会话没有项目目录，无法定位该文件",
+      reason: "",
+    });
+  };
+
   const cancel = async (taskId: string) => {
     if (pendingCancellations.current.has(taskId)) return;
     pendingCancellations.current.add(taskId);
@@ -549,6 +636,49 @@ export function ChatView(props: {
       }));
     } finally {
       pendingCancellations.current.delete(taskId);
+    }
+  };
+
+  // 立即发送: the queued task itself becomes the accepted steer — no duplicate message.
+  const promoteSteer = async (task: RoomState["tasks"][number]) => {
+    const target = laneSteerTarget(task);
+    if (!target || pendingPromotes.current.has(task.id)) return;
+    pendingPromotes.current.add(task.id);
+    setPromotes((current) => ({ ...current, [task.id]: { pending: true, error: null } }));
+    try {
+      const sent = await api<Message>("POST", `/api/rooms/${room.id}/steer/${task.id}`, { targetTaskId: target.id });
+      dispatch({ type: "event", event: { type: "message", message: sent } });
+      setPromotes((current) => {
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+    } catch (e) {
+      setPromotes((current) => ({ ...current, [task.id]: { pending: false, error: (e as Error).message } }));
+    } finally {
+      pendingPromotes.current.delete(task.id);
+    }
+  };
+
+  // 编辑消息 withdraws a not-yet-started queued message from the transcript and restores the composer.
+  const editQueued = async (task: RoomState["tasks"][number]) => {
+    if (pendingEdits.current.has(task.id)) return;
+    pendingEdits.current.add(task.id);
+    setSendError(null);
+    try {
+      const restored = await api<RetractedQueued>("POST", `/api/rooms/${room.id}/retract/${task.id}`);
+      dispatch({ type: "event", event: { type: "message", message: restored.message } });
+      workspace.update({
+        draft: restored.draft,
+        images: restored.images,
+        files: restored.files,
+        quote: restored.quote,
+      });
+      document.querySelector<HTMLElement>(".composer-box textarea")?.focus();
+    } catch (e) {
+      setSendError({ source: "编辑失败：{reason}。请重试。", reason: (e as Error).message });
+    } finally {
+      pendingEdits.current.delete(task.id);
     }
   };
 
@@ -646,11 +776,26 @@ export function ChatView(props: {
 
   const openDetails = (id: string) => {
     preserveReadingPosition();
+    setFilesOpen(false);
     setSelected((cur) => (cur === id && panel ? null : id));
     setPanel(true);
   };
 
+  const settledRevision = useMemo(() => {
+    let count = 0;
+    let hash = 0;
+    for (const message of messages) {
+      if (message.status === "streaming") continue;
+      count++;
+      for (let i = 0; i < message.id.length; i++) hash = ((hash << 5) - hash + message.id.charCodeAt(i)) | 0;
+      hash = ((hash << 5) - hash + message.status.charCodeAt(0)) | 0;
+    }
+    return `${count}:${hash}`;
+  }, [messages]);
+
   const changeCompact = (value: boolean) => {
+    if (value === compact) return;
+    rememberCompact(localStorage, room.id, value);
     const list = listRef.current;
     const reversing = densityAnimation.current?.playState === "running";
     const opacity = list && reversing ? getComputedStyle(list).opacity : "0.55";
@@ -670,8 +815,32 @@ export function ChatView(props: {
     };
   };
 
-  const groups = groupMessages(messages);
-  const tasks = state.tasks;
+  const transcript = useMemo(() => messages.filter((message) => !messageWithdrawn(message.timeline)), [messages]);
+  const collaborations = useMemo(() => collaborationRuns(transcript, state.tasks), [transcript, state.tasks]);
+  const groups = groupMessages(transcript, collaborations);
+  const activity = roomTitleActivity(tasks, cancellations);
+  const memberNames = room.agentIds
+    .map((id) => agents.find((agent) => agent.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
+  const memberMeta =
+    memberNames.length > 1
+      ? memberNames.length > 2
+        ? `${memberNames.slice(0, 2).join(locale === "en" ? ", " : "、")} +${memberNames.length - 2}`
+        : memberNames.join(locale === "en" ? ", " : "、")
+      : null;
+  // 「草稿」 is the unassigned inbox, not a project name worth repeating in the title.
+  const projectMeta =
+    !memberMeta && props.project && props.project.id !== "drafts" && props.project.name !== room.name
+      ? props.project.name
+      : null;
+  const titleMeta = activity ? tr(activity) : (memberMeta ?? projectMeta);
+  const awake = tasks.some(
+    (task) =>
+      task.status === "running" ||
+      task.status === "waiting" ||
+      task.status === "cancelling" ||
+      cancellations[task.id]?.pending,
+  );
   const stopTask = tasks.length === 1 ? tasks[0] : undefined;
   const selectedMsg = messages.find((m) => m.id === selected);
   const ask = asks.find((item) => selectedRequest?.kind === "permission" && item.id === selectedRequest.id) ?? asks[0];
@@ -680,533 +849,595 @@ export function ChatView(props: {
     elicitations.find((item) => selectedRequest?.kind === "question" && item.id === selectedRequest.id) ??
     elicitations[0];
 
+  const renderMessage = (m: Message, assistant = false) => (
+    <MessageItem
+      key={m.id}
+      m={m}
+      onQuote={
+        room.kind === "group" && canQuoteMessage(m) ? (partIndex) => setQuote(messageQuote(m, partIndex)) : undefined
+      }
+      quoteDisabled={sending}
+      terminals={terminals}
+      mentionNames={mentionNames}
+      compact={compact}
+      selected={selected === m.id && panel}
+      onDetails={() => openDetails(m.id)}
+      onJumpToQuote={jumpToMessage}
+      harnessId={agentById.get(m.senderId ?? "")?.harness}
+      hideAuthPrompt={assistant}
+      retry={m.senderKind === "agent" && m.status === "interrupted" ? retries[m.id] : undefined}
+      onRetry={m.senderKind === "agent" && m.status === "interrupted" ? () => void retryRequest(m.id) : undefined}
+    />
+  );
+
   return (
-    <div className="conversation-workspace">
-      <div className="chat-wrap">
-        <div className="chat">
-          <header className="main-head chat-head">
-            <button
-              type="button"
-              className="btn ghost icon back-btn"
-              onClick={props.onBack}
-              aria-label={tr("返回会话列表")}
-              data-shot="open-nav"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <button
-              type="button"
-              className="title-pill"
-              title={roomSubtitle(room, agents)}
-              onClick={() => {
-                preserveReadingPosition();
-                setPanel(true);
-              }}
-            >
-              <RoomIcon room={room} agents={agents} size={22} />
-              <h2>{room.name}</h2>
-            </button>
-            <div className="chat-head-actions">
+    <LocalLinkOpen.Provider value={openLocalLink}>
+      <div className="conversation-workspace">
+        <div className="chat-wrap">
+          <div className="chat">
+            <header className="main-head chat-head">
               <button
                 type="button"
-                className="btn ghost icon conversation-files-open"
-                aria-label={tr("会话文件")}
-                title={tr("会话文件")}
-                aria-haspopup="dialog"
-                aria-expanded={filesOpen}
-                onClick={() => setFilesOpen(true)}
+                className="btn ghost icon back-btn"
+                onClick={props.onBack}
+                aria-label={tr("返回会话列表")}
+                data-shot="open-nav"
               >
-                <FolderOpen size={18} />
+                <ChevronLeft size={18} />
               </button>
-              {props.onSearch && (
-                <button
-                  type="button"
-                  className="btn ghost icon"
-                  aria-label={tr("搜索当前会话")}
-                  title={tr("搜索当前会话（⌘F / Ctrl+F）")}
-                  onClick={props.onSearch}
-                >
-                  <Search size={18} />
-                </button>
-              )}
-              {props.project && (
-                <button
-                  ref={terminalButton}
-                  type="button"
-                  className="btn ghost icon"
-                  aria-label={terminalOpen ? tr("收起项目终端") : tr("打开项目终端")}
-                  title={tr("终端（Ctrl+`）")}
-                  aria-expanded={terminalOpen}
-                  onClick={() => showTerminal(!terminalOpen)}
-                >
-                  <SquareTerminal size={18} />
-                </button>
-              )}
-              {!(panel && wide) && (
-                <button
-                  type="button"
-                  className="btn ghost icon"
-                  aria-pressed={panel}
-                  aria-label={panel ? tr("收起详情面板") : tr("展开详情面板")}
-                  title={tr("详情面板")}
-                  onClick={() => {
-                    preserveReadingPosition();
-                    setPanel((v) => !v);
-                    setSelected(null);
-                  }}
-                >
-                  <PanelRight size={18} />
-                </button>
-              )}
-            </div>
-          </header>
-
-          {loadError && (
-            <div className="form-error" role="alert" style={{ margin: 12 }}>
-              <AlertTriangle size={15} /> {tr("消息加载失败：{reason}", { reason: translateError(loadError) })}
-            </div>
-          )}
-
-          <div className="messages-wrap">
-            <section
-              className="messages"
-              ref={listRef}
-              tabIndex={-1}
-              aria-label={tr("会话消息")}
-              onWheel={(event) => {
-                restoringWorkspace.current = false;
-                setReadingRestoreError(false);
-                onWheel(event);
-                captureWorkspaceReading();
-              }}
-              onTouchMove={() => {
-                restoringWorkspace.current = false;
-                setReadingRestoreError(false);
-                onTouchMove();
-                captureWorkspaceReading();
-              }}
-              onScroll={(event) => {
-                onScroll(event);
-                captureWorkspaceReading();
-              }}
-            >
-              {nextBeforeSeq !== null && (
-                <div className="chat-history">
-                  <button
-                    type="button"
-                    className="btn ghost sm"
-                    aria-disabled={!!history.loading}
-                    onClick={() => void loadHistory()}
-                  >
-                    <History size={14} />
-                    {history.loading ? tr("加载中…") : tr("加载更早消息")}
-                  </button>
-                  <span className="chat-history-status" role={history.error ? "alert" : "status"}>
-                    {history.error ? tr("加载失败：{reason}。请重试。", { reason: translateError(history.error) }) : ""}
-                  </span>
-                </div>
-              )}
-              {messages.length === 0 && replay.length === 0 && !loadError && (
-                <div className="empty">
-                  <RoomIcon room={room} agents={agents} />
-                  <h2 style={{ fontSize: 17 }}>
-                    {members.length > 1
-                      ? tr("开始聊天")
-                      : tr("和 {name} 打个招呼", { name: members[0]?.name ?? "Agent" })}
-                  </h2>
-                  {primary && !primary.harness && (
-                    <p className="muted">
-                      {tr("{name} 还没有绑定 Harness，", { name: primary.name })}
-                      <a href={`#/a/${primary.id}`}>{tr("去设置")}</a>
-                      {tr("或")}
-                      <a href="#/harness">{tr("管理 Harness")}</a>
-                      {tr("。")}
-                    </p>
-                  )}
-                  {members.length > 1 && (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-                      {members.map((a) => (
-                        <button
-                          key={a.id}
-                          type="button"
-                          className="chip-btn"
-                          onClick={() => setDraft((d) => `${d}@${a.name} `)}
-                        >
-                          <AgentAvatar agent={a} size={16} />
-                          <span>@{a.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {replay.length > 0 && primary && (
-                <ReplayHistory turns={replay} agentName={primary.name} terminals={terminals} />
-              )}
-              {groups.map((g) =>
-                g.kind === "system" ? (
-                  <div key={g.messages[0]?.id} className="system-line" role="note" data-message-id={g.messages[0]?.id}>
-                    <span>{g.messages[0]?.content}</span>
-                  </div>
-                ) : (
-                  <div key={g.messages[0]?.id} className="msg-group" data-kind={g.kind}>
-                    {g.kind === "agent" ? (
-                      <LiveAvatar
-                        agent={agentById.get(g.senderId ?? "")}
-                        name={g.senderName}
-                        last={g.messages.at(-1)}
-                      />
-                    ) : (
-                      <HumanAvatar name={g.senderName} size={36} />
-                    )}
-                    <div className="msg-head">
-                      <span className="name">{g.senderName}</span>
-                      {g.kind === "agent" && !agentById.has(g.senderId ?? "") && (
-                        <span className="badge">{tr("已删除")}</span>
-                      )}
-                      <span className="time">{formatTime(g.messages[0]?.createdAt ?? 0, locale)}</span>
-                    </div>
-                    {g.messages.map((m) => (
-                      <MessageItem
-                        key={m.id}
-                        m={m}
-                        onQuote={
-                          room.kind === "group" && canQuoteMessage(m)
-                            ? (partIndex) => setQuote(messageQuote(m, partIndex))
-                            : undefined
-                        }
-                        quoteDisabled={sending}
-                        terminals={terminals}
-                        mentionNames={mentionNames}
-                        compact={compact}
-                        selected={selected === m.id && panel}
-                        onDetails={() => openDetails(m.id)}
-                        onJumpToQuote={jumpToMessage}
-                        harnessId={agentById.get(m.senderId ?? "")?.harness}
-                        retry={m.senderKind === "agent" && m.status === "interrupted" ? retries[m.id] : undefined}
-                        onRetry={
-                          m.senderKind === "agent" && m.status === "interrupted"
-                            ? () => void retryRequest(m.id)
-                            : undefined
-                        }
-                      />
-                    ))}
-                  </div>
-                ),
-              )}
-            </section>
-            <div className="msg-fade msg-fade-top" aria-hidden />
-            <div className="msg-fade msg-fade-bottom" aria-hidden />
-            {(returnPosition || !following) && (
-              <div className="chat-scroll-actions">
-                {returnPosition && (
-                  <button type="button" className="btn sm chat-return" onClick={returnToReading}>
-                    <ChevronLeft size={14} />
-                    {tr("返回刚才位置")}
-                  </button>
-                )}
-                {!following && (
-                  <button
-                    type="button"
-                    className="btn sm chat-latest"
-                    onClick={goToLatest}
-                    aria-label={tr("回到最新消息")}
-                  >
-                    <ArrowDown size={14} />
-                    {tr("回到最新")}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          <footer className="composer">
-            {readingRestoreError && (
-              <p className="quote-navigation-feedback" role="status">
-                {tr("无法恢复阅读位置，可重试加载历史或回到最新消息。")}
-                {nextBeforeSeq !== null && (
-                  <button type="button" className="btn ghost sm" onClick={() => void loadHistory()}>
-                    {tr("重试")}
-                  </button>
-                )}
-                <button type="button" className="btn ghost sm" onClick={goToLatest}>
-                  {tr("回到最新")}
-                </button>
-              </p>
-            )}
-            {!workspace.loaded && !workspace.error && <p className="muted">{tr("正在恢复聊天草稿…")}</p>}
-            {jumpError && (
-              <p className="quote-navigation-feedback" role="status">
-                {tr(jumpError.source, { reason: translateError(jumpError.reason ?? "") })}
-              </p>
-            )}
-            {elicitation && (
-              <ElicitationDialog
-                key={elicitation.id}
-                ask={elicitation}
-                revealRequest={
-                  selectedRequest?.kind === "question" && selectedRequest.id === elicitation.id
-                    ? selectedRequest.nonce
-                    : undefined
-                }
-                agentName={agentById.get(elicitation.agentId)?.name ?? "Agent"}
-                pending={answers[elicitation.id]?.pending ?? false}
-                error={answers[elicitation.id]?.error ?? null}
-                onAccept={(content) => void answerElicitation(elicitation.id, "accept", content)}
-                onCancel={() => void answerElicitation(elicitation.id, "cancel")}
-              />
-            )}
-            {(tasks.length > 0 || conclusion) && (
-              <ReplyStatus
-                tasks={tasks}
-                agents={agentById}
-                cancellations={cancellations}
-                onCancel={(id) => void cancel(id)}
-                conclusion={conclusion}
-                onJump={() => {
-                  if (conclusion) void jumpToMessage(conclusion.messageId);
-                }}
-              />
-            )}
-            {sendError && (
-              <div className="error-text" role="alert" style={{ marginBottom: 6 }}>
-                {tr(sendError.source, { reason: translateError(sendError.reason) })}
-              </div>
-            )}
-            <Composer
-              roomId={room.id}
-              value={draft}
-              quote={quote}
-              onCancelQuote={() => setQuote(null)}
-              onJumpToQuote={jumpToMessage}
-              sending={sending || !workspace.loaded}
-              onChange={setDraft}
-              onSubmit={() => void send()}
-              members={members.length > 1 ? members : []}
-              placeholder={
-                primaryView?.commands.length || primaryView?.skills.length
-                  ? tr("发消息，/ 命令 · $ Skills…")
-                  : tr("发消息…")
-              }
-              commands={primaryView?.commands ?? []}
-              skills={primaryView?.skills ?? []}
-              images={images}
-              files={files}
-              onRemoveImage={(image) =>
-                workspace.update({
-                  images: chatWorkspace.snapshot(room.id).data.images.filter((current) => current !== image),
-                })
-              }
-              onRemoveFile={(file) =>
-                workspace.update({
-                  files: chatWorkspace.snapshot(room.id).data.files.filter((current) => current !== file),
-                })
-              }
-              pendingAttachments={workspace.pendingAttachments}
-              attachmentError={workspace.attachmentError}
-              imageNote={imageNote}
-              fileNote={fileNote}
-              imageBlocked={imageBlocked}
-              stopTask={stopTask}
-              stopPending={!!stopTask && (cancellations[stopTask.id]?.pending || stopTask.status === "cancelling")}
-              queued={state.queued}
-              onStop={() => stopTask && void cancel(stopTask.id)}
-              modelPicker={<SessionChips members={members} sessions={sessions} onPick={pickOption} />}
-              usage={
-                members.length === 1 ? (
-                  primaryView ? (
-                    <CtxUsage view={primaryView} />
-                  ) : null
-                ) : (
-                  <RoomUsage
-                    roomId={room.id}
-                    revision={messages
-                      .filter((message) => message.status !== "streaming")
-                      .map((message) => `${message.id}:${message.status}`)
-                      .join("|")}
-                  />
-                )
-              }
-            />
-          </footer>
-        </div>
-
-        {ask &&
-          !(selectedRequest?.kind === "question" && elicitations.some((item) => item.id === selectedRequest.id)) && (
-            <PermissionDialog
-              key={ask.id}
-              ask={ask}
-              agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
-              terminals={terminals}
-              pending={answers[ask.id]?.pending ?? false}
-              error={
-                answers[ask.id]?.error
-                  ? tr("授权提交失败：{reason}。请重试。", { reason: translateError(answers[ask.id]?.error ?? "") })
-                  : null
-              }
-              onAnswer={(optionId) => void answer(ask.id, optionId)}
-            />
-          )}
-
-        {panelPresence.mounted && (
-          <>
-            {!wide && (
-              // biome-ignore lint/a11y/noStaticElementInteractions: scrim closes the overlay panel; the close button is the keyboard path
-              // biome-ignore lint/a11y/useKeyWithClickEvents: see above
-              <div
-                className="scrim"
-                data-state={panelPresence.state}
+              <button
+                type="button"
+                className="title-pill"
+                data-live={activity ? "" : undefined}
+                aria-expanded={panel}
+                title={activity ? `${roomSubtitle(room, agents)} · ${tr(activity)}` : roomSubtitle(room, agents)}
                 onClick={() => {
                   preserveReadingPosition();
-                  setPanel(false);
+                  setFilesOpen(false);
+                  setPanel(true);
                 }}
-              />
-            )}
-            {/* The slot reserves the panel's column and resizes in step with the slide, so the chat never jumps. */}
-            <div className="details-slot" data-state={panelPresence.state}>
-              <aside className="details" data-state={panelPresence.state} aria-label={tr("详情面板")}>
-                <div className="details-head">
-                  {selectedMsg && (
-                    <button
-                      type="button"
-                      className="btn ghost icon"
-                      aria-label={tr("返回会话信息")}
-                      title={tr("返回会话信息")}
-                      onClick={() => setSelected(null)}
-                    >
-                      <ChevronLeft size={16} />
-                    </button>
+              >
+                <span className="title-faces">
+                  <RoomIcon room={room} agents={agents} size={24} busy={awake} />
+                  {awake && <span className="busy-dot" aria-hidden />}
+                </span>
+                <span className="title-copy">
+                  <h2>{room.name}</h2>
+                  {titleMeta && (
+                    <span className="title-meta">
+                      <span className="title-dot" aria-hidden />
+                      <span className="title-meta-text">{titleMeta}</span>
+                    </span>
                   )}
-                  <h3>{selectedMsg ? tr("回复详情") : tr("会话信息")}</h3>
-                  <div className="details-actions">
-                    <button
-                      type="button"
-                      className="btn ghost icon"
-                      aria-label={tr("关闭详情面板")}
-                      onClick={() => {
-                        preserveReadingPosition();
-                        setPanel(false);
-                      }}
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                </div>
-                <div className="details-body">
-                  {selectedMsg ? (
-                    <MessageDetails
-                      m={selectedMsg}
-                      agent={agentById.get(selectedMsg.senderId ?? "")}
-                      harnessName={props.harnessName}
-                      terminals={terminals}
-                      mentionNames={mentionNames}
-                    />
-                  ) : (
-                    <RoomInfo
-                      room={room}
-                      project={props.project}
-                      agents={agents}
-                      members={members}
-                      messages={messages}
-                      sessions={sessions}
-                      compact={compact}
-                      onCompactChange={changeCompact}
-                      harnessName={props.harnessName}
-                      onRoomChange={props.onRoomChange}
-                      onDeleted={props.onDeleted}
-                    />
-                  )}
-                </div>
-              </aside>
-            </div>
-          </>
-        )}
-      </div>
-      {filesPresence.mounted && (
-        <ConversationFiles
-          key={room.id}
-          open={filesOpen}
-          roomId={room.id}
-          roomName={room.name}
-          revision={messages
-            .filter((message) => message.status !== "streaming")
-            .map((message) => `${message.id}:${message.status}`)
-            .join("|")}
-          onClose={() => setFilesOpen(false)}
-          onSelectMessage={(messageId) => {
-            setFilesOpen(false);
-            props.onNavigateMessage(messageId);
-          }}
-        />
-      )}
-      {props.project && (
-        <div
-          ref={terminalSlot}
-          className="terminal-slot"
-          data-open={terminalOpen || undefined}
-          inert={!terminalOpen}
-          aria-hidden={!terminalOpen}
-          onTransitionCancel={() => {
-            if (!terminalOpen && terminalEnding.current && (terminalSlot.current?.clientHeight ?? 0) === 0) {
-              terminalEnding.current = false;
-              setTerminalMounted(false);
-            }
-          }}
-          onTransitionEnd={(event) => {
-            if (event.target !== event.currentTarget || event.propertyName !== "grid-template-rows") return;
-            if (!terminalOpen && terminalEnding.current) {
-              terminalEnding.current = false;
-              setTerminalMounted(false);
-            }
-          }}
-        >
-          <div className="terminal-clip">
-            <div className="terminal-slot-content" style={{ height: terminalHeight }}>
-              {terminalMounted && (
-                <Suspense
-                  fallback={
-                    <div className="terminal-loading" role="status">
-                      {tr("正在打开终端…")}
-                    </div>
-                  }
+                </span>
+              </button>
+              <div className="chat-head-actions">
+                <button
+                  ref={filesButton}
+                  type="button"
+                  className="btn ghost icon conversation-files-open"
+                  aria-label={tr("会话文件")}
+                  title={tr("会话文件")}
+                  aria-expanded={filesOpen}
+                  onClick={() => {
+                    preserveReadingPosition();
+                    setFilesOpen((open) => {
+                      const next = !open;
+                      if (next) setPanel(false);
+                      return next;
+                    });
+                  }}
                 >
-                  <ProjectTerminal
-                    key={terminalEpoch}
-                    project={props.project}
-                    visible={terminalOpen}
-                    height={terminalHeight}
-                    onHeightChange={setTerminalHeight}
-                    focusRequest={terminalFocusRequest}
-                    onHide={() => showTerminal(false)}
-                    onEnded={() => {
-                      terminalEnding.current = true;
-                      showTerminal(false);
-                      if (reducedMotion() || (terminalSlot.current?.clientHeight ?? 0) === 0) {
-                        terminalEnding.current = false;
-                        setTerminalMounted(false);
-                      }
+                  <FolderOpen size={18} />
+                </button>
+                {props.onSearch && (
+                  <button
+                    type="button"
+                    className="btn ghost icon"
+                    aria-label={tr("搜索当前会话")}
+                    title={tr("搜索当前会话（⌘F / Ctrl+F）")}
+                    onClick={props.onSearch}
+                  >
+                    <Search size={18} />
+                  </button>
+                )}
+                {props.project && (
+                  <button
+                    ref={terminalButton}
+                    type="button"
+                    className="btn ghost icon"
+                    aria-label={terminalOpen ? tr("收起项目终端") : tr("打开项目终端")}
+                    title={tr("终端（Ctrl+`）")}
+                    aria-expanded={terminalOpen}
+                    onClick={() => showTerminal(!terminalOpen)}
+                  >
+                    <SquareTerminal size={18} />
+                  </button>
+                )}
+                {!(panel && wide) && (
+                  <button
+                    type="button"
+                    className="btn ghost icon"
+                    aria-pressed={panel}
+                    aria-label={panel ? tr("收起详情面板") : tr("展开详情面板")}
+                    title={tr("详情面板")}
+                    onClick={() => {
+                      preserveReadingPosition();
+                      setPanel((v) => {
+                        const next = !v;
+                        if (next) setFilesOpen(false);
+                        return next;
+                      });
+                      setSelected(null);
                     }}
-                  />
-                </Suspense>
+                  >
+                    <PanelRight size={18} />
+                  </button>
+                )}
+              </div>
+            </header>
+
+            {loadError && (
+              <div className="form-error" role="alert" style={{ margin: 12 }}>
+                <AlertTriangle size={15} /> {tr("消息加载失败：{reason}", { reason: translateError(loadError) })}
+              </div>
+            )}
+
+            <div className="messages-wrap">
+              <section
+                className="messages"
+                ref={listRef}
+                tabIndex={-1}
+                aria-label={tr("会话消息")}
+                onWheel={(event) => {
+                  restoringWorkspace.current = false;
+                  setReadingRestoreError(false);
+                  onWheel(event);
+                  captureWorkspaceReading();
+                }}
+                onTouchMove={() => {
+                  restoringWorkspace.current = false;
+                  setReadingRestoreError(false);
+                  onTouchMove();
+                  captureWorkspaceReading();
+                }}
+                onScroll={(event) => {
+                  onScroll(event);
+                  captureWorkspaceReading();
+                }}
+              >
+                {nextBeforeSeq !== null && (
+                  <div className="chat-history">
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      aria-disabled={!!history.loading}
+                      onClick={() => void loadHistory()}
+                    >
+                      <History size={14} />
+                      {history.loading ? tr("加载中…") : tr("加载更早消息")}
+                    </button>
+                    <span className="chat-history-status" role={history.error ? "alert" : "status"}>
+                      {history.error
+                        ? tr("加载失败：{reason}。请重试。", { reason: translateError(history.error) })
+                        : ""}
+                    </span>
+                  </div>
+                )}
+                {messages.length === 0 && replay.length === 0 && !loadError && (
+                  <div className="empty">
+                    <RoomIcon room={room} agents={agents} />
+                    <h2 style={{ fontSize: 17 }}>
+                      {members.length > 1
+                        ? tr("开始聊天")
+                        : tr("和 {name} 打个招呼", { name: members[0]?.name ?? "Agent" })}
+                    </h2>
+                    {primary && !primary.harness && (
+                      <p className="muted">
+                        {tr("{name} 还没有绑定 Harness，", { name: primary.name })}
+                        <a href={`#/a/${primary.id}`}>{tr("去设置")}</a>
+                        {tr("或")}
+                        <a href="#/harness">{tr("管理 Harness")}</a>
+                        {tr("。")}
+                      </p>
+                    )}
+                    {members.length > 1 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                        {members.map((a) => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => setDraft((d) => `${d}@${a.name} `)}
+                          >
+                            <AgentAvatar agent={a} size={16} />
+                            <span>@{a.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {replay.length > 0 && primary && (
+                  <ReplayHistory turns={replay} agentName={primary.name} terminals={terminals} />
+                )}
+                {groups.map((g) =>
+                  g.kind === "collaboration" ? (
+                    <CollaborationDetails
+                      key={`collaboration:${g.run.runId}`}
+                      run={g.run}
+                      agents={agentById}
+                      compact={compact}
+                      renderMessage={renderMessage}
+                      onJumpToMessage={jumpToMessage}
+                      onToggle={pause}
+                    />
+                  ) : g.kind === "system" ? (
+                    <div
+                      key={g.messages[0]?.id}
+                      className="system-line"
+                      role="note"
+                      data-message-id={g.messages[0]?.id}
+                    >
+                      <span>{g.messages[0]?.content}</span>
+                    </div>
+                  ) : (
+                    <div key={g.messages[0]?.id} className="msg-group" data-kind={g.kind}>
+                      {g.kind === "agent" ? (
+                        <LiveAvatar
+                          agent={agentById.get(g.senderId ?? "")}
+                          name={g.senderName}
+                          last={g.messages.at(-1)}
+                        />
+                      ) : (
+                        <HumanAvatar name={g.senderName} size={36} />
+                      )}
+                      <div className="msg-head">
+                        <span className="name">{g.senderName}</span>
+                        {g.kind === "agent" && !agentById.has(g.senderId ?? "") && (
+                          <span className="badge">{tr("已删除")}</span>
+                        )}
+                        <span className="time">{formatTime(g.messages[0]?.createdAt ?? 0, locale)}</span>
+                      </div>
+                      {g.messages.map((m) => renderMessage(m))}
+                    </div>
+                  ),
+                )}
+              </section>
+              <div className="msg-fade msg-fade-top" aria-hidden />
+              <div className="msg-fade msg-fade-bottom" aria-hidden />
+              {(returnPosition || !following) && (
+                <div className="chat-scroll-actions">
+                  {returnPosition && (
+                    <button type="button" className="btn sm chat-return" onClick={returnToReading}>
+                      <ChevronLeft size={14} />
+                      {tr("返回刚才位置")}
+                    </button>
+                  )}
+                  {!following && (
+                    <button
+                      type="button"
+                      className="btn sm chat-latest"
+                      onClick={goToLatest}
+                      aria-label={tr("回到最新消息")}
+                    >
+                      <ArrowDown size={14} />
+                      {tr("回到最新")}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
+
+            <footer className="composer">
+              {readingRestoreError && (
+                <p className="quote-navigation-feedback" role="status">
+                  {tr("无法恢复阅读位置，可重试加载历史或回到最新消息。")}
+                  {nextBeforeSeq !== null && (
+                    <button type="button" className="btn ghost sm" onClick={() => void loadHistory()}>
+                      {tr("重试")}
+                    </button>
+                  )}
+                  <button type="button" className="btn ghost sm" onClick={goToLatest}>
+                    {tr("回到最新")}
+                  </button>
+                </p>
+              )}
+              {!workspace.loaded && !workspace.error && <p className="muted">{tr("正在恢复聊天草稿…")}</p>}
+              {jumpError && (
+                <p className="quote-navigation-feedback" role="status">
+                  {tr(jumpError.source, { reason: translateError(jumpError.reason ?? "") })}
+                </p>
+              )}
+              {elicitation && (
+                <ElicitationDialog
+                  key={elicitation.id}
+                  ask={elicitation}
+                  revealRequest={
+                    selectedRequest?.kind === "question" && selectedRequest.id === elicitation.id
+                      ? selectedRequest.nonce
+                      : undefined
+                  }
+                  agentName={agentById.get(elicitation.agentId)?.name ?? "Agent"}
+                  pending={answers[elicitation.id]?.pending ?? false}
+                  error={answers[elicitation.id]?.error ?? null}
+                  onAccept={(content) => void answerElicitation(elicitation.id, "accept", content)}
+                  onCancel={() => void answerElicitation(elicitation.id, "cancel")}
+                />
+              )}
+              {(tasks.length > 0 || conclusion) && (
+                <ReplyStatus
+                  tasks={tasks}
+                  agents={agentById}
+                  cancellations={cancellations}
+                  promotes={promotes}
+                  steerTarget={laneSteerTarget}
+                  onSteer={(task) => void promoteSteer(task)}
+                  onEdit={(task) => void editQueued(task)}
+                  onCancel={(id) => void cancel(id)}
+                  conclusion={conclusion}
+                  onJump={() => {
+                    if (conclusion) void jumpToMessage(conclusion.messageId);
+                  }}
+                />
+              )}
+              {sendError && (
+                <div className="error-text" role="alert" style={{ marginBottom: 6 }}>
+                  {tr(sendError.source, { reason: translateError(sendError.reason) })}
+                </div>
+              )}
+              <Composer
+                roomId={room.id}
+                value={draft}
+                quote={quote}
+                onCancelQuote={() => setQuote(null)}
+                onJumpToQuote={jumpToMessage}
+                sending={sending || !workspace.loaded}
+                onChange={setDraft}
+                onSubmit={() => void send()}
+                members={members.length > 1 ? members : []}
+                placeholder={
+                  primaryView?.commands.length || primaryView?.skills.length
+                    ? tr("发消息，/ 命令 · $ Skills…")
+                    : tr("发消息…")
+                }
+                commands={primaryView?.commands ?? []}
+                skills={primaryView?.skills ?? []}
+                images={images}
+                files={files}
+                onRemoveImage={(image) =>
+                  workspace.update({
+                    images: chatWorkspace.snapshot(room.id).data.images.filter((current) => current !== image),
+                  })
+                }
+                onRemoveFile={(file) =>
+                  workspace.update({
+                    files: chatWorkspace.snapshot(room.id).data.files.filter((current) => current !== file),
+                  })
+                }
+                pendingAttachments={workspace.pendingAttachments}
+                attachmentError={workspace.attachmentError}
+                imageNote={imageNote}
+                fileNote={fileNote}
+                imageBlocked={imageBlocked}
+                stopTask={stopTask}
+                stopPending={
+                  !!stopTask &&
+                  (cancellations[stopTask.id]?.pending ||
+                    promotes[stopTask.id]?.pending ||
+                    stopTask.status === "cancelling")
+                }
+                queued={state.queued}
+                onStop={() =>
+                  stopTask &&
+                  void (stopTask.status === "queued" && !stopTask.steer ? editQueued(stopTask) : cancel(stopTask.id))
+                }
+                modelPicker={<SessionChips members={members} sessions={sessions} onPick={pickOption} />}
+                usage={
+                  members.length === 1 ? (
+                    primaryView ? (
+                      <CtxUsage view={primaryView} />
+                    ) : null
+                  ) : (
+                    <RoomUsage
+                      roomId={room.id}
+                      revision={messages
+                        .filter((message) => message.status !== "streaming")
+                        .map((message) => `${message.id}:${message.status}`)
+                        .join("|")}
+                    />
+                  )
+                }
+              />
+            </footer>
           </div>
+
+          {ask &&
+            !(selectedRequest?.kind === "question" && elicitations.some((item) => item.id === selectedRequest.id)) && (
+              <PermissionDialog
+                key={ask.id}
+                ask={ask}
+                agentName={agentById.get(ask.agentId)?.name ?? "Agent"}
+                terminals={terminals}
+                pending={answers[ask.id]?.pending ?? false}
+                error={
+                  answers[ask.id]?.error
+                    ? tr("授权提交失败：{reason}。请重试。", { reason: translateError(answers[ask.id]?.error ?? "") })
+                    : null
+                }
+                onAnswer={(optionId) => void answer(ask.id, optionId)}
+              />
+            )}
+
+          {panelPresence.mounted && (
+            <>
+              {!wide && (
+                // biome-ignore lint/a11y/noStaticElementInteractions: scrim closes the overlay panel; the close button is the keyboard path
+                // biome-ignore lint/a11y/useKeyWithClickEvents: see above
+                <div
+                  className="scrim"
+                  data-state={panelPresence.state}
+                  onClick={() => {
+                    preserveReadingPosition();
+                    setPanel(false);
+                  }}
+                />
+              )}
+              {/* The slot reserves the panel's column and resizes in step with the slide, so the chat never jumps. */}
+              <div className="details-slot" data-state={panelPresence.state}>
+                <aside className="details" data-state={panelPresence.state} aria-label={tr("详情面板")}>
+                  <div className="details-head">
+                    {selectedMsg && (
+                      <button
+                        type="button"
+                        className="btn ghost icon"
+                        aria-label={tr("返回会话信息")}
+                        title={tr("返回会话信息")}
+                        onClick={() => setSelected(null)}
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                    )}
+                    <h3>{selectedMsg ? tr("回复详情") : tr("会话信息")}</h3>
+                    <div className="details-actions">
+                      <button
+                        type="button"
+                        className="btn ghost icon"
+                        aria-label={tr("关闭详情面板")}
+                        onClick={() => {
+                          preserveReadingPosition();
+                          setPanel(false);
+                        }}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="details-body">
+                    {selectedMsg ? (
+                      <MessageDetails
+                        m={selectedMsg}
+                        agent={agentById.get(selectedMsg.senderId ?? "")}
+                        harnessName={props.harnessName}
+                        terminals={terminals}
+                        mentionNames={mentionNames}
+                      />
+                    ) : (
+                      <RoomInfo
+                        room={room}
+                        project={props.project}
+                        agents={agents}
+                        members={members}
+                        messages={messages}
+                        sessions={sessions}
+                        compact={compact}
+                        onCompactChange={changeCompact}
+                        harnessName={props.harnessName}
+                        onRoomChange={props.onRoomChange}
+                        onDeleted={props.onDeleted}
+                      />
+                    )}
+                  </div>
+                </aside>
+              </div>
+            </>
+          )}
+          {filesPresence.mounted && (
+            <ConversationFiles
+              key={room.id}
+              open={filesOpen}
+              state={filesPresence.state}
+              hasProject={Boolean(props.project && props.project.id !== "drafts")}
+              roomId={room.id}
+              roomName={room.name}
+              revision={settledRevision}
+              openPath={filesJump}
+              returnFocusTo={filesButton.current}
+              onClose={() => {
+                preserveReadingPosition();
+                setFilesOpen(false);
+              }}
+              onSelectMessage={(messageId) => {
+                if (!dockedFiles) setFilesOpen(false);
+                props.onNavigateMessage(messageId);
+              }}
+            />
+          )}
         </div>
-      )}
-    </div>
+        {props.project && (
+          <div
+            ref={terminalSlot}
+            className="terminal-slot"
+            data-open={terminalOpen || undefined}
+            inert={!terminalOpen}
+            aria-hidden={!terminalOpen}
+            onTransitionCancel={() => {
+              if (!terminalOpen && terminalEnding.current && (terminalSlot.current?.clientHeight ?? 0) === 0) {
+                terminalEnding.current = false;
+                setTerminalMounted(false);
+              }
+            }}
+            onTransitionEnd={(event) => {
+              if (event.target !== event.currentTarget || event.propertyName !== "grid-template-rows") return;
+              if (!terminalOpen && terminalEnding.current) {
+                terminalEnding.current = false;
+                setTerminalMounted(false);
+              }
+            }}
+          >
+            <div className="terminal-clip">
+              <div className="terminal-slot-content" style={{ height: terminalHeight }}>
+                {terminalMounted && (
+                  <Suspense
+                    fallback={
+                      <div className="terminal-loading" role="status">
+                        {tr("正在打开终端…")}
+                      </div>
+                    }
+                  >
+                    <ProjectTerminal
+                      key={terminalEpoch}
+                      project={props.project}
+                      visible={terminalOpen}
+                      height={terminalHeight}
+                      onHeightChange={setTerminalHeight}
+                      focusRequest={terminalFocusRequest}
+                      onHide={() => showTerminal(false)}
+                      onEnded={() => {
+                        terminalEnding.current = true;
+                        showTerminal(false);
+                        if (reducedMotion() || (terminalSlot.current?.clientHeight ?? 0) === 0) {
+                          terminalEnding.current = false;
+                          setTerminalMounted(false);
+                        }
+                      }}
+                    />
+                  </Suspense>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </LocalLinkOpen.Provider>
   );
 }
 
-type Group = { kind: Message["senderKind"]; senderId: string | null; senderName: string; messages: Message[] };
+type Group =
+  | { kind: Message["senderKind"]; senderId: string | null; senderName: string; messages: Message[] }
+  | { kind: "collaboration"; run: CollaborationRun };
 
 /** Consecutive messages from the same speaker within 5 minutes share one header. */
-function groupMessages(messages: Message[]): Group[] {
+function groupMessages(messages: Message[], collaborations: Map<string, CollaborationRun>): Group[] {
   const out: Group[] = [];
-  for (const m of messages) {
+  const placed = new Set<string>();
+  const anchors = collaborationAnchors(messages, collaborations);
+  const addMessage = (m: Message) => {
     const last = out.at(-1);
-    const prev = last?.messages.at(-1);
+    const prev = last?.kind !== "collaboration" ? last?.messages.at(-1) : undefined;
     if (
       last &&
+      last.kind !== "collaboration" &&
       prev &&
       m.senderKind !== "system" &&
       last.kind === m.senderKind &&
@@ -1216,8 +1447,186 @@ function groupMessages(messages: Message[]): Group[] {
     )
       last.messages.push(m);
     else out.push({ kind: m.senderKind, senderId: m.senderId, senderName: m.senderName, messages: [m] });
+  };
+  for (const m of messages) {
+    const run = collaborations.get(m.runId);
+    const assistant = Boolean(run && isAssistantMessage(m));
+    if (!assistant) addMessage(m);
+    if (run && !placed.has(run.runId) && anchors.get(run.runId) === m.id) {
+      placed.add(run.runId);
+      out.push({ kind: "collaboration", run });
+    }
+  }
+  for (const run of collaborations.values()) {
+    if (!placed.has(run.runId)) out.push({ kind: "collaboration", run });
   }
   return out;
+}
+
+function CollaborationDetails(props: {
+  run: CollaborationRun;
+  agents: Map<string, Agent>;
+  compact: boolean;
+  renderMessage: (message: Message, assistant: boolean) => ReactNode;
+  onJumpToMessage: (messageId: string) => void;
+  onToggle: () => void;
+}) {
+  const { t } = useI18n();
+  const { run } = props;
+  const [open, setOpen] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const contentId = useId();
+  const status = {
+    running: "协作中",
+    done: "助手已回复",
+    error: "助手回复失败",
+    interrupted: "助手回复被中断",
+    cancelled: "助手已停止",
+    unknown: "未记录回复",
+  } as const;
+  const messageStatus = {
+    streaming: "回复中",
+    done: "正常结束",
+    error: "回复失败",
+    interrupted: "回复被中断",
+    cancelled: "已停止",
+  } as const;
+  const missingKeys = new Map<string, { id: string; harnessId: string; error: string }>();
+  for (const message of run.messages) {
+    if (message.status !== "error" || !message.error) continue;
+    const harnessId = props.agents.get(message.senderId ?? "")?.harness;
+    const envVar = missingKeyVar(message.error);
+    if (!harnessId || envVar === null) continue;
+    const key = `${harnessId}:${envVar}`;
+    if (!missingKeys.has(key)) missingKeys.set(key, { id: message.id, harnessId, error: message.error });
+  }
+  return (
+    <div className="collaboration-block" data-message-id={`collaboration:${run.runId}`} data-open={open || undefined}>
+      <button
+        type="button"
+        className="collaboration-rail"
+        aria-expanded={open}
+        aria-controls={contentId}
+        aria-label={t(open ? "收起协作详情" : "展开协作详情")}
+        onClick={() => {
+          if (detailsRef.current) detailsRef.current.open = !detailsRef.current.open;
+          props.onToggle();
+        }}
+      >
+        <ChevronRight size={13} className="collaboration-chevron" aria-hidden="true" />
+        <span className="collaboration-rail-line" aria-hidden="true" />
+      </button>
+      <details
+        ref={detailsRef}
+        className="collaboration-run"
+        data-collaboration-run={run.runId}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: native summary handles Enter/Space; pause auto-follow before opening details below it. */}
+        <summary onClick={props.onToggle}>
+          <span className="collaboration-avatars" aria-hidden="true">
+            {run.participants.slice(0, 3).map((participant) => (
+              <AgentAvatar
+                key={participant.id}
+                agent={props.agents.get(participant.id)}
+                name={participant.name}
+                size={16}
+              />
+            ))}
+            {run.participants.length > 3 && <i>+{run.participants.length - 3}</i>}
+          </span>
+          <span className="collaboration-title">{t("协作详情")}</span>
+          <span>
+            {run.participants.length === 1 ? t("1 位助手") : t("{count} 位助手", { count: run.participants.length })}
+          </span>
+          <span className="collaboration-state" data-status={run.status}>
+            {run.status === "running" && (
+              <span className="collaboration-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            )}
+            {t(status[run.status])}
+          </span>
+          {run.failed > 0 && (
+            <span className="collaboration-warning">{t("{count} 项失败", { count: run.failed })}</span>
+          )}
+          {run.interrupted > 0 && (
+            <span className="collaboration-warning">{t("{count} 项中断", { count: run.interrupted })}</span>
+          )}
+        </summary>
+        <div className="collaboration-content" id={contentId}>
+          {run.messages.map((message) => (
+            <div className="collaboration-reply" key={message.id}>
+              <div className="collaboration-reply-head">
+                <AgentAvatar agent={props.agents.get(message.senderId ?? "")} name={message.senderName} size={20} />
+                <strong>{message.senderName}</strong>
+                <span data-status={message.status}>{t(messageStatus[message.status])}</span>
+              </div>
+              {props.compact && message.timeline?.handoffFrom && (
+                <details className="collaboration-assignment">
+                  <summary>{t("分配任务")}</summary>
+                  <HandoffTask task={message.timeline.handoffFrom.task} />
+                </details>
+              )}
+              {props.renderMessage(message, true)}
+            </div>
+          ))}
+          {run.tasks
+            .filter((task) => !run.messages.some((message) => message.id === task.messageId))
+            .map((task) => (
+              <div className="collaboration-pending" key={task.id}>
+                <div className="collaboration-reply-head">
+                  <AgentAvatar agent={props.agents.get(task.agentId)} name={task.agentName} size={20} />
+                  <strong>{task.agentName}</strong>
+                  <span>
+                    {t(
+                      task.status === "queued"
+                        ? "排队中"
+                        : task.status === "cancelling"
+                          ? "停止中"
+                          : task.status === "waiting"
+                            ? "等待交接完成"
+                            : task.messageId
+                              ? "回复中"
+                              : "正在准备",
+                    )}
+                  </span>
+                </div>
+                <HandoffTask task={task.text} />
+              </div>
+            ))}
+          {run.assignments
+            .filter((assignment) => !assignment.messageId && !assignment.taskId)
+            .map((assignment) => (
+              <div
+                className="collaboration-pending"
+                key={`${assignment.sourceMessageId}:${assignment.agentId}:${assignment.task}`}
+              >
+                <div className="collaboration-reply-head">
+                  <AgentAvatar agent={props.agents.get(assignment.agentId)} name={assignment.agentName} size={20} />
+                  <strong>{assignment.agentName}</strong>
+                  <span>{t("未记录回复")}</span>
+                </div>
+                <HandoffTask task={assignment.task} />
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={() => props.onJumpToMessage(assignment.sourceMessageId)}
+                >
+                  <ArrowUpRight size={13} aria-hidden="true" />
+                  {t("查看来源消息")}
+                </button>
+              </div>
+            ))}
+        </div>
+      </details>
+      {[...missingKeys.values()].map((item) => (
+        <MissingKey key={item.id} harnessId={item.harnessId} error={item.error} />
+      ))}
+    </div>
+  );
 }
 
 const messageHighlights = new WeakMap<HTMLElement, { timer: number; animations: Animation[]; bodies: HTMLElement[] }>();
@@ -1241,6 +1650,13 @@ function flashMessage({ messageId, partIndex }: MessageTarget): "found" | "missi
   if (activeMessageHighlight) clearMessageHighlight(activeMessageHighlight);
   const element = document.querySelector<HTMLElement>(`.message-row[data-message-id="${CSS.escape(messageId)}"]`);
   if (!element) return "missing-message";
+  // Source navigation must reveal the canonical reply before measuring or scrolling to it.
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    if (!(parent instanceof HTMLDetailsElement)) continue;
+    parent.open = true;
+    for (const child of parent.children)
+      if (child instanceof HTMLElement && child.tagName !== "SUMMARY") child.inert = false;
+  }
   const bodies = [
     ...element.querySelectorAll<HTMLElement>(
       partIndex === undefined ? "[data-message-body]" : `[data-message-body][data-body-phase="${partIndex}"]`,
@@ -1289,6 +1705,7 @@ function MessageItem(props: {
   quoteDisabled?: boolean;
   retry?: { pending: boolean; error: string | null };
   onRetry?: () => void;
+  hideAuthPrompt?: boolean;
 }) {
   const { t: tr } = useI18n();
   const { m } = props;
@@ -1351,6 +1768,14 @@ function MessageItem(props: {
             {t && (
               <TimelineView t={t} streaming={false} terminals={props.terminals} mentionNames={props.mentionNames} />
             )}
+            {t?.steer && (
+              <div className="msg-steer" data-stage={t.steer.stage}>
+                <Zap size={12} aria-hidden />
+                {t.steer.stage === "interrupted"
+                  ? tr("引导 {name} 已中断，未执行", { name: `@${t.steer.agentName}` })
+                  : tr("立即引导 {name}", { name: `@${t.steer.agentName}` })}
+              </div>
+            )}
           </>
         ) : compact ? (
           <CompactReply
@@ -1407,7 +1832,9 @@ function MessageItem(props: {
             <span>{m.error ? translateError(m.error) : tr("回复失败")}</span>
           </div>
         )}
-        {m.status === "error" && m.error && <MissingKey harnessId={props.harnessId} error={m.error} />}
+        {!props.hideAuthPrompt && m.status === "error" && m.error && (
+          <MissingKey harnessId={props.harnessId} error={m.error} />
+        )}
         {m.status === "interrupted" && (
           <div className="msg-interrupted">
             <div className="msg-error">
@@ -1655,6 +2082,10 @@ function ReplyStatus(props: {
   tasks: RoomState["tasks"];
   agents: Map<string, Agent>;
   cancellations: Record<string, { pending: boolean; error: string | null }>;
+  promotes: Record<string, { pending: boolean; error: string | null }>;
+  steerTarget: (task: RoomState["tasks"][number]) => RoomState["tasks"][number] | undefined;
+  onSteer: (task: RoomState["tasks"][number]) => void;
+  onEdit: (task: RoomState["tasks"][number]) => void;
   onCancel: (id: string) => void;
   conclusion: RoomConclusion | null;
   onJump: () => void;
@@ -1743,26 +2174,32 @@ function ReplyStatus(props: {
       (item) => item.agentId === task.agentId && item.status === "queued" && !props.cancellations[item.id]?.pending,
     ).length;
     const status =
-      props.cancellations[task.id]?.pending || task.status === "cancelling"
-        ? tr("正在停止")
-        : task.status === "queued"
-          ? queued > 1
-            ? tr("{count} 项排队", { count: queued })
-            : tr("排队中")
-          : task.status === "waiting"
-            ? task.coordination === "lead" || task.coordination === "review"
-              ? tr("等待成员结果")
-              : tr("等待交接完成")
-            : task.coordination === "review"
-              ? tr("正在跟进")
-              : task.messageId
-                ? tr("正在回复")
-                : tr("正在准备");
+      task.steer && task.status === "queued"
+        ? props.tasks.some((item) => item.id === task.steer?.targetTaskId)
+          ? tr("正在停止并引导")
+          : tr("等待优先执行")
+        : props.cancellations[task.id]?.pending || task.status === "cancelling"
+          ? tr("正在停止")
+          : task.status === "queued"
+            ? queued > 1
+              ? tr("{count} 项排队", { count: queued })
+              : tr("排队中")
+            : task.status === "waiting"
+              ? task.coordination === "lead" || task.coordination === "review"
+                ? tr("等待成员结果")
+                : tr("等待交接完成")
+              : task.coordination === "review"
+                ? tr("正在跟进")
+                : task.messageId
+                  ? tr("正在回复")
+                  : tr("正在准备");
     return { task, status, queued: task.status === "queued" ? 0 : queued };
   });
   const overflow = participants.slice(3);
   const single = props.tasks.length === 1 ? props.tasks[0] : undefined;
-  const singleStopping = !!single && (props.cancellations[single.id]?.pending || single.status === "cancelling");
+  const singleStopping =
+    !!single &&
+    (props.cancellations[single.id]?.pending || props.promotes[single.id]?.pending || single.status === "cancelling");
   return (
     <section ref={root} className="chat-tasks" aria-label={tr("会话任务")} data-expanded={expanded}>
       <div className="chat-activity">
@@ -1822,7 +2259,23 @@ function ReplyStatus(props: {
             <ChevronRight size={13} className="chat-activity-chevron" aria-hidden />
           </button>
         )}
-        {single && (
+        {single && single.status === "queued" && !single.steer && (
+          <button
+            type="button"
+            className="chat-activity-stop"
+            data-hidden={expanded || undefined}
+            aria-hidden={expanded}
+            inert={expanded}
+            aria-label={tr("编辑消息")}
+            title={tr("编辑消息 · 拉回输入框修改")}
+            aria-describedby={summaryId}
+            disabled={singleStopping}
+            onClick={() => props.onEdit(single)}
+          >
+            <Pencil size={11} aria-hidden />
+          </button>
+        )}
+        {single && (single.status !== "queued" || !!single.steer) && (
           <button
             type="button"
             className="chat-activity-stop"
@@ -1883,20 +2336,26 @@ function ReplyStatus(props: {
           <ul className="chat-task-list">
             {props.tasks.map((task) => {
               const cancellation = props.cancellations[task.id];
+              const promote = props.promotes[task.id];
+              const laneTarget = task.status === "queued" && !task.steer ? props.steerTarget(task) : undefined;
               const status =
-                task.status === "queued"
-                  ? tr("排队中")
-                  : task.status === "cancelling"
-                    ? tr("停止中")
-                    : task.status === "waiting"
-                      ? task.coordination === "lead" || task.coordination === "review"
-                        ? tr("统筹中")
-                        : tr("交接中")
-                      : task.coordination === "review"
-                        ? tr("跟进中")
-                        : task.messageId
-                          ? tr("回复中")
-                          : tr("准备中");
+                task.steer && task.status === "queued"
+                  ? props.tasks.some((item) => item.id === task.steer?.targetTaskId)
+                    ? tr("正在停止并引导")
+                    : tr("等待优先执行")
+                  : task.status === "queued"
+                    ? tr("排队中")
+                    : task.status === "cancelling"
+                      ? tr("停止中")
+                      : task.status === "waiting"
+                        ? task.coordination === "lead" || task.coordination === "review"
+                          ? tr("统筹中")
+                          : tr("交接中")
+                        : task.coordination === "review"
+                          ? tr("跟进中")
+                          : task.messageId
+                            ? tr("回复中")
+                            : tr("准备中");
               return (
                 <li className="chat-task" key={task.id} data-task-id={task.id} data-task-status={task.status}>
                   <div className="chat-task-content" id={`task-summary-${task.id}`}>
@@ -1911,21 +2370,58 @@ function ReplyStatus(props: {
                         {tr("停止失败：{reason}。请重试。", { reason: translateError(cancellation.error) })}
                       </div>
                     )}
+                    {promote?.error && (
+                      <div className="chat-task-error" role="alert">
+                        {tr("立即发送失败：{reason}。请重试。", { reason: translateError(promote.error) })}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    className="btn ghost sm chat-task-stop"
-                    aria-label={task.status === "queued" ? tr("取消排队") : tr("停止任务")}
-                    aria-describedby={`task-summary-${task.id}`}
-                    disabled={cancellation?.pending || task.status === "cancelling"}
-                    onClick={() => props.onCancel(task.id)}
-                  >
-                    {cancellation?.pending || task.status === "cancelling"
-                      ? tr("停止中…")
-                      : task.status === "queued"
-                        ? tr("取消排队")
-                        : tr("停止")}
-                  </button>
+                  {task.status === "queued" && !task.steer ? (
+                    <div className="chat-task-actions">
+                      <button
+                        type="button"
+                        className="btn ghost sm chat-task-send-now"
+                        aria-label={tr("立即发送")}
+                        aria-describedby={`task-summary-${task.id}`}
+                        disabled={promote?.pending || cancellation?.pending || !laneTarget}
+                        title={
+                          laneTarget
+                            ? tr("停止 @{name} 的当前任务并优先发送", { name: laneTarget.agentName })
+                            : tr("当前没有可打断的任务")
+                        }
+                        onClick={() => props.onSteer(task)}
+                      >
+                        <Zap size={13} aria-hidden />
+                        {promote?.pending ? tr("发送中…") : tr("立即发送")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost sm"
+                        aria-label={tr("编辑消息")}
+                        aria-describedby={`task-summary-${task.id}`}
+                        disabled={promote?.pending || cancellation?.pending}
+                        title={tr("拉回输入框修改后重新发送")}
+                        onClick={() => props.onEdit(task)}
+                      >
+                        {tr("编辑消息")}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn ghost sm chat-task-stop"
+                      aria-label={task.status === "queued" ? tr("取消排队") : tr("停止任务")}
+                      aria-describedby={`task-summary-${task.id}`}
+                      disabled={cancellation?.pending || task.status === "cancelling"}
+                      onClick={() => props.onCancel(task.id)}
+                    >
+                      {cancellation?.pending || task.status === "cancelling"
+                        ? tr("停止中…")
+                        : task.status === "queued"
+                          ? tr("取消排队")
+                          : tr("停止")}
+                    </button>
+                  )}
                 </li>
               );
             })}
@@ -1973,6 +2469,21 @@ function QuoteExcerpt({
 }
 
 /** After a while with no output, say so (a harness can sit silently while it retries upstream). */
+/** A task plus every descendant owned through accepted handoffs, matching the server's steer chain. */
+function steerChain(task: { id: string }, tasks: { id: string; parentTaskId?: string | null }[]): Set<string> {
+  const chain = new Set([task.id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const item of tasks)
+      if (item.parentTaskId && chain.has(item.parentTaskId) && !chain.has(item.id)) {
+        chain.add(item.id);
+        grew = true;
+      }
+  }
+  return chain;
+}
+
 function Waited({ since }: { since: number }) {
   const { t: tr } = useI18n();
   const [now, setNow] = useState(Date.now());
@@ -2346,17 +2857,17 @@ function RoomInfo(props: {
       {tab === "info" && (
         <>
           <section className="d-section">
-            <label className="chat-display-setting">
-              <span>{tr("仅显示回复正文")}</span>
-              <input
-                type="checkbox"
-                role="switch"
-                className="tg"
-                checked={props.compact}
-                aria-checked={props.compact}
-                onChange={(event) => props.onCompactChange(event.target.checked)}
-              />
-            </label>
+            <div className="chat-display-setting">
+              <span>{tr("详细/简洁模式")}</span>
+              <fieldset className="segmented" aria-label={tr("详细/简洁模式")}>
+                <button type="button" aria-pressed={props.compact} onClick={() => props.onCompactChange(true)}>
+                  {tr("简洁")}
+                </button>
+                <button type="button" aria-pressed={!props.compact} onClick={() => props.onCompactChange(false)}>
+                  {tr("详细")}
+                </button>
+              </fieldset>
+            </div>
           </section>
           {props.members.length > 1 && (
             <section className="d-section">
@@ -2523,6 +3034,7 @@ function Composer(props: {
       ref.current?.setSelectionRange(before.length, before.length);
     });
   };
+  const empty = !props.value.trim() && props.images.length === 0 && props.files.length === 0;
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; the attachment button is the accessible path
@@ -2761,9 +3273,14 @@ function Composer(props: {
         <div className="composer-status">
           {props.usage}
           {(() => {
-            const empty = !props.value.trim() && props.images.length === 0 && props.files.length === 0;
             const stop = !!props.stopTask && !props.sending && !props.pendingAttachments && empty;
-            const label = stop ? (props.stopTask?.status === "queued" ? tr("取消排队") : tr("停止")) : tr("发送");
+            const label = stop
+              ? props.stopTask?.status === "queued"
+                ? props.stopTask?.steer
+                  ? tr("取消排队")
+                  : tr("编辑消息")
+                : tr("停止")
+              : tr("发送");
             return (
               <button
                 type="button"

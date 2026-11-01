@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { serve } from "../server/app";
 import type { Room } from "../server/store";
 import type { GlobalEvent } from "../shared/notify";
-import { messagePreview } from "../shared/roomPreview";
+import { messagePreview, type RoomPreview } from "../shared/roomPreview";
 import { agentInput, until } from "./helpers";
 
 const { app, server } = serve({ dbPath: ":memory:" }, 0);
@@ -22,7 +22,8 @@ afterAll(() => {
 
 const previews = (roomId: string) =>
   events.filter(
-    (e): e is Extract<GlobalEvent, { type: "room.preview" }> => e.type === "room.preview" && e.roomId === roomId,
+    (e): e is Extract<GlobalEvent, { type: "room.preview" }> & { last: NonNullable<RoomPreview> } =>
+      e.type === "room.preview" && e.roomId === roomId && e.last !== null,
   );
 async function send(roomId: string, content: string) {
   const response = await fetch(`${base}/api/rooms/${roomId}/messages`, {

@@ -43,6 +43,9 @@
 .chat-task-state { flex: none; color: var(--text-3); font-size: 11px; }
 .chat-task-summary { color: var(--text-2); line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .chat-task-stop { flex: none; min-height: 30px; }
+.chat-task-actions { display: flex; flex: none; gap: 6px; align-items: center; }
+.chat-task-actions .btn { min-height: 30px; }
+.chat-task-send-now { gap: 4px; color: var(--accent-text); }
 .chat-task-error { color: var(--danger); margin-top: 3px; overflow-wrap: anywhere; }
 @keyframes chat-activity-pulse { 0%, 70%, 100% { opacity: 0.3; } 35% { opacity: 1; } }
 @media (max-width: 600px) {

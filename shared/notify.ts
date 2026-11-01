@@ -8,7 +8,14 @@ export type GlobalEvent =
   | { type: "attention.changed" }
   | { type: "profile.updated"; profile: import("../server/profile").Profile }
   | { type: "activity"; roomId: string; busy: boolean }
-  | { type: "room.preview"; roomId: string; last: RoomPreview }
+  | {
+      type: "room.preview";
+      roomId: string;
+      /** Null only when `replacesMessageId` was the room's latest visible message and nothing older remains. */
+      last: RoomPreview | null;
+      /** Set when a message left the transcript. Replaces that preview even if `last` is older or absent. */
+      replacesMessageId?: string;
+    }
   | {
       type: "notify";
       kind: NotifyKind;

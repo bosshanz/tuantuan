@@ -36,6 +36,24 @@ export interface Timeline {
   reviewOf?: string[];
   /** Explicit task checkpoint, committed only when this reply completes successfully. */
   taskContext?: TaskContext;
+  /** Set on a human message sent as an immediate steer: which chain it replaced and how far it got. */
+  steer?: {
+    taskId: string;
+    runId: string;
+    agentId: string;
+    agentName: string;
+    stage: "stopping" | "sent" | "interrupted";
+  };
+  /**
+   * A queued human message pulled back into the composer. The row stays so room
+   * sequence numbers remain contiguous; transcript, search and previews skip it.
+   */
+  withdrawn?: boolean;
+}
+
+/** True when a queued message was pulled back into the composer and must not be shown. */
+export function messageWithdrawn(timeline: { withdrawn?: boolean } | null | undefined): boolean {
+  return timeline?.withdrawn === true;
 }
 
 export interface TaskContext {
@@ -265,6 +283,7 @@ export function replayTurns(updates: acp.SessionUpdate[]): ReplayTurn[] {
       .replace(/<tuantuan-identity>[\s\S]*?<\/tuantuan-identity>\s*/g, "")
       .replace(/<tuantuan-skills>[\s\S]*?<\/tuantuan-skills>\s*/g, "")
       .replace(/<tuantuan-coordination\b[^>]*>[\s\S]*?<\/tuantuan-coordination>\s*/g, "")
+      .replace(/<tuantuan-steer>[\s\S]*?<\/tuantuan-steer>\s*/g, "")
       .replace(/<tuantuan-context>[\s\S]*?<\/tuantuan-context>\s*/g, "")
       .replace(/<tuantuan-response>[\s\S]*?<\/tuantuan-response>\s*/g, "")
       .trim();

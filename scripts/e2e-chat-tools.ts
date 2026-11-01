@@ -748,8 +748,9 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
       throw new Error("separate reply phases were combined into one bubble");
     await page.getByRole("button", { name: "展开详情面板" }).click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
-    const densitySwitch = page.getByRole("switch", { name: "仅显示回复正文", exact: true });
-    await densitySwitch.uncheck();
+    const modeButton = (name: "简洁" | "详细") =>
+      page.getByRole("group", { name: "详细/简洁模式" }).getByRole("button", { name, exact: true });
+    await modeButton("详细").click();
     const densitySettled = () =>
       page.waitForFunction(() =>
         [...(document.querySelector(".messages")?.getAnimations() ?? [])].every((a) => a.playState !== "running"),
@@ -769,16 +770,17 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
         return { id: message?.dataset.messageId, offset: (message?.getBoundingClientRect().top ?? 0) - top };
       });
     const beforeDensity = await readingPosition();
-    await densitySwitch.dblclick({ delay: 35 });
+    await modeButton("简洁").click();
+    await modeButton("详细").click();
     await densitySettled();
     const afterDensity = await readingPosition();
     if (
-      (await densitySwitch.isChecked()) ||
+      (await modeButton("详细").getAttribute("aria-pressed")) !== "true" ||
       beforeDensity.id !== afterDensity.id ||
       Math.abs(beforeDensity.offset - afterDensity.offset) > 2
     )
       throw new Error(`density reversal lost reading position: ${JSON.stringify({ beforeDensity, afterDensity })}`);
-    await densitySwitch.check();
+    await modeButton("简洁").click();
 
     // Live chunks extend one bubble; only an actual activity boundary starts the next one.
     const phaseRoom = await request<{ id: string }>("POST", "/api/rooms", {
@@ -1029,7 +1031,7 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
     await expectPhaseHighlight(1);
     await page.getByRole("button", { name: "展开详情面板" }).click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
-    await densitySwitch.uncheck();
+    await modeButton("详细").click();
     await densitySettled();
     await page.getByRole("button", { name: "关闭详情面板", exact: true }).click();
     await savedQuote.click();
@@ -1038,7 +1040,7 @@ export async function chatToolsSmoke(browser: Browser, base: string, store: Stor
       throw new Error("preserving phase indices exposed the duplicate handoff tool");
     await page.getByRole("button", { name: "展开详情面板" }).click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
-    await densitySwitch.check();
+    await modeButton("简洁").click();
     await densitySettled();
     await page.getByRole("button", { name: "关闭详情面板", exact: true }).click();
 

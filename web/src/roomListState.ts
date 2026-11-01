@@ -17,9 +17,14 @@ type Action =
 function applyEvent(rooms: Room[], event: RoomListEvent): Room[] {
   return rooms.map((room) => {
     if (room.id !== event.roomId) return room;
-    return event.type === "activity"
-      ? { ...room, busy: event.busy }
-      : { ...room, last: newerPreview(room.last, event.last) };
+    if (event.type === "activity") return { ...room, busy: event.busy };
+    // A withdrawn message must give the sidebar back, including when it was the latest preview.
+    if (event.replacesMessageId) {
+      if (room.last?.messageId !== event.replacesMessageId) return room;
+      return { ...room, last: event.last ?? undefined };
+    }
+    if (!event.last) return room;
+    return { ...room, last: newerPreview(room.last, event.last) };
   });
 }
 

@@ -48,13 +48,21 @@
 .bot-avatar[data-anim="full"][data-expr="working"] .ba-eyes { animation: none; }
 @keyframes ba-glance-lr { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 60% { transform: translateX(4px); } }
 @keyframes ba-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3%); } }
-.brand-mark { display: block; overflow: visible; }
+.brand-mark { display: block; overflow: visible; transform-origin: 46% 54%; transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .brand-mark .bm-ink { fill: var(--ink); }
 .brand-mark .bm-red { fill: var(--brand); }
-.brand-mark .bm-eyes { stroke: var(--on-ink); stroke-width: 9; stroke-linecap: round; transform-box: fill-box; transform-origin: center; transition: transform 0.35s ease; animation: bm-blink 6s infinite; }
-.brand-mark .bm-eyes-red { stroke: #fff; animation-delay: 0.18s; }
-.brand:hover .bm-eyes-ink { transform: translateX(3px); }
-.brand:hover .bm-eyes-red { transform: translateX(-4px) translateY(3px); }
+.brand-mark .bm-eyes { stroke: var(--on-ink); stroke-width: 9; stroke-linecap: round; transform-box: fill-box; transform-origin: center; transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); animation: bm-blink 6.2s infinite; }
+.brand-mark .bm-eyes-red { stroke: #fff; animation-delay: 0.2s; }
+.brand:hover .brand-mark,
+.brand:focus-visible .brand-mark { transform: scale(1.06); }
+.brand:hover .bm-eyes-ink,
+.brand:focus-visible .bm-eyes-ink { transform: translate(2.5px, -1px); }
+.brand:hover .bm-eyes-red,
+.brand:focus-visible .bm-eyes-red { transform: translate(-3px, 1px); }
 html[data-tab-hidden] .brand-mark .bm-eyes { animation-play-state: paused; }
-@keyframes bm-blink { 0%, 93%, 100% { scale: 1 1; } 95% { scale: 1 0.12; } }
-@media (prefers-reduced-motion: reduce) { .brand-mark .bm-eyes { animation: none; transition: none; } }
+@keyframes bm-blink { 0%, 92%, 100% { scale: 1 1; } 95% { scale: 1 0.12; } }
+@media (prefers-reduced-motion: reduce) {
+  .brand-mark, .brand-mark .bm-eyes { animation: none; transition: none; }
+  .brand:hover .brand-mark,
+  .brand:focus-visible .brand-mark { transform: none; }
+}

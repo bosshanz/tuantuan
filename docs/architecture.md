@@ -37,11 +37,12 @@
 | `shared/attachments.ts` / `server/attachments.ts` | 附件数量、大小、编码契约；UTF-8 文本内联、二进制原件托管与精确只读路径授权 |
 | `web/src/composerAttachments.ts` / `FileAttachments.tsx` | 按房间串行读取附件、预览与安全下载；草稿仍由 `chatWorkspace.ts` 拥有 |
 | `server/conversation-files.ts` / `shared/conversationFiles.ts` / `shared/filePreview.ts` / `web/src/ConversationFiles.tsx` / `FilePreview.tsx` | 从持久化消息派生会话文件元数据并分页；内容接口重新解析来源、验证项目文件范围；前端按需下载 / 预览，文本预览使用独立的 1 MiB 有界读取与 UTF-8 校验；来源定位复用聊天导航 |
-| `server/session-changes.ts` / `shared/sessionEdits.ts` / `web/src/SessionChanges.tsx` | 从已结束回复的时间线派生 Agent 报告的已完成编辑与历史 diff，详情保留回复状态和来源消息；不推断实际工作区状态 |
-| `server/git-status.ts` / `shared/gitStatus.ts` / `web/src/GitWorkspace.tsx` | 只读查询会话目录范围内的 Git 工作区状态和按需详情；对比结果不归因会话或 Agent，不修改仓库 |
+| `server/session-changes.ts` / `shared/sessionEdits.ts` / `web/src/ConversationFiles.tsx` | 从已结束回复的时间线派生 Agent 报告的已完成编辑与历史 diff，详情保留回复状态和来源消息；不推断实际工作区状态 |
+| `server/git-status.ts` / `shared/gitStatus.ts` / `web/src/ConversationFiles.tsx` / `FileViewerPane.tsx` | 只读查询会话目录范围内的 Git 工作区状态和按需详情（仓库根相对路径，前端按 `scope` 归一化为会话目录相对路径，详情请求再加回前缀）；对比结果不归因会话或 Agent，不修改仓库 |
+| `server/workspace-files.ts` / `web/src/ConversationFiles.tsx` / `FileViewerPane.tsx` | 会话工作区目录树、搜索与文件预览 / 内容接口；realpath 边界 + `O_NOFOLLOW` 拒绝符号链接逃逸，预览上限与编码校验同 `filePreview` |
 | `shared/timeline.ts` | 把 `session/update` 折叠成时间线（文本、思考、工具卡片、计划、用量）；服务端持久化和前端渲染共用 |
 | `server/tuantuan-mcp.ts` / `server/mcp-shim.ts` | 团团自己的 MCP 服务器：`/mcp/<token>`（JSON-RPC over HTTP POST）；token 对应「房间 + Agent」，只在内存。Harness 支持 HTTP MCP 时直接连，否则启动 stdio 中转脚本。工具由 Orchestrator 提供 |
-| `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；直达 / 群主统筹路由、逐轮职责、成员结果收集与群主续轮、单个 Agent 回合、交接预算与定向取消 |
+| `server/orchestrator.ts` | 每房间的任务依赖图与每 Agent FIFO 队列；直达 / 群主统筹路由、逐轮职责、成员结果收集与群主续轮、单个 Agent 回合、交接预算、定向取消与立即引导 |
 | `server/task-context.ts` | 结构化任务笔记的共享 schema 与运行时校验、交接长度契约、带省略标记的正文首尾摘录 |
 | `server/mentions.ts` | 人类消息里的 `@名字` / `@所有人` 解析（忽略引用、代码和转述行）；Agent 回复不解析 |
 | `server/store.ts` | SQLite 迁移与读写 |
@@ -50,7 +51,7 @@
 | `web/src/i18n.ts` / `Profile.tsx` | 响应式界面语言与启动缓存；个人资料编辑草稿、串行保存和失败重试 |
 | `web/src/Harness.tsx` | 时间线渲染（工具卡片、diff、终端、计划）、权限弹窗、会话栏 |
 | `web/src/Onboarding.tsx` / `Setup.tsx` / `Registry.tsx` | 首次引导（一页三步）；Harness 管理页；「更多 Agent」（Registry 列表、安装、握手、图标） |
-| `desktop/` | Electron 壳：主进程启动随包 Bun 服务端（子进程组、`/api/health`、父进程看门狗）、单实例、菜单、preload（文件夹对话框、全屏状态）；`scripts/` 打包（stage / electron-builder / afterPack）与 Xvfb 冒烟 |
+| `desktop/` | Electron 壳：主进程启动随包 Bun 服务端（子进程组、`/api/health`、父进程看门狗）、单实例、菜单、preload（文件夹对话框、全屏状态、`revealPath` 系统文件管理器定位）；`scripts/` 打包（stage / electron-builder / afterPack）与 Xvfb 冒烟 |
 | `desktop/src/power.ts` / `shared/desktopPower.ts` | 桌面任务防休眠：主进程拥有唯一 prevent-app-suspension 实例，监听全局 activity 并用全部房间快照校准；增量覆盖在途旧快照，断线释放并重连恢复。偏好保存到 userData/settings.json，preload 只提供状态与开关 |
 | `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
@@ -63,7 +64,7 @@
 | `web/src/ProjectTerminal.tsx` | 按需加载 xterm.js，独立 WebSocket 传输输入 / 输出 / 尺寸，隐藏保留实例，标签页各自连接独立 shell，刷新恢复项目全部终端与选中页；只在显式打开且用户尚未选择其他焦点时聚焦，正常退出状态不被迟到的 PTY 错误覆盖 |
 | `web/src/messageMerge.ts` | 历史快照与实时消息按 id 合并，保留完成态 / 较长流式文本；发送接口返回的消息立即插入 |
 | `web/src/motion.ts` | `usePresence`（退场动画期间保持挂载）、`withViewTransition`（路由切换） |
-| `web/src/BrandMark.tsx` | 团团 Logo（导航栏，眨眼 + 悬停互看）；favicon 在 `web/public/` |
+| `web/src/BrandMark.tsx` | 团团 Logo（石墨在前、珊瑚探出，眨眼 + 悬停互看）；favicon 与 `docs/brand/` 使用同一构图 |
 
 前端直接 `import type` 后端的数据类型（`Agent`、`Message`、`RoomEvent`…），契约只有一份定义。
 
@@ -158,11 +159,11 @@ BYOK 每次上游请求（包括工具续请求）都用实际请求构造器计
 
 `PreviewImage` 为 Mermaid、Markdown、ACP 时间线及工具图片提供同一个入口。预览通过 portal 和原生 `dialog.showModal()` 进入 top layer，缩略图继续占据消息中的原位置；Tab 保持在弹窗内，关闭时以 `preventScroll` 恢复触发按钮焦点。视口通过 ResizeObserver 测量，适应窗口按自然尺寸计算且不自动放大小图。缩放与平移由组件统一管理，滚轮按指针位置缩放，拖动和方向键平移均限制在图片边界；窗口变化重新计算适配比例与平移边界。暗色背景与固定工具区让图片不被控件遮挡；失败可重试，重试不更改原始资源地址。
 
-`FilePreview` 从独立 JSON 预览接口按需读取文本，与下载复用持久化来源校验及已验证的文件描述符；本地文件最多读取 1 MiB + 1 字节以发现增长，附件查询也限制 base64 投影大小。原件下载继续使用 attachment / octet-stream。Markdown 不执行原始 HTML、不请求图片或跳转链接；源码仅插入转义文本或受控高亮 token。HTML 在 inert template 中解析并移除主动内容和导航属性，插入首置 CSP 后放入空 sandbox 的 iframe，不开放脚本或同源权限；超出 20,000 元素时退回可查看源码的错误状态。超过 100 KiB 或 3,000 行关闭高亮，过多行使用普通文本而不生成逐行 DOM。预览关闭取消请求并恢复列表入口焦点；静态 iframe 获焦点时归还键盘焦点，保留滚轮阅读。`scripts/e2e-file-preview.ts` 验证文档、源码复制、HTML 隔离、错误恢复、焦点和窄屏。
+`ConversationFiles` 与 `FileViewerPane` 组成右侧并排可调宽的只读文件工作台（桌面与聊天并列且与会话详情面板互斥，窄屏切换覆盖与单列钻取），四个列表标签均通过 `useVirtualList` 按固定行高虚拟滚动，支持大仓库与长历史下的键盘连续导航。`server/workspace-files.ts` 提供会话目录树按需展开（`/tree`）、有界文件名搜索（`/tree/search`）及工作区文件预览 / 下载（`/workspace-file/preview`、`/workspace-file/content`）：统一校验 `realpathSync(room.cwd)` 边界与 `O_RDONLY | O_NOFOLLOW` 文件描述符，隐藏 `.git`、拦截符号链接逃逸与祖先环路，并将依赖 / 构建目录排在普通目录之后。`server/conversation-files.ts` 按请求复用 `FileLookupCache` 缓存真实路径与本地文件元数据，聊天附件与工作区光栅图片在 `?inline=1` 下附严格 `default-src 'none'` CSP 与 `nosniff` 内联展示（上限 20 MiB），原件下载继续使用 `attachment` / `octet-stream`。文本预览最多读取 1 MiB + 1 字节以发现超限；Markdown 不执行原始 HTML、不请求外部图片或跳转链接；HTML 在 inert template 中清洗主动内容、导航属性以及 `<style>` / `style` 中的 `@import` 与非内联光栅 `url(...)`，注入首置 CSP 后放入空 `sandbox=""` 的 iframe，超出 20,000 元素退回源码错误态；超过 100 KiB 或 3,000 行关闭语法高亮与逐行 DOM。静态 iframe 获焦点时归还键盘焦点并保留滚轮阅读。`scripts/e2e-conversation-files.ts`、`scripts/e2e-file-preview.ts` 与 `scripts/e2e-git-workspace.ts` 验证虚拟化目录树、搜索、预览隔离、Git 核对与窄屏回退。
 
-会话改动从持久化的 Agent 消息时间线派生，只纳入回复已结束且工具状态为 completed 的 edit；失败、取消和中断回复中的已完成 edit 同样保留。每条详情带来源消息与该回复状态；执行中或未完成的编辑不进入汇总。历史报告不证明当前文件状态，也不包含 shell 等未报告的修改。相同路径由两个及以上 Agent 报告时标记重叠，并不推断冲突。
+会话改动从持久化的 Agent 消息时间线派生，只纳入回复已结束且工具状态为 completed 的 edit；失败、取消和中断回复中的已完成 edit 同样保留。每条详情带来源消息与该回复状态；执行中或未完成的编辑不进入汇总。历史报告不证明当前文件状态，也不包含 shell 等未报告的修改。相同路径由两个及以上 Agent 报告时标记重叠，并不推断冲突；文件工作台将该状态同步投影到目录树对应文件与祖先目录。
 
-Git 工作区状态独立于历史消息，按需从会话工作目录查询，限制在该目录范围，返回仓库根目录相对路径。已暂存 diff 对比 `HEAD`，无提交仓库明确标识并与空树对比；未暂存 diff 对比暂存区，未跟踪文件读取当前内容。按需查看详情前重新核对当前状态，受输出大小限制，二进制、超限、状态变化或读取失败明确返回而不冒充空 diff；未跟踪文件沿用会话文件的受限读取校验。Git 查询禁用外部 diff 和 textconv，不写暂存区或工作树。该视图不是会话变更快照：可包含原有改动及其他会话或外部工具的改动，不做来源归因。
+Git 工作区状态独立于历史消息，按需从会话工作目录查询（单次状态列表输出上限 16 MiB），限制在该目录范围，返回仓库根目录相对路径。已暂存 diff 对比 `HEAD`，无提交仓库明确标识并与空树对比；未暂存 diff 对比暂存区，未跟踪文件读取当前内容。按需查看单文件详情时仅针对 `:(literal)<path>` 重新核对当前状态，避免在大型仓库重复全量扫描；受输出大小限制，二进制、超限、状态变化或读取失败明确返回而不冒充空 diff；未跟踪文件沿用会话文件的受限读取校验。Git 查询禁用外部 diff 和 textconv，不写暂存区或工作树。该视图不是会话变更快照：可包含原有改动及其他会话或外部工具的改动，不做来源归因。
 
 Git 查询先检查已跟踪路径的 attributes 和配置：使用外部 clean / process filter 的文件或会话目录内的已跟踪子模块会使查询明确失败，避免隐式运行程序；已配置但不适用的 filter 禁用后继续。检查与执行之间的外部并发配置或文件替换不受隔离。
 
@@ -186,16 +187,21 @@ ACP 表单提问仅声明 `elicitation.form`。`HarnessHost` 按 ask ID 与活�
 
 消息分页沿用 `messages.seq` 和 `Store.recentMessages(roomId, limit, beforeSeq)`；`GET /api/rooms/:id/messages` 接受正整数 `limit`（默认 100，最多 500）与可选的排他游标 `beforeSeq`，返回按序排列的消息和 `nextBeforeSeq`（`null` 表示没有更早记录）。前端初始页为 200 条，历史页只合并消息与分页进度，不应用响应里的任务、会话或权限快照。消息按 id 去重、按 seq 排序，历史请求与最新快照分别标识和隔离；分页提交前记录当前可见消息的偏移，布局更新后恢复阅读位置。
 
+协作展示由 `shared/collaboration.ts` 从已加载消息的有效 `timeline.handoffFrom`、`runId` 和当前 `RoomState.tasks` 派生，按请求分组；不以当前群主、名字、会话当前成员数或 hop 猜测历史角色。无合法来源或同时标记 `reviewOf` 的消息保持直接可见。活动子任务在父任务关系成立时加入，排除根任务和群主 review；流式状态优先，失败、中断和取消分别计数。没有 senderId 的历史消息以名称作为展示身份回退，同名历史成员无法仅凭该字段区分。`runAgentTurn` 创建占位消息时将分工来源和初始时间线同次写入，再发布首条事件，避免流式首帧被误分类。前端以原生 details 在每次请求的首条分工来源之后（或首条助手回复处）收纳助手消息，复用原消息及工具详情；来源导航先展开祖先 details。折叠不更改消息持久化、调度或 Agent 的结果回流，不新增存储表或摘要调用。
+
+成功回复的有效 `timeline.handoffs` 同时保留为分工记录，即使接手任务尚未启动就从内存队列消失。回复匹配要求同一 run、发送者及来源 Agent ID、任务文本和分工前后 seq 区间一致；活动任务匹配要求父任务关联到来源消息。缺少来源身份或无法可靠匹配时显示「未记录回复」，不把它推断为已完成或已取消；这不持久化运行任务图。
+
 结论卡从成功根任务或 `reviewOf` 跟进消息的 `timeline.taskContext` 派生，服务端快照不受当前历史页限制，前端以 seq 合并快照与实时结果；无新笔记时保留上一份，不另存结论或生成摘要。来源跳转按需加载旧页，失败停止自动追读，保留错误和手动重试入口。引用导航复用该通路并携带已保存的 `partIndex`，以原始时间线阶段位置定位和高亮正文；完整视图仅在渲染时隐藏重复交接工具，保留原始索引。带阶段位置的引用不能回退到整条消息，连续定位会清除旧高亮；旧引用仍按原消息定位。`ChatView` 在首次来源导航时保存 `useChatScroll` 的消息 ID 与视口偏移锚点，连续查看来源保留最初的锚点；返回按当前布局还原位置，取消待完成定位并清除高亮，迟到历史页仍正常合并。显式回到最新或切换会话清除返回点，返回按钮消失后焦点落在消息阅读区域。`POST /api/rooms/:id/messages/:messageId/retry` 仅接受同房间的 interrupted Agent 消息，从 runId 找到原人类请求，将正文、图片与原请求引用交给普通消息路由，创建新 run；不恢复旧任务队列或 Harness 内部执行断点。
 
 1. 人类消息写库后立即路由成独立的根任务：单 Agent → 该 Agent；多 Agent 时 @所有人 → 全部成员；@具体成员 → 这些成员；没有 @ → 群主负责统筹。只有最后一种 run 保存 coordinatorId 和 rootTaskId，其余是直接对话。更换群主只影响新 run。同一房间不同 Agent 并行，同一 Agent 按入队顺序执行；新消息不取消旧任务，不同房间互不阻塞。
-2. `RoomState.tasks` 提供 taskId、runId、parentTaskId、agentId、messageId、请求文本与 queued / running / cancelling / waiting 状态；协调任务另带 coordination（lead / work / review）。已完成但仍有活动后代的任务显示为 waiting，保留停止剩余工作的入口。`activeRunId` 仅保留为兼容的忙碌标志，`queued` 计数任务；界面不从单个 runId 推断全部运行状态。`idle(roomId)` 等到队列、衍生交接和自动跟进全部结束。
+2. `RoomState.tasks` 提供 taskId、runId、parentTaskId、agentId、messageId、请求文本与 queued / running / cancelling / waiting 状态；协调任务另带 coordination（lead / work / review），引导任务另带 steer.targetTaskId。已完成但仍有活动后代的任务显示为 waiting，保留停止剩余工作的入口。`activeRunId` 仅保留为兼容的忙碌标志，`queued` 计数任务；界面不从单个 runId 推断全部运行状态。`idle(roomId)` 等到队列、衍生交接和自动跟进全部结束。
 3. 单个回合：取得（或新建 / 恢复）该 Agent 在本会话的 ACP session。群聊转述取原始请求及之前的最近 30 条记录作为候选；交接通过 `Store.runMessages` 单独查询同一请求已完成的 Agent 回复，不先对全房间取 30 条再过滤。候选中取该 Agent 上次成功发言之后的内容，长正文保留首尾与省略标记，附消息 ID 和原长；单条约 2000 字符、整体约 8000 字符，优先较新消息，目录与完整原文可经 `read_context` 追读。`<tuantuan-task>` 独立保留原始消息全文与引用快照，`<tuantuan-context>` 独立保留结构化笔记；排队期间的新消息不能替换它们。每轮另附 `<tuantuan-coordination>` 指定 leader / member / direct 职责及 initial / review 阶段，不把群主职责写死在可能缓存的身份文档中。单 Agent 的新请求直接收到用户消息（含图片）；群聊缩为单人时，已有协调 run 保留职责与结果上下文直至收尾。身份文档按 Harness 传递（见 [Harness 文档](harness.md)）；不支持的 Harness 附加在新会话首条普通 prompt 前的 `<tuantuan-identity>` 中。
 
 普通模型请求的 `runAgentTurn` 另附 `<tuantuan-response>` 沟通约定，覆盖单聊、直达、群主、成员及跟进轮，确保恢复的 Harness session 也接收当前约定。原生 Harness 的前导斜杠命令按 Host 相同规则识别，不追加该块，保留命令处理所需的原始块数量、内容和顺序；自定义模型以及带引用或群聊包装的请求仍按模型任务处理。约定引导少量面向用户的关键消息，不改变原始请求、协调职责、权限、上下文保存或原生 Harness 规则；前端的本机精简偏好不传入编排。消息仍使用原 ACP 正文/思考/工具事件，没有新增阶段协议或摘要调用；原生历史回放剥离该内部提示块。
 
 4. `session/update` 按 messageId 实时推送，同时折叠进时间线；回合结束时写库。权限请求以 `permission` 事件推送，用户回答后返回给 Harness。取消或删除后的迟到更新不能继续写入回复。
 5. `POST /api/rooms/:id/cancel {taskId}` 只取消该任务及 parentTaskId 可追溯的后代，保留独立根任务和兄弟任务。排队任务直接移除；运行任务变为 cancelling，待 Harness 结束才放行同一 Agent 下一项。群聊缺 taskId 返回 400；DM 空请求兼容为停止当前任务，保留后续队列。删除房间、修改项目目录 / 归属或停机使用 `cancelAll`；移除 Agent 使用 `cancelAgent`，只传播到其交接后代。
+   `POST /api/rooms/:id/steer` 在单个入口完成「停止 → 释放 → 优先发送」：校验消息 / 附件与目标（目标须为可见的运行中、停止中或等待任务；仅排队与已结束目标拒绝），要求新指令的路由恰好解析到目标 Agent（多 @ / @所有人 / 其他 Agent 拒绝）。通过后写入带 `timeline.steer` 的人类消息（阶段 stopping），新根任务记录 `steer.waits`（目标 + 交接后代）并入队占位，再以「被新消息打断」原因取消该链。pump 先处理引导任务：链未完全退出时占住该 Agent 执行槽，退出后先于同 Agent 更早排队项启动；其余排队项顺序不变。requestId 幂等返回已接受消息，同一链同时只接受一个引导；引导任务被启动时阶段写为 sent，被取消 / 房间失效 / 重启时写为 interrupted（启动 sweep 只改 stopping，不重放）。引导回合附 `<tuantuan-steer>` 提示先核对当前文件，原生历史回放剥离该块。
 6. Host 取消：prompt 先检查 AbortSignal；初始化等待可被取消，取消后不发送 prompt，同一 slot 的预热可供后续请求复用。已发出的 prompt 先发 `session/cancel`、解决挂起权限；默认 4 秒仍未返回则销毁该「房间 + Agent」的 Harness 与 ACP 终端进程组，保留部分回复并标为 cancelled，其他房间和 Agent 继续执行。同一 room / Agent 的重入 prompt 与活动期间切换历史会话返回 409。
 7. 交接：运行中的 Agent 调用 `handoff`，校验成员、完整任务和可选笔记后，同步预占该人类消息共享的最多 5 次交接预算；来源正常结束后才创建子任务。协调 run 仅允许冻结的群主分工，成员结果自动回流；直接对话仍可按需继续交接。相同轮次已有排队 / 运行任务或预占的目标去重，`@所有人` 每成员只触发一次；不跨独立人类消息去重。失败或取消释放未派发预算，不保存成功交接、不产生后代。交接说明 trim 后最多 16,000 字符，超限拒绝，不截断。`context` 完整 JSON 最多 4000 字符，各字符串最多 2000 字符，数组各最多 20 项；缺少字段或超限不修改当前快照。省略 `context` 时复制当前收到 / 暂存的笔记，显式 `context` 只作用于该目标，接受后不受后续 `save_context` 影响。接手方按自己的 FIFO 排队，prompt 附完整 `<tuantuan-handoff>` 与独立 `<tuantuan-context>`，不克隆来源 session；时间线保留 `handoffs` / `handoffFrom`。角色属于本次请求，不形成固定 Agent 上下级。
 8. 初始化去重与失效：同一房间 / Agent 的 opening 按配置签名复用并记录代次；发布 session 前再次核对签名与代次。Agent 设置、项目目录或会话选择变更，以及停机时使旧 opening 失效，旧结果不能回写映射或 slot；相关旧请求返回 409，下一次请求按当前配置重试。失败或切换清理只移除该请求仍拥有的 slot，不删除其他房间相同 ACP sessionId 的映射。

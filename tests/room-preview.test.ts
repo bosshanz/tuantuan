@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type Message, type Room, Store } from "../server/store";
 import { messagePreview, newerPreview, previewText, type RoomPreview } from "../shared/roomPreview";
+import { emptyTimeline } from "../shared/timeline";
 import { type RoomListState, roomListReducer } from "../web/src/roomListState";
 
 const message = (extra: Partial<Message> = {}): Message => ({
@@ -49,6 +50,7 @@ describe("sidebar preview contract", () => {
     expect(previewText(last({ content: "", status: "cancelled" }))).toBe("已取消");
     expect(last({ content: "partial reply", status: "cancelled", error: "cancelled" }).text).toBe("partial reply");
     expect(messagePreview(message({ senderKind: "system" }))).toBeNull();
+    expect(messagePreview(message({ timeline: { ...emptyTimeline(), withdrawn: true } }))).toBeNull();
   });
 
   test("a completion from an older turn and late streaming placeholders cannot regress the preview", () => {
@@ -86,6 +88,48 @@ describe("sidebar preview contract", () => {
         status: "done",
       });
       expect(store.listRooms()[0]?.last).toEqual(messagePreview(m) ?? undefined);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  test("a message pulled back into the composer does not remain the sidebar preview", () => {
+    const store = new Store(":memory:");
+    try {
+      const r = store.createRoom("preview", []);
+      const kept = store.insertMessage({
+        roomId: r.id,
+        runId: "run",
+        hop: 0,
+        senderKind: "human",
+        senderId: null,
+        senderName: "我",
+        content: "kept",
+        status: "done",
+      });
+      const pulled = store.insertMessage({
+        roomId: r.id,
+        runId: "queued",
+        hop: 0,
+        senderKind: "human",
+        senderId: null,
+        senderName: "我",
+        content: "pulled back",
+        status: "done",
+      });
+      store.updateReply(pulled.id, {
+        content: "",
+        status: "cancelled",
+        timeline: { ...emptyTimeline(), withdrawn: true },
+      });
+      expect(store.listRooms()[0]?.last?.messageId).toBe(kept.id);
+      expect(store.latestPreview(r.id)?.messageId).toBe(kept.id);
+      store.updateReply(kept.id, {
+        content: "",
+        status: "cancelled",
+        timeline: { ...emptyTimeline(), withdrawn: true },
+      });
+      expect(store.latestPreview(r.id)).toBeNull();
     } finally {
       store.db.close();
     }
@@ -132,6 +176,29 @@ describe("room list snapshot versus global events", () => {
     });
     expect(roomListReducer(state, { type: "snapshot", id: 1, rooms: [room()] })).toBe(state);
     expect(state.rooms[0]?.last?.text).toBe("missed while offline");
+  });
+
+  test("withdrawing the current preview rolls back to the previous one and ignores a stale replacement", () => {
+    const older = last({ id: "older", seq: 2, content: "earlier" });
+    const queued = last({ id: "queued", seq: 4, senderKind: "human", content: "queued text" });
+    let state = live(initial([room("r", older)]), queued);
+    expect(state.rooms[0]?.last?.messageId).toBe("queued");
+    state = roomListReducer(state, {
+      type: "event",
+      event: { type: "room.preview", roomId: "r", last: older, replacesMessageId: "queued" },
+    });
+    expect(state.rooms[0]?.last?.messageId).toBe("older");
+    state = live(state, last({ id: "newer", seq: 5, content: "newer" }));
+    state = roomListReducer(state, {
+      type: "event",
+      event: { type: "room.preview", roomId: "r", last: null, replacesMessageId: "queued" },
+    });
+    expect(state.rooms[0]?.last?.messageId).toBe("newer");
+    state = roomListReducer(initial([room("r", queued)]), {
+      type: "event",
+      event: { type: "room.preview", roomId: "r", last: null, replacesMessageId: "queued" },
+    });
+    expect(state.rooms[0]?.last).toBeUndefined();
   });
 
   test("failed refresh keeps live data; a deleted room is not resurrected by journal replay", () => {

@@ -7,7 +7,8 @@ import { openCheckedFile } from "./conversation-files";
 import type { Room, Store } from "./store";
 
 const exec = promisify(execFile);
-const MAX_BYTES = 1024 * 1024;
+const DIFF_MAX_BYTES = 1024 * 1024;
+const LIST_MAX_BYTES = 16 * 1024 * 1024;
 const env: NodeJS.ProcessEnv = {
   ...process.env,
   LC_ALL: "C",
@@ -26,7 +27,12 @@ for (const key of Object.keys(env)) {
     delete env[key];
 }
 
-async function git(cwd: string, args: string[], maxBuffer = MAX_BYTES, safeOptions: string[] = []): Promise<string> {
+async function git(
+  cwd: string,
+  args: string[],
+  maxBuffer = DIFF_MAX_BYTES,
+  safeOptions: string[] = [],
+): Promise<string> {
   const result = await exec(
     "git",
     [
@@ -71,19 +77,12 @@ function within(root: string, path: string): boolean {
   return p !== ".." && !p.startsWith(`..${sep}`) && !isAbsolute(p);
 }
 
-/** Refuse configured clean filters on tracked paths instead of executing them or
- * presenting a patch produced with different conversion semantics. Git config includes
- * and all attribute sources are resolved by Git itself. Submodule status is also refused:
- * its own configuration could execute filters and is outside the parent repository. */
-async function prepareReadOnlyGit(cwd: string, root: string): Promise<string[]> {
-  const entries = (await git(cwd, ["ls-files", "--stage", "--full-name", "-z", "--", "."])).split("\0").filter(Boolean);
-  const paths = new Set<string>();
-  for (const entry of entries) {
-    const tab = entry.indexOf("\t");
-    if (tab < 0) throw new Error("Git 索引格式无效");
-    if (entry.startsWith("160000 ")) throw new Error("当前目录包含 Git 子模块，暂不支持安全读取状态");
-    paths.add(entry.slice(tab + 1));
-  }
+function strictlyInside(root: string, path: string): boolean {
+  const p = relative(root, path);
+  return p !== "" && p !== ".." && !p.startsWith(`..${sep}`) && !isAbsolute(p);
+}
+
+async function configuredFilterDrivers(cwd: string): Promise<Set<string>> {
   let config = "";
   try {
     config = await git(cwd, ["config", "--null", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|process)$"]);
@@ -95,9 +94,13 @@ async function prepareReadOnlyGit(cwd: string, root: string): Promise<string[]> 
     const match = /^filter\.(.*)\.(?:clean|process)$/.exec(key);
     if (match?.[1]) drivers.add(match[1]);
   }
+  return drivers;
+}
+
+async function verifyNoCleanFilters(root: string, drivers: Set<string>, allPaths: string[]): Promise<string[]> {
   if (!drivers.size) return [];
   const safeOptions = [...drivers].flatMap((name) => ["-c", `filter.${name}.clean=`, "-c", `filter.${name}.process=`]);
-  const allPaths = [...paths];
+  if (!allPaths.length) return safeOptions;
   // check-attr accepts filenames as literal argv values after --; bound each batch.
   for (let i = 0; i < allPaths.length; ) {
     const batch: string[] = [];
@@ -110,7 +113,7 @@ async function prepareReadOnlyGit(cwd: string, root: string): Promise<string[]> 
       size += path.length;
       i++;
     }
-    const result = (await git(root, ["check-attr", "-z", "filter", "--", ...batch])).split("\0");
+    const result = (await git(root, ["check-attr", "-z", "filter", "--", ...batch], LIST_MAX_BYTES)).split("\0");
     for (let j = 0; j + 2 < result.length; j += 3) {
       const driver = result[j + 2];
       if (driver && drivers.has(driver))
@@ -118,6 +121,70 @@ async function prepareReadOnlyGit(cwd: string, root: string): Promise<string[]> 
     }
   }
   return safeOptions;
+}
+
+/** Refuse configured clean filters on tracked paths instead of executing them or
+ * presenting a patch produced with different conversion semantics. Git config includes
+ * and all attribute sources are resolved by Git itself. Submodule status is also refused:
+ * its own configuration could execute filters and is outside the parent repository. */
+async function prepareReadOnlyGit(cwd: string, root: string): Promise<string[]> {
+  const [entriesRaw, drivers] = await Promise.all([
+    git(cwd, ["ls-files", "--stage", "--full-name", "-z", "--", "."], LIST_MAX_BYTES),
+    configuredFilterDrivers(cwd),
+  ]);
+  const entries = entriesRaw.split("\0").filter(Boolean);
+  const paths = new Set<string>();
+  for (const entry of entries) {
+    const tab = entry.indexOf("\t");
+    if (tab < 0) throw new Error("Git 索引格式无效");
+    if (entry.startsWith("160000 ")) throw new Error("当前目录包含 Git 子模块，暂不支持安全读取状态");
+    paths.add(entry.slice(tab + 1));
+  }
+  return verifyNoCleanFilters(root, drivers, [...paths]);
+}
+
+async function prepareReadOnlyGitForPath(cwd: string, root: string, path: string): Promise<string[]> {
+  const literalPath = `:(literal)${path}`;
+  const [entriesRaw, drivers] = await Promise.all([
+    git(root, ["ls-files", "--stage", "--full-name", "-z", "--", literalPath], DIFF_MAX_BYTES),
+    configuredFilterDrivers(cwd),
+  ]);
+  const tracked: string[] = [];
+  for (const entry of entriesRaw.split("\0").filter(Boolean)) {
+    const tab = entry.indexOf("\t");
+    if (tab < 0) throw new Error("Git 索引格式无效");
+    if (entry.startsWith("160000 ")) throw new Error("当前目录包含 Git 子模块，暂不支持安全读取状态");
+    tracked.push(entry.slice(tab + 1));
+  }
+  return verifyNoCleanFilters(root, drivers, tracked);
+}
+
+function parsePorcelainItems(raw: string, root: string): GitStatusItem[] {
+  const items: GitStatusItem[] = [];
+  const resolvedRoot = resolve(root);
+  for (const entry of raw.split("\0")) {
+    if (!entry) continue;
+    if (entry.length < 4 || entry[2] !== " ") throw new Error("Git 状态格式无效");
+    const path = entry.slice(3);
+    if (!within(resolvedRoot, resolve(resolvedRoot, path)) || path === "") throw new Error("Git 返回了无效路径");
+    const untracked = entry.slice(0, 2) === "??";
+    items.push({
+      path,
+      staged: untracked || entry[0] === " " ? null : (entry[0] ?? null),
+      unstaged: untracked || entry[1] === " " ? null : (entry[1] ?? null),
+      untracked,
+    });
+  }
+  return items;
+}
+
+async function resolveRepoScope(cwd: string): Promise<{ root: string; scope: string }> {
+  const rev = trimNewline(await git(cwd, ["rev-parse", "--show-toplevel", "--show-prefix"]));
+  const newline = rev.indexOf("\n");
+  const root = (newline < 0 ? rev : rev.slice(0, newline)).replace(/\r$/, "");
+  const prefix = newline < 0 ? "" : rev.slice(newline + 1).replace(/\r$/, "");
+  const scope = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
+  return { root, scope };
 }
 
 interface Snapshot {
@@ -129,8 +196,9 @@ interface Snapshot {
 async function snapshot(room: Room): Promise<Snapshot> {
   const cwd = room.cwd;
   let root: string;
+  let scope: string;
   try {
-    root = trimNewline(await git(cwd, ["rev-parse", "--show-toplevel"]));
+    ({ root, scope } = await resolveRepoScope(cwd));
   } catch (error) {
     const reason = message(error);
     return {
@@ -143,31 +211,16 @@ async function snapshot(room: Room): Promise<Snapshot> {
     };
   }
   try {
-    const prefix = trimNewline(await git(cwd, ["rev-parse", "--show-prefix"]));
-    const scope = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
     const safeOptions = await prepareReadOnlyGit(cwd, root);
     // -z forces root-relative paths, even when Git is run in a subdirectory.
     // --no-renames ensures both sides of a move appear independently in the scope.
     const raw = await git(
       cwd,
       ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=all", "--", "."],
-      MAX_BYTES,
+      LIST_MAX_BYTES,
       safeOptions,
     );
-    const items: GitStatusItem[] = [];
-    for (const entry of raw.split("\0")) {
-      if (!entry) continue;
-      if (entry.length < 4 || entry[2] !== " ") throw new Error("Git 状态格式无效");
-      const path = entry.slice(3);
-      if (!within(resolve(root), resolve(root, path)) || path === "") throw new Error("Git 返回了无效路径");
-      const untracked = entry.slice(0, 2) === "??";
-      items.push({
-        path,
-        staged: untracked || entry[0] === " " ? null : (entry[0] ?? null),
-        unstaged: untracked || entry[1] === " " ? null : (entry[1] ?? null),
-        untracked,
-      });
-    }
+    const items = parsePorcelainItems(raw, root);
     let state: "ready" | "unborn" = "ready";
     try {
       await git(cwd, ["rev-parse", "--verify", "--quiet", "HEAD"]);
@@ -196,15 +249,15 @@ function untrackedDetail(room: Room, root: string, path: string, section: GitSta
     // openCheckedFile checks canonical parent paths, file identity and O_NOFOLLOW.
     const opened = openCheckedFile(room, relative(realpathSync(room.cwd), absolute));
     fd = opened.fd;
-    if (opened.size > MAX_BYTES) return { ...base, state: "too-large" };
-    const bytes = Buffer.alloc(MAX_BYTES + 1);
+    if (opened.size > DIFF_MAX_BYTES) return { ...base, state: "too-large" };
+    const bytes = Buffer.alloc(DIFF_MAX_BYTES + 1);
     let offset = 0;
     while (offset < bytes.length) {
       const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
       if (!count) break;
       offset += count;
     }
-    if (offset > MAX_BYTES) return { ...base, state: "too-large" };
+    if (offset > DIFF_MAX_BYTES) return { ...base, state: "too-large" };
     const data = bytes.subarray(0, offset);
     if (data.includes(0)) return { ...base, state: "binary" };
     const content = new TextDecoder("utf-8", { fatal: true }).decode(data);
@@ -228,23 +281,63 @@ export async function handleGitStatusDetail(store: Store, roomId: string, url: U
     (section !== "staged" && section !== "unstaged" && section !== "untracked")
   )
     return Response.json({ error: "无效路径或状态" }, { status: 400 });
-  const snapshotResult = await snapshot(room);
-  const current = snapshotResult.response;
   const base: { path: string; section: GitStatusSection } = { path, section };
-  if ((current.state !== "ready" && current.state !== "unborn") || !current.root)
+  let root: string;
+  let scope: string;
+  try {
+    ({ root, scope } = await resolveRepoScope(room.cwd));
+  } catch (error) {
     return Response.json({
       ...base,
       state: "unavailable",
-      reason: current.error || "Git 状态不可用",
+      reason: message(error) || "Git 状态不可用",
     } satisfies GitStatusDetailResponse);
-  const item = current.items.find((entry) => entry.path === path);
+  }
+  const resolvedRoot = resolve(root);
+  const resolvedScope = scope ? resolve(resolvedRoot, scope) : resolvedRoot;
+  const targetAbsolute = resolve(resolvedRoot, path);
+  if (!strictlyInside(resolvedRoot, targetAbsolute) || !strictlyInside(resolvedScope, targetAbsolute)) {
+    return Response.json({
+      ...base,
+      state: "unavailable",
+      reason: "状态已变化，请刷新",
+    } satisfies GitStatusDetailResponse);
+  }
+  const literalPath = `:(literal)${path}`;
+  let safeOptions: string[];
+  let item: GitStatusItem | undefined;
+  try {
+    safeOptions = await prepareReadOnlyGitForPath(room.cwd, root, path);
+    const raw = await git(
+      root,
+      [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--no-renames",
+        "--ignore-submodules=all",
+        "--",
+        literalPath,
+      ],
+      DIFF_MAX_BYTES,
+      safeOptions,
+    );
+    item = parsePorcelainItems(raw, root).find((entry) => entry.path === path);
+  } catch (error) {
+    return Response.json({
+      ...base,
+      state: "unavailable",
+      reason: message(error),
+    } satisfies GitStatusDetailResponse);
+  }
   if (!item?.[section])
     return Response.json({
       ...base,
       state: "unavailable",
       reason: "状态已变化，请刷新",
     } satisfies GitStatusDetailResponse);
-  if (section === "untracked") return Response.json(untrackedDetail(room, current.root, path, section));
+  if (section === "untracked") return Response.json(untrackedDetail(room, root, path, section));
   const args = [
     "diff",
     ...(section === "staged" ? ["--cached"] : []),
@@ -253,18 +346,12 @@ export async function handleGitStatusDetail(store: Store, roomId: string, url: U
     "--no-color",
     "--no-renames",
   ];
-  const literalPath = `:(literal)${path}`;
   try {
     // --numstat marks binary files with '-' without relying on patch text.
-    const stats = await git(
-      current.root,
-      [...args, "--numstat", "-z", "--", literalPath],
-      MAX_BYTES,
-      snapshotResult.safeOptions,
-    );
+    const stats = await git(root, [...args, "--numstat", "-z", "--", literalPath], DIFF_MAX_BYTES, safeOptions);
     if (stats.startsWith("-\t-\t"))
       return Response.json({ ...base, state: "binary" } satisfies GitStatusDetailResponse);
-    const content = await git(current.root, [...args, "--", literalPath], MAX_BYTES, snapshotResult.safeOptions);
+    const content = await git(root, [...args, "--", literalPath], DIFF_MAX_BYTES, safeOptions);
     if (!content)
       return Response.json({
         ...base,

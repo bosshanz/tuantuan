@@ -1105,4 +1105,74 @@ export const errorMessages: MessageCatalog = {
     en: "ZCode did not return a valid percentage or absolute usage; quota is unknown",
     ja: "ZCode が有効な割合や絶対使用量を返さなかったため、利用枠は不明です",
   },
+  文件路径无效: {
+    "zh-TW": "檔案路徑無效",
+    en: "Invalid file path",
+    ja: "ファイルパスが無効です",
+  },
+  目录超出当前工作区: {
+    "zh-TW": "目錄超出目前工作區",
+    en: "Folder is outside the current workspace",
+    ja: "フォルダが現在のワークスペース外にあります",
+  },
+  目录不存在: {
+    "zh-TW": "目錄不存在",
+    en: "Folder does not exist",
+    ja: "フォルダが存在しません",
+  },
+  目录当前不可用: {
+    "zh-TW": "目錄目前無法使用",
+    en: "Folder is currently unavailable",
+    ja: "フォルダを現在利用できません",
+  },
+  搜索词无效: {
+    "zh-TW": "搜尋關鍵字無效",
+    en: "Invalid search query",
+    ja: "検索キーワードが無効です",
+  },
+  工作区目录当前不可用: {
+    "zh-TW": "工作區目錄目前無法使用",
+    en: "Workspace folder is currently unavailable",
+    ja: "ワークスペースのフォルダを現在利用できません",
+  },
+  "目标任务已结束或不存在，未执行引导；可作为普通消息发送": {
+    "zh-TW": "目標任務已結束或不存在，未執行引導；可作為普通訊息傳送",
+    en: "The target task has finished or no longer exists, so the steer was not applied. You can send this as a normal message.",
+    ja: "対象タスクは終了したか存在しないため、指示は実行されませんでした。通常メッセージとして送信できます",
+  },
+  "目标任务尚未开始，可用「取消排队」移除；引导用于正在执行的任务": {
+    "zh-TW": "目標任務尚未開始，可用「取消排隊」移除；引導用於正在執行的任務",
+    en: "The target task has not started yet. Use “dequeue” to remove it; steering applies to tasks that are running",
+    ja: "対象タスクはまだ開始されていません。「待機をキャンセル」で取り除けます。指示は実行中のタスクに使います",
+  },
+  "该任务已有进行中的引导，请等待其完成或先取消该引导": {
+    "zh-TW": "該任務已有進行中的引導，請等待其完成或先取消該引導",
+    en: "This task already has a steer in progress. Wait for it to finish or cancel it first",
+    ja: "このタスクには進行中の指示があります。完了を待つか、先にその指示をキャンセルしてください",
+  },
+  "该任务不在排队中，无法立即发送": {
+    "zh-TW": "該任務不在排隊中，無法立即傳送",
+    en: "This task is no longer queued, so it cannot be sent now",
+    ja: "このタスクは待機中ではないため、今すぐ送信できません",
+  },
+  "只能引导同一 Agent 正在执行的任务": {
+    "zh-TW": "只能引導同一 Agent 正在執行的任務",
+    en: "Only a running task of the same agent can be steered",
+    ja: "指示できるのは同じ Agent の実行中タスクだけです",
+  },
+  "该任务属于将要停止的任务链，无法立即发送": {
+    "zh-TW": "該任務屬於將要停止的任務鏈，無法立即傳送",
+    en: "This task belongs to the chain being stopped, so it cannot be sent now",
+    ja: "このタスクは停止対象のチェーンに属するため、今すぐ送信できません",
+  },
+  "一次只能引导一个目标；多 @ 或 @所有人 的消息仍按原顺序排队": {
+    "zh-TW": "一次只能引導一個目標；多 @ 或 @所有人 的訊息仍按原順序排隊",
+    en: "Only one target can be steered at a time. Messages with multiple @mentions or @everyone still queue in order",
+    ja: "一度に指示できる対象は 1 つだけです。複数 @ や @全員 のメッセージは従来どおり順番に待機します",
+  },
+  "新指令需要发给 @{name} 才能引导该任务，请调整或作为普通消息发送": {
+    "zh-TW": "新指令需要傳給 @{name} 才能引導該任務，請調整或作為普通訊息傳送",
+    en: "The new instruction must be addressed to @{name} to steer this task. Adjust it or send it as a normal message",
+    ja: "このタスクに指示するには新しい指示を @{name} 宛にする必要があります。宛先を調整するか、通常メッセージとして送信してください",
+  },
 };

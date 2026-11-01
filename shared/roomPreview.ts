@@ -1,5 +1,6 @@
 import type { Message } from "../server/store";
 import { type Locale, translate } from "./i18n";
+import { messageWithdrawn } from "./timeline";
 
 export interface RoomPreview {
   messageId: string;
@@ -14,11 +15,11 @@ export interface RoomPreview {
 type PreviewMessage = Pick<
   Message,
   "id" | "seq" | "senderKind" | "senderName" | "content" | "error" | "createdAt" | "status"
-> & { timeline?: { parts: readonly { kind: string; name?: string | null }[] } | null };
+> & { timeline?: { parts: readonly { kind: string; name?: string | null }[]; withdrawn?: boolean } | null };
 
 /** The list snapshot and global message events use the same last-message contract. */
 export function messagePreview(message: PreviewMessage): RoomPreview | null {
-  if (message.senderKind === "system") return null;
+  if (message.senderKind === "system" || messageWithdrawn(message.timeline)) return null;
   const text = (message.content.trim() || message.error || "").replace(/\s+/g, " ").slice(0, 120);
   let attachment: RoomPreview["attachment"];
   if (!text) {

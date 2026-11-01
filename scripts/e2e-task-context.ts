@@ -96,6 +96,7 @@ export async function taskContextSmoke(browser: Browser, base: string, store: St
     const received = snapshot.messages.find((message) => message.timeline?.handoffFrom);
     if (!sent || !received || sent.status !== "done" || received.status !== "done")
       throw new Error("structured handoff did not produce successful source and receiver replies");
+    await page.locator(`details[data-collaboration-run="${received.runId}"] > summary`).click();
     for (const handoff of [sent.timeline?.handoffs?.[0], received.timeline?.handoffFrom]) {
       if (handoff?.task !== task || JSON.stringify(handoff.context) !== JSON.stringify(context))
         throw new Error("persisted handoff did not retain the full task and structured snapshot");
@@ -153,9 +154,12 @@ export async function taskContextSmoke(browser: Browser, base: string, store: St
 
     await page.getByRole("button", { name: "展开详情面板", exact: true }).click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
-    const compactSwitch = page.getByRole("switch", { name: "仅显示回复正文", exact: true });
-    if (!(await compactSwitch.isChecked())) throw new Error("task context fixture did not start in compact view");
-    await compactSwitch.uncheck();
+    const conciseMode = page
+      .getByRole("group", { name: "详细/简洁模式" })
+      .getByRole("button", { name: "简洁", exact: true });
+    if ((await conciseMode.getAttribute("aria-pressed")) !== "true")
+      throw new Error("task context fixture did not start in compact view");
+    await page.getByRole("group", { name: "详细/简洁模式" }).getByRole("button", { name: "详细", exact: true }).click();
     await page.waitForFunction(
       (ids: string[]) =>
         ids.every((id) => document.querySelector(`[data-message-id="${id}"]`)?.getAttribute("data-compact") === null),
@@ -229,7 +233,10 @@ export async function taskContextSmoke(browser: Browser, base: string, store: St
     });
     await page.reload();
     await page.getByRole("heading", { name: "结构化交接回归" }).waitFor();
+    await page.locator(`details[data-collaboration-run="${received.runId}"] > summary`).click();
     for (const message of fixtures) {
+      if (message.status === "error")
+        await page.locator(`details[data-collaboration-run="${message.runId}"] > summary`).click();
       await row(message.id).waitFor();
       if (await row(message.id).locator('.task-context[data-kind="saved"]').count())
         throw new Error(`${message.status} reply incorrectly displays saved task notes`);

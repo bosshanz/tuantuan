@@ -15,6 +15,7 @@ import { createContext, type ReactNode, useContext, useEffect, useState } from "
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
+import { localFileTarget } from "../../shared/localFileLink";
 import type { Agent, Room } from "./api";
 import type { Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
@@ -143,6 +144,8 @@ function withMentions(children: ReactNode, names: string[]): ReactNode {
 }
 
 const MentionNames = createContext<string[]>([]);
+/** Provided by the chat view: a link that names a local file opens through the workspace, not the browser. */
+export const LocalLinkOpen = createContext<((href: string) => void) | null>(null);
 const markdownPlugins = [remarkGfm];
 
 function containsImage(node: Element): boolean {
@@ -159,6 +162,8 @@ const markdownComponents: Components = {
   },
   a: function MarkdownLink({ href, children, node }) {
     const { t } = useI18n();
+    const openLocal = useContext(LocalLinkOpen);
+    const local = href && openLocal ? localFileTarget(href) !== null : false;
     return node && containsImage(node) ? (
       <span className="md-linked-image">
         {children}
@@ -168,6 +173,16 @@ const markdownComponents: Components = {
           </a>
         )}
       </span>
+    ) : local ? (
+      <a
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          openLocal?.(href as string);
+        }}
+      >
+        {children}
+      </a>
     ) : (
       <a href={href} target="_blank" rel="noreferrer noopener">
         {children}

@@ -11,6 +11,16 @@ export const coreMessages = {
     en: "Sidebar",
     ja: "サイドバー",
   },
+  收起侧栏: {
+    "zh-TW": "收起側欄",
+    en: "Collapse sidebar",
+    ja: "サイドバーを折りたたむ",
+  },
+  展开侧栏: {
+    "zh-TW": "展開側欄",
+    en: "Expand sidebar",
+    ja: "サイドバーを展開",
+  },
   "团团 Tuantuan": {
     "zh-TW": "團團 Tuantuan",
     en: "Tuantuan",

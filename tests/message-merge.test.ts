@@ -19,6 +19,32 @@ describe("message merge (snapshot vs live events)", () => {
     expect(upsertMessage(live, done)[0]).toBe(done);
     expect(upsertMessage([done], msg("c", 3, { status: "streaming", content: "he" }))[0]).toBe(done);
   });
+  test("on a content/status tie the copy with the further-along steer stage wins", () => {
+    const steer = (stage: "stopping" | "sent" | "interrupted") =>
+      ({ steer: { taskId: "t", runId: "run", agentId: "a", agentName: "A", stage } }) as Message["timeline"];
+    const stopping = msg("s", 1, { content: "do it", timeline: steer("stopping") });
+    const sent = msg("s", 1, { content: "do it", timeline: steer("sent") });
+    const interrupted = msg("s", 1, { content: "do it", timeline: steer("interrupted") });
+    // A stale live copy still on "stopping" must not beat the snapshot's recorded progress.
+    expect(mergeMessages([sent], [stopping], "r")[0]?.timeline?.steer?.stage).toBe("sent");
+    expect(mergeMessages([stopping], [interrupted], "r")[0]?.timeline?.steer?.stage).toBe("interrupted");
+    expect(upsertMessage([interrupted], stopping)[0]?.timeline?.steer?.stage).toBe("interrupted");
+    // A longer streaming copy still wins over a stage difference.
+    const longer = msg("s", 1, { content: "do it now", timeline: steer("stopping") });
+    expect(mergeMessages([interrupted], [longer], "r")[0]?.content).toBe("do it now");
+  });
+  test("a withdrawn queued message replaces the longer sent copy and is not restored by it", () => {
+    const sent = msg("q", 1, { seq: 4, content: "排队编辑", status: "done" });
+    const withdrawn = msg("q", 1, {
+      seq: 4,
+      content: "",
+      status: "cancelled",
+      timeline: { parts: [], tools: {}, plan: null, withdrawn: true },
+    });
+    expect(upsertMessage([sent], withdrawn)[0]?.timeline?.withdrawn).toBe(true);
+    expect(mergeMessages([withdrawn], [sent], "r")[0]?.timeline?.withdrawn).toBe(true);
+    expect(mergeMessages([sent], [withdrawn], "r")[0]?.content).toBe("");
+  });
   test("ignores other rooms and keeps chronological order", () => {
     const out = mergeMessages([msg("a", 1), msg("c", 3)], [msg("b", 2), msg("x", 0, { roomId: "other" })], "r");
     expect(out.map((m) => m.id)).toEqual(["a", "b", "c"]);

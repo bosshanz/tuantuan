@@ -113,6 +113,19 @@ function leadingHtmlTag(source: string): string | null {
   return null;
 }
 
+const SAFE_RASTER_DATA_URI = /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z\d+/=\s]+$/i;
+
+/** Strip external @import and non-raster url() references so CSS parsing never initiates network probes. */
+function sanitizeStaticCss(css: string): string {
+  return css
+    .replace(/@import\b[\s\S]*?(?:;|\{[\s\S]*?\})/gi, "")
+    .replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi, (full, dq, sq, bare) => {
+      const target = String(dq ?? sq ?? bare ?? "").trim();
+      if (!target || target.startsWith("#") || SAFE_RASTER_DATA_URI.test(target)) return full;
+      return "none";
+    });
+}
+
 /** Parse into an inert template, never a detached document that could start resource requests. */
 export function staticHtmlDocument(source: string): string {
   const template = document.createElement("template");
@@ -136,21 +149,26 @@ export function staticHtmlDocument(source: string): string {
     const element = pending.pop();
     if (!element) continue;
     if (++count > 20_000) throw new Error("页面结构过于复杂，请查看源码");
-    if (removedTags.has(element.localName.toLowerCase())) {
+    const tag = element.localName.toLowerCase();
+    if (removedTags.has(tag)) {
       // Removing templates also removes their inert nested trees and declarative shadow roots.
       element.remove();
       continue;
     }
+    if (tag === "style" && element.textContent) {
+      element.textContent = sanitizeStaticCss(element.textContent);
+    }
     for (const attribute of [...element.attributes]) {
       const name = attribute.name.toLowerCase();
-      const rasterSource =
-        name === "src" &&
-        element.localName === "img" &&
-        /^data:image\/(png|jpeg|gif|webp);base64,[a-z\d+/=\s]+$/i.test(attribute.value);
+      if (name === "style") {
+        attribute.value = sanitizeStaticCss(attribute.value);
+        continue;
+      }
+      const rasterSource = name === "src" && tag === "img" && SAFE_RASTER_DATA_URI.test(attribute.value);
       if (name.startsWith("on") || removedAttributes.has(name) || (name === "src" && !rasterSource))
         element.removeAttribute(attribute.name);
     }
-    if (["input", "button", "select", "textarea"].includes(element.localName)) element.setAttribute("disabled", "");
+    if (["input", "button", "select", "textarea"].includes(tag)) element.setAttribute("disabled", "");
     for (const child of element.children) pending.push(child);
   }
   // The document parser puts this trusted prefix in head, then merges the authored html

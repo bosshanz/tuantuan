@@ -395,6 +395,17 @@ export class ValidationError extends Error {
 
 type Row = Record<string, unknown>;
 
+/**
+ * Messages the transcript, search, sidebar and agent context may treat as real history.
+ * Missing or corrupt timelines are not withdrawn. json_extract must not see invalid JSON:
+ * historical rows can store non-JSON timelines, and search still has to read their body.
+ */
+function visibleTranscriptSql(alias = ""): string {
+  const timeline = alias ? `${alias}.timeline` : "timeline";
+  const sender = alias ? `${alias}.sender_kind` : "sender_kind";
+  return `${sender} != 'system' AND CASE WHEN json_valid(${timeline}) THEN IFNULL(json_extract(${timeline}, '$.withdrawn'), 0) ELSE 0 END != 1`;
+}
+
 export class Store {
   readonly db: Database;
   readonly modelCatalog: ModelCatalog;
@@ -416,6 +427,12 @@ export class Store {
     // Streams cannot survive a restart: mark them so the UI does not show a forever-typing message.
     this.db
       .query("UPDATE messages SET status = 'interrupted', error = '服务重启，回复中断' WHERE status = 'streaming'")
+      .run();
+    // The task queue is in-memory: an accepted steer that never delivered is interrupted, not replayed.
+    this.db
+      .query(
+        "UPDATE messages SET timeline = json_set(timeline, '$.steer.stage', 'interrupted') WHERE json_extract(timeline, '$.steer.stage') = 'stopping'",
+      )
       .run();
   }
 
@@ -537,42 +554,56 @@ export class Store {
   // ---- rooms ----
   listRooms(): Room[] {
     const rooms = this.db.query("SELECT * FROM rooms ORDER BY created_at").all() as Row[];
-    // Last non-system message per room, for the sidebar preview / recency order.
-    const last = new Map(
-      (
-        this.db
-          .query(
-            `SELECT m.room_id, m.id, m.seq, m.status, m.sender_name, m.sender_kind, m.content, m.error, m.created_at,
-               CASE WHEN trim(m.content) = '' AND json_valid(m.timeline) THEN
-                 (SELECT json_group_array(json_object('kind', json_extract(p.value, '$.kind'), 'name', json_extract(p.value, '$.name')))
-                  FROM json_each(m.timeline, '$.parts') p
-                  WHERE json_extract(p.value, '$.kind') IN ('file', 'image'))
-               END AS attachment_parts
-             FROM messages m
-             JOIN (SELECT room_id, MAX(seq) AS seq FROM messages WHERE sender_kind != 'system' GROUP BY room_id) x
-               ON x.room_id = m.room_id AND x.seq = m.seq`,
-          )
-          .all() as Row[]
-      ).map((r) => [r.room_id as string, r]),
-    );
+    const last = new Map(this.lastPreviewRows().map((row) => [row.room_id as string, row]));
     return rooms.map((r) => {
       const room = this.toRoom(r);
-      const l = last.get(room.id);
-      if (l)
-        room.last =
-          messagePreview({
-            id: l.id as string,
-            seq: l.seq as number,
-            status: l.status as MessageStatus,
-            senderKind: l.sender_kind as Message["senderKind"],
-            senderName: l.sender_name as string,
-            content: l.content as string,
-            error: l.error as string | null,
-            createdAt: l.created_at as number,
-            timeline: l.attachment_parts ? { parts: JSON.parse(l.attachment_parts as string) } : null,
-          }) ?? undefined;
+      const preview = last.get(room.id);
+      if (preview) room.last = this.previewFromRow(preview) ?? undefined;
       return room;
     });
+  }
+
+  /** Sidebar preview for one room, skipping system notes and messages pulled back into the composer. */
+  latestPreview(roomId: string): RoomPreview | null {
+    const row = this.lastPreviewRows(roomId)[0];
+    return row ? this.previewFromRow(row) : null;
+  }
+
+  private previewFromRow(row: Row): RoomPreview | null {
+    return messagePreview({
+      id: row.id as string,
+      seq: row.seq as number,
+      status: row.status as MessageStatus,
+      senderKind: row.sender_kind as Message["senderKind"],
+      senderName: row.sender_name as string,
+      content: row.content as string,
+      error: row.error as string | null,
+      createdAt: row.created_at as number,
+      timeline: row.attachment_parts
+        ? { parts: JSON.parse(row.attachment_parts as string) as { kind: string; name?: string | null }[] }
+        : null,
+    });
+  }
+
+  /** Last visible message per room. Withdrawn rows stay in the table so sequence numbers do not gap. */
+  private lastPreviewRows(roomId?: string): Row[] {
+    return this.db
+      .query(
+        `SELECT m.room_id, m.id, m.seq, m.status, m.sender_name, m.sender_kind, m.content, m.error, m.created_at,
+           CASE WHEN trim(m.content) = '' AND json_valid(m.timeline) THEN
+             (SELECT json_group_array(json_object('kind', json_extract(p.value, '$.kind'), 'name', json_extract(p.value, '$.name')))
+              FROM json_each(m.timeline, '$.parts') p
+              WHERE json_extract(p.value, '$.kind') IN ('file', 'image'))
+           END AS attachment_parts
+         FROM messages m
+         JOIN (
+           SELECT room_id, MAX(seq) AS seq FROM messages
+           WHERE ${visibleTranscriptSql()}
+           GROUP BY room_id
+         ) x ON x.room_id = m.room_id AND x.seq = m.seq
+         ${roomId ? "WHERE m.room_id = ?" : ""}`,
+      )
+      .all(...(roomId ? [roomId] : [])) as Row[];
   }
 
   getRoom(id: string): Room | null {
@@ -706,6 +737,7 @@ export class Store {
   insertMessage(
     m: Omit<Message, "id" | "seq" | "createdAt" | "timeline" | "error" | "quote"> & {
       id?: string;
+      initialTimeline?: Timeline;
       replyToId?: string | null;
       replyToPartIndex?: number;
     },
@@ -751,7 +783,7 @@ export class Store {
           m.content,
           m.status,
           Date.now(),
-          m.senderKind === "agent" ? JSON.stringify(emptyTimeline()) : null,
+          m.senderKind === "agent" ? JSON.stringify(m.initialTimeline ?? emptyTimeline()) : null,
           quote ? JSON.stringify(quote) : null,
         );
     })();
@@ -922,7 +954,7 @@ export class Store {
       .query(
         `WITH page AS MATERIALIZED (
            SELECT m.id FROM messages m
-           WHERE m.sender_kind != 'system' AND m.status != 'streaming'
+           WHERE ${visibleTranscriptSql("m")} AND m.status != 'streaming'
              AND instr(lower(m.content), lower(?)) > 0
              ${roomId ? "AND m.room_id = ?" : ""}
              ${before ? "AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))" : ""}
@@ -1016,7 +1048,7 @@ export class Store {
     const rows = this.db
       .query(
         `SELECT * FROM messages WHERE room_id = ? AND seq < ? AND (seq <= ? OR run_id = ?)
-         AND sender_kind != 'system' AND status != 'streaming' ORDER BY seq DESC LIMIT ?`,
+         AND ${visibleTranscriptSql()} AND status != 'streaming' ORDER BY seq DESC LIMIT ?`,
       )
       .all(roomId, beforeSeq ?? Number.MAX_SAFE_INTEGER, throughSeq, runId, limit) as Row[];
     return rows.reverse().map(toMessage);

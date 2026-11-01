@@ -11,7 +11,6 @@ import {
 } from "node:fs";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
-import { fileURLToPath } from "node:url";
 import { attachmentBytes, IMAGE_MIME_TYPES } from "../shared/attachments";
 import {
   CONVERSATION_FILE_DOWNLOAD_MAX_BYTES,
@@ -21,6 +20,7 @@ import {
   type ConversationFilesPage,
 } from "../shared/conversationFiles";
 import { FILE_PREVIEW_MAX_BYTES, type FilePreviewContent, getFilePreviewType } from "../shared/filePreview";
+import { localFileTarget } from "../shared/localFileLink";
 import {
   type ConversationFileMessage,
   type ConversationFileSource,
@@ -130,28 +130,7 @@ function* markdownReferences(source: ConversationFileSource): Generator<FileRefe
 }
 
 /** null means a remote URL or non-file target; explicit local but inaccessible paths stay visible. */
-function localPath(raw: string): string | null {
-  if (!raw || raw.length > 8192 || raw.includes("\0") || raw.startsWith("#")) return null;
-  if (/^file:/i.test(raw)) {
-    try {
-      const url = new URL(raw);
-      if (url.hostname && url.hostname !== "localhost") return null;
-      return fileURLToPath(url);
-    } catch {
-      return null;
-    }
-  }
-  if (/^[a-z][a-z\d+.-]*:/i.test(raw) && !/^[a-z]:[\\/]/i.test(raw)) return null;
-  if (raw.startsWith("//") || raw.startsWith("\\\\")) return null;
-  try {
-    return decodeURIComponent(raw.replace(/#(?:L\d+(?:C\d+)?(?:-L?\d+(?:C\d+)?)?)?$/, "")).replace(
-      /:\d+(?::\d+)?$/,
-      "",
-    );
-  } catch {
-    return null;
-  }
-}
+const localPath = localFileTarget;
 
 function* references(source: ConversationFileSource): Generator<FileReference> {
   if (source.kind === "text") yield* markdownReferences(source);
@@ -176,29 +155,50 @@ interface LocalFile {
   ino?: number;
 }
 
-function currentFile(cwd: string, path: string): LocalFile {
+interface FileLookupCache {
+  root?: string | null;
+  files: Map<string, LocalFile>;
+}
+
+function currentFile(cwd: string, path: string, cache?: FileLookupCache): LocalFile {
   const unavailable: LocalFile = { state: "unavailable", size: null };
   if (!cwd || !path || path.length > 8192 || path.includes("\0") || /(^|[\\/])\.\.([\\/]|$)/.test(path))
     return unavailable;
+  const cached = cache?.files.get(path);
+  if (cached) return cached;
+  const remember = (result: LocalFile) => {
+    cache?.files.set(path, result);
+    return result;
+  };
   try {
-    const root = realpathSync(cwd);
+    let root: string | null | undefined = cache?.root;
+    if (root === undefined) {
+      try {
+        root = realpathSync(cwd);
+      } catch {
+        root = null;
+      }
+      if (cache) cache.root = root;
+    }
+    if (!root) return remember(unavailable);
     const absolute = resolve(cwd, path);
-    if (!inside(resolve(cwd), absolute) && !inside(root, absolute)) return unavailable;
+    if (!inside(resolve(cwd), absolute) && !inside(root, absolute)) return remember(unavailable);
     // Resolve existing parents too: a missing target beneath an outside symlink is unavailable.
     let ancestor = absolute;
     for (;;) {
       try {
-        if (!inside(root, realpathSync(ancestor)) && realpathSync(ancestor) !== root) return unavailable;
+        const realAncestor = realpathSync(ancestor);
+        if (!inside(root, realAncestor) && realAncestor !== root) return remember(unavailable);
         break;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return unavailable;
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return remember(unavailable);
         try {
-          if (lstatSync(ancestor).isSymbolicLink()) return unavailable;
+          if (lstatSync(ancestor).isSymbolicLink()) return remember(unavailable);
         } catch (statError) {
-          if ((statError as NodeJS.ErrnoException).code !== "ENOENT") return unavailable;
+          if ((statError as NodeJS.ErrnoException).code !== "ENOENT") return remember(unavailable);
         }
         const parent = resolve(ancestor, "..");
-        if (parent === ancestor) return unavailable;
+        if (parent === ancestor) return remember(unavailable);
         ancestor = parent;
       }
     }
@@ -206,25 +206,27 @@ function currentFile(cwd: string, path: string): LocalFile {
     try {
       realPath = realpathSync(absolute);
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code === "ENOENT" ? { state: "missing", size: null } : unavailable;
+      return remember(
+        (error as NodeJS.ErrnoException).code === "ENOENT" ? { state: "missing", size: null } : unavailable,
+      );
     }
-    if (!inside(root, realPath)) return unavailable;
+    if (!inside(root, realPath)) return remember(unavailable);
     const stat = statSync(realPath);
-    if (!stat.isFile()) return unavailable;
-    return {
+    if (!stat.isFile()) return remember(unavailable);
+    return remember({
       state: stat.size <= CONVERSATION_FILE_DOWNLOAD_MAX_BYTES ? "available" : "unavailable",
       size: stat.size,
       realPath,
       root,
       dev: stat.dev,
       ino: stat.ino,
-    };
+    });
   } catch {
-    return unavailable;
+    return remember(unavailable);
   }
 }
 
-function mimeFor(name: string, declared: string | null): string {
+export function mimeFor(name: string, declared: string | null): string {
   if (declared && /^[\w!#$&^_.+-]+\/[\w!#$&^_.+-]+$/.test(declared)) return declared.toLowerCase();
   return Bun.file(name).type || "application/octet-stream";
 }
@@ -242,6 +244,7 @@ function fileItem(
   message: ConversationFileMessage,
   source: ConversationFileSource,
   reference: FileReference,
+  cache?: FileLookupCache,
 ): ConversationFile {
   const id = encode({
     version: 1,
@@ -252,7 +255,7 @@ function fileItem(
   } satisfies FileIdentity);
   const name = reference.path ? reference.name || basename(reference.path) || reference.path : inlineName(source);
   const mimeType = mimeFor(name, source.mimeType);
-  const local = reference.path ? currentFile(room.cwd, reference.path) : null;
+  const local = reference.path ? currentFile(room.cwd, reference.path, cache) : null;
   const size = local ? local.size : source.size;
   const state = local
     ? local.state
@@ -298,6 +301,7 @@ export function handleConversationFiles(store: Store, roomId: string, url: URL):
     let position: Position =
       rawCursor === null ? { seq: Number.MAX_SAFE_INTEGER, key: "", offset: -1 } : cursor(rawCursor, roomId);
     const items: ConversationFile[] = [];
+    const lookupCache: FileLookupCache = { files: new Map() };
     let scanned = 0;
     for (let messages = 0; messages < MESSAGE_BUDGET && scanned < SOURCE_BUDGET; messages++) {
       const message = store.conversationFileMessage(roomId, position.seq);
@@ -315,7 +319,7 @@ export function handleConversationFiles(store: Store, roomId: string, url: URL):
           return Response.json({ items, nextCursor: nextCursor(roomId, position) } satisfies ConversationFilesPage);
         for (const reference of references(source)) {
           if (source.key === position.key && reference.offset <= position.offset) continue;
-          items.push(fileItem(room, message, source, reference));
+          items.push(fileItem(room, message, source, reference, lookupCache));
           position = { seq: message.seq, key: source.key, offset: reference.offset };
           if (items.length === limit)
             return Response.json({ items, nextCursor: nextCursor(roomId, position) } satisfies ConversationFilesPage);
@@ -330,7 +334,7 @@ export function handleConversationFiles(store: Store, roomId: string, url: URL):
   }
 }
 
-function downloadHeaders(name: string, size: number): Headers {
+export function downloadHeaders(name: string, size: number): Headers {
   const safe =
     Array.from(basename(name), (character) =>
       character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127 ? "_" : character,
@@ -344,6 +348,19 @@ function downloadHeaders(name: string, size: number): Headers {
     "content-type": "application/octet-stream",
     "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`,
     "content-length": String(size),
+    "x-content-type-options": "nosniff",
+    "cache-control": "no-store",
+  });
+}
+
+export function inlineImageHeaders(mimeType: string, size: number): Headers {
+  if (!imageTypes.has(mimeType)) throw new ValidationError("此文件不支持图片预览", 415);
+  if (size > INLINE_BYTES_MAX) throw new ValidationError("文件当前不可用", 413);
+  return new Headers({
+    "content-type": mimeType,
+    "content-disposition": "inline",
+    "content-length": String(size),
+    "content-security-policy": "default-src 'none'",
     "x-content-type-options": "nosniff",
     "cache-control": "no-store",
   });
@@ -421,7 +438,7 @@ function inlineFileBytes(
   return Buffer.from(payload as string, "base64");
 }
 
-function fileFailure(error: unknown): Response {
+export function fileFailure(error: unknown): Response {
   if ((error as NodeJS.ErrnoException).code === "ENOENT")
     return Response.json({ error: "文件不存在" }, { status: 404 });
   if (["EACCES", "EPERM", "ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? ""))
@@ -429,15 +446,45 @@ function fileFailure(error: unknown): Response {
   return failure(error);
 }
 
-export function handleConversationFileContent(store: Store, roomId: string, fileId: string): Response {
+export function readBoundedPreviewBytes(fd: number, size: number): Buffer {
+  if (size > FILE_PREVIEW_MAX_BYTES) throw new ValidationError("文件超过 1 MiB 预览上限", 413);
+  // One extra byte detects growth after fstat, without allowing an unbounded read.
+  const buffer = Buffer.alloc(FILE_PREVIEW_MAX_BYTES + 1);
+  let total = 0;
+  while (total <= FILE_PREVIEW_MAX_BYTES) {
+    const count = readSync(fd, buffer, total, buffer.length - total, null);
+    if (!count) break;
+    total += count;
+  }
+  if (total > FILE_PREVIEW_MAX_BYTES) throw new ValidationError("文件超过 1 MiB 预览上限", 413);
+  return buffer.subarray(0, total);
+}
+
+export function decodePreviewText(bytes: Uint8Array): string {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new ValidationError("文件不是有效的 UTF-8 文本", 415);
+  }
+  for (const character of text) {
+    const code = character.charCodeAt(0);
+    if ((code < 32 && code !== 9 && code !== 10 && code !== 13) || (code >= 127 && code <= 159))
+      throw new ValidationError("文件包含二进制或控制字符，无法预览", 415);
+  }
+  return text;
+}
+
+export function handleConversationFileContent(store: Store, roomId: string, fileId: string, url?: URL): Response {
   let fd: number | undefined;
   try {
     const { room, message, source, reference, item } = resolveConversationFile(store, roomId, fileId);
     requireAvailableFile(item);
+    const inline = url?.searchParams.get("inline") === "1";
     if (reference.path) {
       const opened = openCheckedFile(room, reference.path);
       fd = opened.fd;
-      const headers = downloadHeaders(item.name, opened.size);
+      const headers = inline ? inlineImageHeaders(item.mimeType, opened.size) : downloadHeaders(item.name, opened.size);
       if (!opened.size) {
         closeSync(fd);
         fd = undefined;
@@ -448,7 +495,8 @@ export function handleConversationFileContent(store: Store, roomId: string, file
       return new Response(Readable.toWeb(stream) as unknown as ReadableStream<Uint8Array>, { headers });
     }
     const bytes = inlineFileBytes(store, roomId, message.id, source);
-    return new Response(bytes, { headers: downloadHeaders(item.name, bytes.length) });
+    const headers = inline ? inlineImageHeaders(item.mimeType, bytes.length) : downloadHeaders(item.name, bytes.length);
+    return new Response(bytes, { headers });
   } catch (error) {
     if (fd !== undefined) closeSync(fd);
     return fileFailure(error);
@@ -468,29 +516,9 @@ export function handleConversationFilePreview(store: Store, roomId: string, file
     if (reference.path) {
       const opened = openCheckedFile(room, reference.path);
       fd = opened.fd;
-      if (opened.size > FILE_PREVIEW_MAX_BYTES) throw new ValidationError("文件超过 1 MiB 预览上限", 413);
-      // One extra byte detects growth after fstat, without allowing an unbounded read.
-      const buffer = Buffer.alloc(FILE_PREVIEW_MAX_BYTES + 1);
-      let total = 0;
-      while (total <= FILE_PREVIEW_MAX_BYTES) {
-        const count = readSync(fd, buffer, total, buffer.length - total, null);
-        if (!count) break;
-        total += count;
-      }
-      if (total > FILE_PREVIEW_MAX_BYTES) throw new ValidationError("文件超过 1 MiB 预览上限", 413);
-      bytes = buffer.subarray(0, total);
+      bytes = readBoundedPreviewBytes(fd, opened.size);
     } else bytes = inlineFileBytes(store, roomId, message.id, source, FILE_PREVIEW_MAX_BYTES);
-    let text: string;
-    try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      throw new ValidationError("文件不是有效的 UTF-8 文本", 415);
-    }
-    for (const character of text) {
-      const code = character.charCodeAt(0);
-      if ((code < 32 && code !== 9 && code !== 10 && code !== 13) || (code >= 127 && code <= 159))
-        throw new ValidationError("文件包含二进制或控制字符，无法预览", 415);
-    }
+    const text = decodePreviewText(bytes);
     return Response.json({ ...type, text, size: bytes.length } satisfies FilePreviewContent, {
       headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
     });
