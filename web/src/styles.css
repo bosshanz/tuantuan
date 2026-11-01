@@ -1690,7 +1690,8 @@ html[data-desktop="darwin"]:not([data-fullscreen]) .side-brand { display: none; 
 .main { background: var(--surface); }
 .chat { position: relative; }
 .chat-head { position: absolute; inset: 0 0 auto 0; z-index: 5; border-bottom: none !important; background: transparent; justify-content: center; pointer-events: none; }
-.chat > .chat-head { top: 8px; }
+/* The floating head spans exactly one --head-h row from the top, so the pill and the right-hand icons
+   share the sidebar row's centerline (and, on macOS, the traffic lights' center at y = 26). */
 .chat-head > * { pointer-events: auto; }
 .chat-head .back-btn { position: absolute; left: 12px; }
 .chat-head > .btn:last-child { position: absolute; right: 16px; }
@@ -1740,7 +1741,7 @@ html[data-desktop="darwin"]:not([data-fullscreen]) .side-brand { display: none; 
   .terminal-context { display: none; }
   .terminal-screen { margin: 0 12px 8px; }
 }
-.title-pill { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 60%; height: 46px; padding: 0 10px 0 8px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); box-shadow: 0 4px 16px rgb(24 24 27 / 0.08), var(--shadow-1); transition: transform 120ms var(--ease), border-color 180ms var(--ease), background-color 180ms var(--ease), box-shadow 180ms var(--ease); }
+.title-pill { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 60%; height: 40px; padding: 0 12px 0 6px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); box-shadow: 0 4px 16px rgb(24 24 27 / 0.08), var(--shadow-1); transition: transform 120ms var(--ease), border-color 180ms var(--ease), background-color 180ms var(--ease), box-shadow 180ms var(--ease); }
 .chat-head .title-pill:not(.static) { position: relative; isolation: isolate; border-radius: 999px; border-color: transparent; background: transparent; box-shadow: none; transform: none; transition: box-shadow 180ms var(--ease); }
 .chat-head .title-pill:not(.static)::before { content: ""; position: absolute; z-index: -1; inset: -1px; border: 1px solid var(--border); border-radius: inherit; background: var(--surface); box-shadow: 0 4px 16px rgb(24 24 27 / 0.08), var(--shadow-1); pointer-events: none; transition: inset 320ms cubic-bezier(0.2, 1.25, 0.35, 1), border-color 180ms var(--ease), background-color 180ms var(--ease), box-shadow 220ms var(--ease); }
 .title-pill:hover { border-color: var(--border-strong); background: var(--surface-hover); }

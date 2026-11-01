@@ -247,7 +247,7 @@ Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio M
 - 服务端不进 asar：`resources/server`（源码 + 生产依赖）+ `resources/bin/bun`。主进程选空闲端口启动子进程组，等 `/api/health` 后加载窗口。退出时除服务端原组外，还追踪其 Harness / ACP 终端 / 安装任务的独立子进程组，按 pid 与启动时间保留身份，服务端退出后继续回收已记录组，避免误杀复用的组号；4 秒强退兜底。POSIX 依赖 `ps` 发现子组，不可用时仅回收原服务组；Windows 走 `taskkill` 进程树，平台实际验收分开记录。服务端收到退出信号时关闭 host / installer，并用 `TUANTUAN_PARENT_PID` 看门狗兜底。
 - 登录 shell 环境在主进程解析一次，传给服务端，Harness 继承它（CC Switch 写的变量照常生效）。
 - 主进程启动时读取 `/api/profile` 初始化菜单语言；前端全局通知模块在语言变化时经 preload 的 `tuantuan:set-locale` 同步，主进程重建应用菜单和托盘菜单。系统通知使用当前语言生成应用标题、状态和提示，消息预览保留原文。浏览器桥接检查不能替代真实原生菜单显示验收。
-- macOS：`titleBarStyle: "hidden"`，红绿灯位置 `{x: 18, y: 20}`；网页侧 `html[data-desktop="darwin"]` 让侧栏顶行左侧留出红绿灯位置，搜索和「+」排在红绿灯右边；`data-fullscreen` 由主进程在进入 / 退出全屏时经 preload 设置，全屏时不再留空。
+- macOS：`titleBarStyle: "hidden"`，红绿灯位置 `{x: 18, y: 20}`；网页侧 `html[data-desktop="darwin"]` 让侧栏顶行左侧留出红绿灯位置，搜索和「+」排在红绿灯右边；`data-fullscreen` 由主进程在进入 / 退出全屏时经 preload 设置，全屏时不再留空。顶栏所有元素共用一条 `--head-h`（macOS 52px）中线：红绿灯中心 y=26，侧栏图标按钮 32px、会话标题胶囊 40px、右侧操作按钮 32px 都在该行内垂直居中，浮动标题栏不再额外下移。
 
 ## 桌面更新的状态与安装边界
 
