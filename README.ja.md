@@ -32,15 +32,15 @@ macOS、Windows、Linux 向けの Electron デスクトップアプリ、また�
 
 詳しくは[機能一覧（簡体字中国語）](docs/features.md)をご覧ください。
 
-## v0.3.1 をダウンロード
+## v0.3.2 をダウンロード
 
-[GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.3.1) からデスクトップアプリをダウンロードできます。
+[GitHub Releases](https://github.com/bosshanz/tuantuan/releases/tag/v0.3.2) からデスクトップアプリをダウンロードできます。
 
 - **macOS**：Apple シリコン（arm64）または Intel（x64）向けの `.dmg` と `.zip`。
 - **Windows**：x64 向けの `.exe` インストーラー。
 - **Linux**：x64 向けの `.AppImage`。
 
-デスクトップアプリには実行環境が含まれているため、Bun のインストールは不要です。v0.3.1 の macOS 版はアドホック署名を使用し、Apple の公証を受けていません。Windows 版にはコード署名がありません。詳しくは[インストールと署名の説明（簡体字中国語）](docs/install.md)をご覧ください。
+デスクトップアプリには実行環境が含まれているため、Bun のインストールは不要です。v0.3.2 の macOS 版はアドホック署名を使用し、Apple の公証を受けていません。Windows 版にはコード署名がありません。詳しくは[インストールと署名の説明（簡体字中国語）](docs/install.md)をご覧ください。
 
 ### Homebrew でインストール（macOS）
 
