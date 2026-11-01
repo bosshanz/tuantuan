@@ -12,7 +12,6 @@ import {
   FolderOpen,
   History,
   Loader2,
-  PanelRight,
   Pencil,
   Pin,
   Plus,
@@ -889,27 +888,30 @@ export function ChatView(props: {
                 type="button"
                 className="title-pill"
                 data-live={activity ? "" : undefined}
-                aria-expanded={panel}
-                title={activity ? `${roomSubtitle(room, agents)} · ${tr(activity)}` : roomSubtitle(room, agents)}
+                aria-label={`${room.name} · ${tr("会话信息")}`}
+                aria-expanded={panel && !selectedMsg}
+                title={`${room.name} · ${roomSubtitle(room, agents)}${activity ? ` · ${tr(activity)}` : ""}`}
                 onClick={() => {
                   preserveReadingPosition();
                   setFilesOpen(false);
-                  setPanel(true);
+                  setPanel(!panel || !!selectedMsg);
+                  setSelected(null);
                 }}
               >
                 <span className="title-faces">
-                  <RoomIcon room={room} agents={agents} size={24} busy={awake} />
+                  <RoomIcon room={room} agents={agents} size={28} busy={awake} reactToHover />
                   {awake && <span className="busy-dot" aria-hidden />}
                 </span>
                 <span className="title-copy">
                   <h2>{room.name}</h2>
                   {titleMeta && (
                     <span className="title-meta">
-                      <span className="title-dot" aria-hidden />
+                      {activity && <span className="title-dot" aria-hidden />}
                       <span className="title-meta-text">{titleMeta}</span>
                     </span>
                   )}
                 </span>
+                <ChevronRight className="title-chevron" size={14} aria-hidden />
               </button>
               <div className="chat-head-actions">
                 <button
@@ -952,26 +954,6 @@ export function ChatView(props: {
                     onClick={() => showTerminal(!terminalOpen)}
                   >
                     <SquareTerminal size={18} />
-                  </button>
-                )}
-                {!(panel && wide) && (
-                  <button
-                    type="button"
-                    className="btn ghost icon"
-                    aria-pressed={panel}
-                    aria-label={panel ? tr("收起详情面板") : tr("展开详情面板")}
-                    title={tr("详情面板")}
-                    onClick={() => {
-                      preserveReadingPosition();
-                      setPanel((v) => {
-                        const next = !v;
-                        if (next) setFilesOpen(false);
-                        return next;
-                      });
-                      setSelected(null);
-                    }}
-                  >
-                    <PanelRight size={18} />
                   </button>
                 )}
               </div>

@@ -152,7 +152,7 @@ export async function taskContextSmoke(browser: Browser, base: string, store: St
     await assertNotes(receivedDetails.locator('.task-context[data-kind="saved"]'));
     await closeMessageDetails();
 
-    await page.getByRole("button", { name: "展开详情面板", exact: true }).click();
+    await page.locator(".chat-head .title-pill").click();
     await page.getByRole("tab", { name: "详情", exact: true }).click();
     const conciseMode = page
       .getByRole("group", { name: "详细/简洁模式" })

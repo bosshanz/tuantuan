@@ -44,6 +44,7 @@ export function AgentAvatar({
   name,
   expression,
   animate,
+  reactToHover,
   pulse,
 }: {
   agent?: Pick<Agent, "color" | "name"> & { avatarShape?: AvatarShape };
@@ -51,6 +52,7 @@ export function AgentAvatar({
   name?: string;
   expression?: Expression;
   animate?: boolean;
+  reactToHover?: boolean;
   pulse?: unknown;
 }) {
   if (!agent) {
@@ -69,6 +71,7 @@ export function AgentAvatar({
         size={size}
         expression={expression}
         animate={animate}
+        reactToHover={reactToHover}
         pulse={pulse}
       />
     </span>
@@ -88,15 +91,25 @@ export function RoomIcon({
   agents,
   size = 32,
   busy = false,
+  reactToHover = false,
 }: {
   room: Room;
   agents: Agent[];
   size?: number;
   busy?: boolean;
+  reactToHover?: boolean;
 }) {
   const members = room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
   if (members.length === 1 && members[0])
-    return <AgentAvatar agent={members[0]} size={size} expression={busy ? "thinking" : "idle"} animate={busy} />;
+    return (
+      <AgentAvatar
+        agent={members[0]}
+        size={size}
+        expression={busy ? "thinking" : "idle"}
+        animate={busy}
+        reactToHover={reactToHover}
+      />
+    );
   if (members.length === 0)
     return (
       <span className="room-icon" style={{ ["--size" as string]: `${size}px` }} aria-hidden>
@@ -107,7 +120,14 @@ export function RoomIcon({
   return (
     <span className="room-stack" style={{ ["--size" as string]: `${size}px` }} aria-hidden>
       {members.slice(0, 2).map((a) => (
-        <AgentAvatar key={a.id} agent={a} size={mini} expression={busy ? "thinking" : "idle"} animate={busy} />
+        <AgentAvatar
+          key={a.id}
+          agent={a}
+          size={mini}
+          expression={busy ? "thinking" : "idle"}
+          animate={busy}
+          reactToHover={reactToHover}
+        />
       ))}
       {members.length > 2 && <span className="room-stack-more">+{members.length - 2}</span>}
     </span>

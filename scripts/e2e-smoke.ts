@@ -665,6 +665,70 @@ try {
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "展开侧栏" }).click();
+
+  // Project disclosure remains user-controlled, while navigation reveals its destination.
+  const otherProject = app.store.createProject("侧栏测试项目", cwd);
+  const otherRoom = app.store.createRoom("侧栏测试会话", group.agentIds, { projectId: otherProject.id });
+  await page.reload();
+  const projectGroup = (name: string) =>
+    page.locator(".side-group", { has: page.locator(".side-group-name", { hasText: name }) });
+  const toggleProject = async (name: string) => projectGroup(name).locator(".side-group-toggle").click();
+  const waitProject = async (name: string, open: boolean) => {
+    await page.waitForFunction(
+      ({ name, open }) => {
+        const group = [...document.querySelectorAll(".side-group")].find(
+          (el) => el.querySelector(".side-group-name")?.textContent === name,
+        );
+        const content = group?.querySelector(".collapse");
+        const height = content?.getBoundingClientRect().height;
+        return (
+          group?.querySelector(".side-group-toggle")?.getAttribute("aria-expanded") === String(open) &&
+          height !== undefined &&
+          (open ? height > 10 : height < 0.5)
+        );
+      },
+      { name, open },
+    );
+  };
+  await waitProject("冒烟项目", true);
+  await toggleProject("冒烟项目");
+  await waitProject("冒烟项目", false);
+  await toggleProject("冒烟项目");
+  await waitProject("冒烟项目", true);
+  await waitProject("侧栏测试项目", true);
+  await toggleProject("侧栏测试项目");
+  await waitProject("侧栏测试项目", false);
+  await toggleProject("侧栏测试项目");
+  await waitProject("侧栏测试项目", true);
+  await toggleProject("侧栏测试项目");
+  await waitProject("侧栏测试项目", false);
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".side-group .collapse")].every((el) => el.getBoundingClientRect().height > 10),
+  );
+  await page.getByRole("button", { name: "展开侧栏" }).click();
+  await waitProject("侧栏测试项目", false);
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await page.locator('.side-room[title="侧栏测试会话"]').click();
+  await page.getByRole("button", { name: "展开侧栏" }).click();
+  await waitProject("侧栏测试项目", true);
+  await toggleProject("侧栏测试项目");
+  await waitProject("侧栏测试项目", false);
+  await toggleProject("冒烟项目");
+  await waitProject("冒烟项目", false);
+  await projectGroup("冒烟项目").locator(".side-group-head").hover();
+  await page.getByRole("button", { name: "冒烟项目 设置" }).click();
+  await waitProject("冒烟项目", true);
+  await toggleProject("冒烟项目");
+  await waitProject("冒烟项目", false);
+  await page.reload();
+  await waitProject("冒烟项目", true);
+  await waitProject("侧栏测试项目", false);
+  await page.goto(`http://localhost:${server.port}/#/c/${group.id}`);
+  app.store.deleteRoom(otherRoom.id);
+  app.store.deleteProject(otherProject.id);
+  await page.reload();
+  await waitProject("冒烟项目", true);
   // A project's "+" preselects that project.
   await page.locator(".side-group-head", { hasText: "冒烟项目" }).hover();
   await page.getByRole("button", { name: "在 冒烟项目 新建会话" }).click();
@@ -906,7 +970,7 @@ try {
       .count()
   )
     throw new Error("density preference still clutters the conversation toolbar");
-  await page.getByRole("button", { name: "展开详情面板" }).click();
+  await page.locator(".chat-head .title-pill").click();
   await page.getByRole("tab", { name: "详情", exact: true }).click();
   const modeButton = (name: "简洁" | "详细") =>
     page.getByRole("group", { name: "详细/简洁模式" }).getByRole("button", { name, exact: true });
@@ -967,7 +1031,7 @@ try {
         return row?.dataset.messageId ?? null;
       });
     const before = await firstVisible();
-    await page.getByRole("button", { name: "展开详情面板" }).click();
+    await page.locator(".chat-head .title-pill").click();
     await page.waitForTimeout(450);
     const during = await firstVisible();
     await page.getByRole("button", { name: "关闭详情面板" }).click();
@@ -987,6 +1051,12 @@ try {
   await input.fill("/slow");
   await input.press("Enter");
   await page.locator('.send-btn[data-mode="stop"]').waitFor();
+  const busyTitleAvatar = page.locator('.title-faces .bot-avatar[data-expr="thinking"]').first();
+  await busyTitleAvatar.waitFor();
+  await page.locator(".chat-head .title-pill").hover();
+  if (await busyTitleAvatar.locator(".ba-face-curious").count())
+    throw new Error("hover replaced the title avatar's active expression");
+  await page.mouse.move(0, 0);
   if (await page.locator(".run-bar").count()) throw new Error("reply banner should be gone");
   await page.waitForTimeout(250);
   await shot("composer-stop");
@@ -1022,6 +1092,57 @@ try {
   await page.getByRole("option", { name: "Mock Smart" }).click();
   await page.locator(".model-trigger", { hasText: "Mock Smart" }).waitFor();
 
+  // The title toggles conversation info and returns to it from a reply's details.
+  const titlePill = page.locator(".chat-head .title-pill");
+  const curiousFace = titlePill.locator(".ba-face-curious").first();
+  await curiousFace.waitFor();
+  if (await page.getByRole("button", { name: /^(展开|收起)详情面板$/ }).count())
+    throw new Error("redundant details panel button still appears in the header");
+  await page.mouse.move(0, 0);
+  await page.waitForFunction(() => {
+    const arrow = document.querySelector(".title-chevron");
+    return arrow && Number.parseFloat(getComputedStyle(arrow).opacity) < 0.01;
+  });
+  const titleBeforeHover = await titlePill.locator("h2").boundingBox();
+  await titlePill.hover();
+  await page.waitForFunction(() => {
+    const arrow = document.querySelector(".title-chevron");
+    const title = document.querySelector(".chat-head .title-pill");
+    const curious = title?.querySelector(".ba-face-curious");
+    return (
+      arrow &&
+      title &&
+      curious &&
+      Number.parseFloat(getComputedStyle(arrow).opacity) > 0.99 &&
+      Number.parseFloat(getComputedStyle(curious).opacity) > 0.99 &&
+      Number.parseFloat(getComputedStyle(title, "::before").left) < -6
+    );
+  });
+  const titleOnHover = await titlePill.locator("h2").boundingBox();
+  if (
+    !titleBeforeHover ||
+    !titleOnHover ||
+    ["x", "y", "width", "height"].some(
+      (key) =>
+        Math.abs(
+          titleBeforeHover[key as keyof typeof titleBeforeHover] - titleOnHover[key as keyof typeof titleOnHover],
+        ) > 0.5,
+    )
+  )
+    throw new Error("title moved or resized as the island expanded");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const reducedInset = await titlePill.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element, "::before").left),
+  );
+  if (reducedInset < -1.5) throw new Error("title island expanded with reduced motion enabled");
+  await page.emulateMedia({ reducedMotion: null });
+  await page.mouse.move(0, 0);
+  await titlePill.click();
+  await page.locator('.chat-head .title-pill[aria-expanded="true"]').waitFor();
+  await page.getByRole("heading", { name: "会话信息", exact: true }).waitFor();
+  await titlePill.click();
+  await page.locator('.chat-head .title-pill[aria-expanded="false"]').waitFor();
+
   const lastReply = page.locator('.message-row[data-sender="agent"]').last();
   await lastReply.hover();
   await lastReply.getByRole("button", { name: "更多消息操作", exact: true }).click();
@@ -1030,6 +1151,11 @@ try {
     .getByRole("button", { name: "查看详情", exact: true })
     .click();
   await page.getByRole("heading", { name: "回复详情" }).waitFor();
+  await page.locator('.chat-head .title-pill[aria-expanded="false"]').waitFor();
+  await titlePill.click();
+  await page.locator('.chat-head .title-pill[aria-expanded="true"]').waitFor();
+  await page.getByRole("heading", { name: "会话信息", exact: true }).waitFor();
+  await showReplyDetails(lastReply);
   const settle = () =>
     page.evaluate(() =>
       Promise.all(
@@ -1040,13 +1166,13 @@ try {
       ),
     );
   await settle();
-  // Alignment: one header line across columns, shared left edges, no header collisions.
+  // Alignment: the chat controls share a line, sidebar edges align, and headers do not collide.
   await page.getByRole("heading", { name: "回复详情" }).waitFor();
   const issues = await page.evaluate(() => {
     const out: string[] = [];
     const r = (el: Element | null) => el?.getBoundingClientRect();
     const near = (a: number, b: number, what: string) => Math.abs(a - b) > 0.5 && out.push(`${what}: ${a} vs ${b}`);
-    // One 56px header line: sidebar top row, floating title pill, details header.
+    // Sidebar top row and details header retain their 56px height.
     for (const sel of [".side-top", ".details-head"]) {
       const b = r(document.querySelector(sel));
       if (!b) out.push(`missing ${sel}`);
@@ -1059,8 +1185,12 @@ try {
     const main = r(document.querySelector(".chat-head"));
     if (!pill || !main) out.push("missing title pill");
     else {
-      near(pill.top + pill.height / 2, 28, "title pill centred on header line");
+      near(main.top, 8, "chat header top offset");
+      near(pill.top + pill.height / 2, main.top + main.height / 2, "title pill centred on header line");
       near(pill.left + pill.width / 2, main.left + main.width / 2, "title pill centred");
+      const action = r(document.querySelector(".chat-head-actions button"));
+      if (!action) out.push("missing chat header action");
+      else near(action.top + action.height / 2, pill.top + pill.height / 2, "chat action centred on title");
     }
     const details = r(document.querySelector(".details"));
     for (const b of document.querySelectorAll(".main-head button")) {

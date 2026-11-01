@@ -349,6 +349,11 @@ export function App() {
   };
 
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
+  const activeProjectId = editingProject?.id ?? room?.projectId;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new destination in the same project should reveal it too
+  useEffect(() => {
+    if (activeProjectId) setCollapsed((current) => current.filter((id) => id !== activeProjectId));
+  }, [activeProjectId, roomId, projectPage]);
   const fullPage =
     section === "setup" ||
     section === "harness" ||
@@ -494,8 +499,7 @@ export function App() {
                   const list = rooms
                     .filter((r) => r.projectId === p.id)
                     .sort((x, y) => (y.last?.at ?? y.createdAt) - (x.last?.at ?? x.createdAt));
-                  const active = list.some((r) => r.id === roomId) || projectPage === p.id;
-                  const open = active || !collapsed.includes(p.id);
+                  const open = !collapsed.includes(p.id);
                   return (
                     <div key={p.id} className="side-group" data-open={open || undefined}>
                       <div className="side-group-head" aria-current={projectPage === p.id ? "page" : undefined}>
