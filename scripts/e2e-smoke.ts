@@ -601,6 +601,70 @@ try {
   await page.getByRole("heading", { name: "草稿会话" }).waitFor();
   if (app.store.listRooms().find((r) => r.name === "草稿会话")?.projectId !== "drafts")
     throw new Error("conversation without a project should go to 草稿");
+  // Both selected project conversations and draft conversations line up with the compact toolbar.
+  await page.locator(".side-group-rooms .side-room", { hasText: "冒烟会话" }).click();
+  await page.locator('.side-group-rooms .side-room[aria-current="page"]').waitFor();
+  const expandedIndent = await page.evaluate(() => {
+    const draft = document.querySelector(".side-scroll > .side-room")?.getBoundingClientRect();
+    const projectRoom = document.querySelector(".side-group-rooms .side-room")?.getBoundingClientRect();
+    return draft && projectRoom ? projectRoom.left - draft.left : null;
+  });
+  if (expandedIndent === null || Math.abs(expandedIndent - 14) > 0.5)
+    throw new Error(`expanded project conversation indent: ${expandedIndent}, expected 14`);
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  for (const [width, desktop, expectedWidth] of [
+    [1440, false, 64],
+    [1024, false, 64],
+    [1440, true, 88],
+    [1024, true, 88],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    const measurement = await page.evaluate(async (desktop) => {
+      if (desktop) document.documentElement.dataset.desktop = "darwin";
+      else delete document.documentElement.dataset.desktop;
+      await Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY)
+          .map((a) => a.finished.catch(() => undefined)),
+      );
+      const center = (el: Element) => {
+        const rect = el.getBoundingClientRect();
+        return rect.width ? rect.left + rect.width / 2 : null;
+      };
+      const side = document.querySelector(".side")?.getBoundingClientRect();
+      const buttons = [...document.querySelectorAll(".side-top button")].map(center);
+      const drafts = [...document.querySelectorAll(".side-scroll > .side-room")];
+      const selected = document.querySelector('.side-group-rooms .side-room[aria-current="page"]');
+      const projectRooms = [...document.querySelectorAll(".side-group-rooms .side-room")];
+      return {
+        width: side?.width,
+        axis: side ? side.left + side.width / 2 : null,
+        buttons,
+        draftRows: drafts.map(center),
+        draftIcons: drafts.flatMap((row) => [...row.querySelectorAll(".side-room-icon")].map(center)),
+        projectRows: projectRooms.map(center),
+        projectIcons: projectRooms.flatMap((row) => [...row.querySelectorAll(".side-room-icon")].map(center)),
+        selected: selected ? center(selected) : null,
+      };
+    }, desktop);
+    const { axis, selected, ...groups } = measurement;
+    if (axis === null || selected === null || Math.abs((measurement.width ?? 0) - expectedWidth) > 0.5)
+      throw new Error(`compact sidebar missing selected project room or wrong width: ${JSON.stringify(measurement)}`);
+    for (const [label, centers] of Object.entries(groups)) {
+      if (!Array.isArray(centers)) continue;
+      if (!centers.length || centers.some((value) => value === null || Math.abs(value - axis) > 0.5))
+        throw new Error(`compact ${label} misaligned at ${width}px desktop=${desktop}: ${JSON.stringify(measurement)}`);
+    }
+    if (Math.abs(selected - axis) > 0.5)
+      throw new Error(`selected project room misaligned: ${JSON.stringify(measurement)}`);
+    console.log(`sidebar alignment @${width}px desktop=${desktop}: ${JSON.stringify(measurement)}`);
+  }
+  await page.evaluate(() => {
+    delete document.documentElement.dataset.desktop;
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "展开侧栏" }).click();
   // A project's "+" preselects that project.
   await page.locator(".side-group-head", { hasText: "冒烟项目" }).hover();
   await page.getByRole("button", { name: "在 冒烟项目 新建会话" }).click();

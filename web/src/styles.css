@@ -1601,7 +1601,7 @@ html[data-desktop="darwin"]:not([data-fullscreen]) .side-brand { display: none; 
   .shell.side-collapsed .side-add-project,
   .shell.side-collapsed .list-empty { display: none; }
   .shell.side-collapsed .side-group .collapse { grid-template-rows: 1fr; opacity: 1; }
-  .shell.side-collapsed .side-group-rooms { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .shell.side-collapsed .side-group-rooms { display: flex; flex-direction: column; align-items: center; gap: 2px; padding-left: 0; }
   .shell.side-collapsed .side-back { padding: 6px; }
   .shell.side-collapsed .side-back-label,
   .shell.side-collapsed .side-nav-label,
