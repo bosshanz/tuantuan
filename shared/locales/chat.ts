@@ -220,13 +220,15 @@ export const chatMessages = {
     en: "Thinking",
     ja: "思考中",
   },
-  仅显示回复正文: { "zh-TW": "僅顯示回覆正文", en: "Show replies only", ja: "返信本文のみ表示" },
+  "详细/简洁模式": { "zh-TW": "詳細/簡潔模式", en: "Detailed / Concise", ja: "詳細／簡潔" },
+  简洁: { "zh-TW": "簡潔", en: "Concise", ja: "簡潔" },
+  详细: { "zh-TW": "詳細", en: "Detailed", ja: "詳細" },
   尚未启动: { "zh-TW": "尚未啟動", en: "Not started", ja: "未起動" },
   精简视图: { "zh-TW": "精簡檢視", en: "Compact view", ja: "コンパクト表示" },
-  "折叠思考、工具和计划，保留回复正文。应用于本机所有会话。": {
-    "zh-TW": "收合思考、工具和計畫，保留回覆內文。套用至本機所有對話。",
-    en: "Fold thoughts, tools and plans while keeping replies visible. Applies to all conversations on this device.",
-    ja: "思考・ツール・計画を折りたたみ、返答本文を表示します。この端末のすべての会話に適用されます。",
+  "简洁模式只保留回复正文，详细模式显示完整过程。每个会话单独记住。": {
+    "zh-TW": "簡潔模式只保留回覆內文，詳細模式顯示完整過程。每個對話單獨記住。",
+    en: "Concise keeps reply text; Detailed shows the full process. Remembered per conversation.",
+    ja: "簡潔モードは返答本文だけを残し、詳細モードは過程全体を表示します。会話ごとに記憶します。",
   },
   展开提问: { "zh-TW": "展開提問", en: "Open question", ja: "質問を開く" },
   收起提问: { "zh-TW": "收合提問", en: "Collapse question", ja: "質問を折りたたむ" },
@@ -390,6 +392,11 @@ export const chatMessages = {
     "zh-TW": "立即傳送失敗：{reason}。請重試。",
     en: "Could not send now: {reason}. Please try again.",
     ja: "今すぐ送信に失敗しました：{reason}。再試行してください。",
+  },
+  "编辑失败：{reason}。请重试。": {
+    "zh-TW": "編輯失敗：{reason}。請重試。",
+    en: "Could not edit: {reason}. Please try again.",
+    ja: "編集に失敗しました：{reason}。再試行してください。",
   },
   停止任务: {
     "zh-TW": "停止任務",

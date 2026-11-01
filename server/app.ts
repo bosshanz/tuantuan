@@ -10,7 +10,7 @@ import { missingKeyVar } from "../shared/auth";
 import { translate } from "../shared/i18n";
 import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
 import { messagePreview } from "../shared/roomPreview";
-import { replayTurns } from "../shared/timeline";
+import { messageWithdrawn, replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
 import { AttentionService } from "./attention";
 import { AVATAR_SHAPES } from "./avatars";
@@ -227,6 +227,13 @@ export function createApp(deps: AppDeps) {
     else if (event.type === "message") {
       const last = messagePreview(event.message);
       if (last) publishAll({ type: "room.preview", roomId, last });
+      else if (messageWithdrawn(event.message.timeline))
+        publishAll({
+          type: "room.preview",
+          roomId,
+          last: store.latestPreview(roomId),
+          replacesMessageId: event.message.id,
+        });
       const n = notifyForMessage(roomId, event.message, readProfile(store.getSetting("profile", {})).language);
       if (n) publishAll(n);
     } else if (event.type === "permission" && event.ask) {
@@ -1676,7 +1683,7 @@ export function createApp(deps: AppDeps) {
           const seen = new Set(
             store
               .recentMessages(t.room.id, 500)
-              .filter((m) => m.senderKind === "human")
+              .filter((m) => m.senderKind === "human" && !messageWithdrawn(m.timeline))
               .map((m) => m.content.trim()),
           );
           return json(replayTurns(host.replay(t.room.id, t.agent.id)).filter((x) => !seen.has(x.user)));
@@ -1773,6 +1780,9 @@ export function createApp(deps: AppDeps) {
           201,
         );
       }
+      // 编辑消息: a not-yet-started queued message leaves the transcript and returns to the composer.
+      if (room && sub === "retract" && subId && !action && method === "POST")
+        return json(orchestrator.retractQueued(room.id, subId));
       // A queued message is promoted in place: its own task becomes the accepted steer.
       if (room && sub === "steer" && subId && !action && method === "POST") {
         const m = z.object({ targetTaskId: z.string().min(1).max(200) }).parse(await body());

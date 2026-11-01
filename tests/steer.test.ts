@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type * as acp from "@agentclientprotocol/sdk";
 import { serve } from "../server/app";
 import type { HarnessHost } from "../server/host";
-import { Orchestrator, type RoomEvent } from "../server/orchestrator";
+import { Orchestrator, type RetractedQueued, type RoomEvent } from "../server/orchestrator";
 import type { Agent, Message } from "../server/store";
 import { Store } from "../server/store";
 import { agentInput, until } from "./helpers";
@@ -416,6 +416,109 @@ describe("immediate steer", () => {
   });
 });
 
+describe("edit withdraws a queued message from the transcript", () => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const note = { name: "note.txt", mimeType: "text/plain", data: "Zg==" };
+
+  test("restores attachments and quote, keeps the sequence, and does not run the withdrawn message", async () => {
+    const f = fixture(["A"]);
+    const source = f.store.insertMessage({
+      roomId: f.room.id,
+      runId: "quoted",
+      hop: 0,
+      senderKind: "human",
+      senderId: null,
+      senderName: "用户",
+      content: "被引用的原文",
+      status: "done",
+    });
+    const first = f.say("当前任务");
+    const queued = f.scheduler.postHumanMessage(
+      f.room.id,
+      "用户",
+      "排队编辑",
+      [{ mimeType: "image/png", data: png }],
+      source.id,
+      undefined,
+      [note],
+    );
+    const running = f.task("A");
+    const queuedTask = f.task("A", queued.id);
+    expect(running?.status).toBe("running");
+    expect(queuedTask?.status).toBe("queued");
+    expect(() => f.scheduler.retractQueued(f.room.id, running?.id ?? "")).toThrow("只能撤回尚未开始的排队消息");
+    const restored = f.scheduler.retractQueued(f.room.id, queuedTask?.id ?? "");
+    expect(restored).toMatchObject({
+      draft: "排队编辑",
+      images: [{ mimeType: "image/png", data: png }],
+      files: [note],
+      quote: { messageId: source.id },
+    });
+    expect(restored.message).toMatchObject({ id: queued.id, content: "", status: "cancelled" });
+    expect(restored.message.timeline?.withdrawn).toBe(true);
+    const stored = f.store.getMessage(queued.id);
+    expect(stored?.timeline?.withdrawn).toBe(true);
+    expect(JSON.stringify(stored?.timeline)).not.toContain(png.slice(0, 24));
+    const visible = f.store.recentMessages(f.room.id, 20);
+    expect(visible.some((message) => message.id === queued.id)).toBe(true);
+    expect(visible.map((message) => message.seq)).toEqual(visible.map((_, index) => (visible[0]?.seq ?? 1) + index));
+    const preview = f.store.listRooms().find((room) => room.id === f.room.id)?.last;
+    expect(preview?.messageId).not.toBe(queued.id);
+    expect(preview?.status).toBe("streaming");
+    expect(preview?.text ?? "").not.toContain("排队编辑");
+    expect(f.store.searchMessages({ query: "排队编辑", roomId: f.room.id, limit: 10 })).toEqual([]);
+    expect(
+      f.store.contextMessages(f.room.id, first.id, Number.MAX_SAFE_INTEGER, 20).map((message) => message.id),
+    ).not.toContain(queued.id);
+    expect(f.scheduler.state(f.room.id).tasks.some((task) => task.runId === queued.id)).toBe(false);
+    expect(f.host.calls).toHaveLength(1);
+    expect(() => f.scheduler.retractQueued(f.room.id, queuedTask?.id ?? "")).toThrow("只能撤回尚未开始的排队消息");
+    const later = f.say("后面的");
+    expect(f.task("A", later.id)?.status).toBe("queued");
+    f.host.finish(0);
+    await until(() => f.host.calls.length === 2);
+    expect(f.host.text(1)).toContain("后面的");
+    expect(f.host.text(1)).not.toContain("排队编辑");
+    f.host.finish(1);
+    await f.scheduler.idle(f.room.id);
+  });
+
+  test("refuses a message that already started, and withdraws every still-queued lane of one message", () => {
+    const f = fixture(["A", "B"]);
+    f.say("@A 忙");
+    const shared = f.say("@A @B 一起");
+    expect(f.task("B", shared.id)?.status).toBe("running");
+    expect(() => f.scheduler.retractQueued(f.room.id, f.task("A", shared.id)?.id ?? "")).toThrow(
+      "只能撤回尚未开始的排队消息",
+    );
+    expect(f.store.getMessage(shared.id)?.content).toBe("@A @B 一起");
+    const waiting = f.say("@所有人 后");
+    const laneA = f.task("A", waiting.id);
+    expect(laneA?.status).toBe("queued");
+    expect(f.task("B", waiting.id)?.status).toBe("queued");
+    const calls = f.host.calls.length;
+    f.scheduler.retractQueued(f.room.id, laneA?.id ?? "");
+    expect(f.store.getMessage(waiting.id)?.timeline?.withdrawn).toBe(true);
+    expect(f.store.getMessage(waiting.id)?.content).toBe("");
+    expect(f.scheduler.state(f.room.id).tasks.some((task) => task.runId === waiting.id)).toBe(false);
+    expect(f.task("A", shared.id)?.status).toBe("queued");
+    expect(f.task("B", shared.id)?.status).toBe("running");
+    expect(f.host.calls).toHaveLength(calls);
+  });
+
+  test("a promoted steer stays in the transcript", () => {
+    const f = fixture(["A"]);
+    f.say("当前任务");
+    const queued = f.say("排队C");
+    const running = f.task("A");
+    const queuedTask = f.task("A", queued.id);
+    f.scheduler.steerQueued(f.room.id, queuedTask?.id ?? "", running?.id ?? "");
+    expect(() => f.scheduler.retractQueued(f.room.id, queuedTask?.id ?? "")).toThrow("只能撤回尚未开始的排队消息");
+    expect(f.store.getMessage(queued.id)?.content).toBe("排队C");
+    expect(f.store.getMessage(queued.id)?.timeline?.withdrawn).toBeUndefined();
+  });
+});
+
 describe("steer HTTP route", () => {
   const apis: { app: ReturnType<typeof serve>["app"]; server: ReturnType<typeof serve>["server"] }[] = [];
   afterEach(async () => {
@@ -534,6 +637,68 @@ describe("steer HTTP route", () => {
     calls[0]?.resolve({ stopReason: "end_turn" });
     await until(() => calls.length === 2);
     calls[1]?.resolve({ stopReason: "end_turn" });
+    await app.orchestrator.idle(room.id);
+  });
+
+  test("POST /retract/:taskId removes a queued message from the visible transcript", async () => {
+    const { app, server } = serve({ dbPath: ":memory:" }, 0);
+    apis.push({ app, server });
+    const base = `http://127.0.0.1:${server.port}`;
+    const calls: { resolve: (result: { stopReason: acp.StopReason }) => void }[] = [];
+    app.host.prompt = () =>
+      new Promise((resolve) => {
+        calls.push({ resolve });
+      });
+    const api = async <T>(method: string, path: string, body?: unknown) => {
+      const response = await fetch(base + path, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: response.status, data: (await response.json()) as T };
+    };
+    const agent = (await api<Agent>("POST", "/api/agents", agentInput("A"))).data;
+    const room = (await api<{ id: string }>("POST", "/api/rooms", { name: "dm", agentIds: [agent.id] })).data;
+    await api("POST", `/api/rooms/${room.id}/messages`, { content: "当前任务" });
+    const queued = await api<Message>("POST", `/api/rooms/${room.id}/messages`, { content: "排队编辑" });
+    await until(() => calls.length === 1);
+    const before = (
+      await api<{ state: { tasks: { id: string; runId: string; status: string }[] } }>(
+        "GET",
+        `/api/rooms/${room.id}/messages`,
+      )
+    ).data.state;
+    const running = before.tasks.find((task) => task.status === "running");
+    const queuedTask = before.tasks.find((task) => task.runId === queued.data.id);
+    expect(queuedTask?.status).toBe("queued");
+    const denied = await api<{ error: string }>("POST", `/api/rooms/${room.id}/retract/${running?.id}`);
+    expect(denied.status).toBe(409);
+    expect(denied.data.error).toContain("尚未开始");
+    const restored = await api<RetractedQueued>("POST", `/api/rooms/${room.id}/retract/${queuedTask?.id}`);
+    expect(restored.status).toBe(200);
+    expect(restored.data.draft).toBe("排队编辑");
+    expect(restored.data.message).toMatchObject({ id: queued.data.id, content: "", status: "cancelled" });
+    expect(restored.data.message.timeline?.withdrawn).toBe(true);
+    const page = (
+      await api<{
+        messages: Message[];
+        state: { tasks: { id: string; runId: string; status: string }[] };
+      }>("GET", `/api/rooms/${room.id}/messages`)
+    ).data;
+    expect(page.messages.find((message) => message.id === queued.data.id)?.timeline?.withdrawn).toBe(true);
+    expect(page.state.tasks.some((task) => task.runId === queued.data.id)).toBe(false);
+    expect(page.state.tasks.some((task) => task.id === running?.id)).toBe(true);
+    const rooms = (
+      await api<{ id: string; last?: { messageId: string; text: string; status: string } | null }[]>(
+        "GET",
+        "/api/rooms",
+      )
+    ).data;
+    const preview = rooms.find((item) => item.id === room.id)?.last;
+    expect(preview?.messageId).not.toBe(queued.data.id);
+    expect(preview?.text ?? "").not.toContain("排队编辑");
+    expect((await api("POST", `/api/rooms/${room.id}/retract/${queuedTask?.id}`)).status).toBe(409);
+    calls[0]?.resolve({ stopReason: "end_turn" });
     await app.orchestrator.idle(room.id);
   });
 });

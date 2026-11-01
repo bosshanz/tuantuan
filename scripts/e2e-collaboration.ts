@@ -291,13 +291,13 @@ export async function collaborationSmoke(browser: Browser, base: string, store: 
     await run(runA).waitFor();
     if ((await run(runA).locator(`[data-message-id="${first.id}"]`).count()) !== 1 || !(await row(direct2).isVisible()))
       throw new Error("changing main agent reclassified historical replies");
-    await page.evaluate(() => localStorage.setItem("tuantuan:compact", "0"));
+    await page.evaluate((id) => localStorage.setItem(`tuantuan:compact:${id}`, "0"), room.id);
     await page.reload();
     await run(runA).locator(":scope > summary").click();
     await row(first).locator(".handoff-from").waitFor();
     if ((await run(runA).locator(".collaboration-assignment").count()) !== 0)
       throw new Error("full timeline view duplicated the handoff task inside collaboration details");
-    await page.evaluate(() => localStorage.setItem("tuantuan:compact", "1"));
+    await page.evaluate((id) => localStorage.setItem(`tuantuan:compact:${id}`, "1"), room.id);
     const originalAgents = room.agentIds;
     const shrunk = await fetch(`${base}/api/rooms/${room.id}`, {
       method: "PATCH",

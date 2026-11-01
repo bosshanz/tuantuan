@@ -902,23 +902,30 @@ try {
   if (
     await page
       .locator(".chat-head")
-      .getByRole("button", { name: /仅显示回复正文/ })
+      .getByRole("button", { name: /^(简洁|详细)$/ })
       .count()
   )
     throw new Error("density preference still clutters the conversation toolbar");
   await page.getByRole("button", { name: "展开详情面板" }).click();
   await page.getByRole("tab", { name: "详情", exact: true }).click();
-  const compactSwitch = page.getByRole("switch", { name: "仅显示回复正文", exact: true });
-  await compactSwitch.dblclick({ delay: 35 });
-  if (!(await compactSwitch.isChecked()) || !(await compactSwitch.evaluate((el) => el === document.activeElement)))
+  const modeButton = (name: "简洁" | "详细") =>
+    page.getByRole("group", { name: "详细/简洁模式" }).getByRole("button", { name, exact: true });
+  await modeButton("详细").click();
+  await modeButton("简洁").click();
+  if (
+    (await modeButton("简洁").getAttribute("aria-pressed")) !== "true" ||
+    !(await modeButton("简洁").evaluate((el) => el === document.activeElement))
+  )
     throw new Error("rapid density reversal lost a click or keyboard focus");
-  await compactSwitch.uncheck();
+  await modeButton("详细").click();
   await page.locator(".plan-item[data-status=completed]", { hasText: "跑测试" }).waitFor();
   await page.locator(".thought").first().waitFor();
   if (await page.locator(".compact-process").count()) throw new Error("compact summary rendered while compact is off");
-  await compactSwitch.dblclick({ delay: 35 });
-  if (await compactSwitch.isChecked()) throw new Error("rapid density reversal failed from full view");
-  await compactSwitch.check();
+  await modeButton("简洁").click();
+  await modeButton("详细").click();
+  if ((await modeButton("详细").getAttribute("aria-pressed")) !== "true")
+    throw new Error("rapid density reversal failed from full view");
+  await modeButton("简洁").click();
   await planRow.locator(".compact-reply").waitFor();
   if (await page.locator(".messages .plan-item, .messages .thought, .messages .tool, .compact-process").count())
     throw new Error("returning to compact view left process details in the transcript");

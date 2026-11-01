@@ -56,13 +56,14 @@ import "./chatScroll.css";
 import "./collaboration.css";
 import type { ElicitationValue } from "../../shared/elicitation";
 import { resolveLocalFileLink } from "../../shared/localFileLink";
-import type { ReplayTurn, RoomConclusion, TaskContext } from "../../shared/timeline";
+import { messageWithdrawn, type ReplayTurn, type RoomConclusion, type TaskContext } from "../../shared/timeline";
 import {
   type Agent,
   ApiError,
   api,
   type Message,
   type Project,
+  type RetractedQueued,
   type Room,
   type RoomState,
   type SessionView,
@@ -74,6 +75,7 @@ import { SessionChips } from "./ConfigChips";
 import { ConversationFiles } from "./ConversationFiles";
 import { type ChatSnapshot, chatReducer, emptyChat, historyCursor, type MessagePage } from "./chatState";
 import { chatWorkspace, type ImageAttachment } from "./chatWorkspace";
+import { compactForRoom, rememberCompact } from "./compactPreference";
 import { formatAttachmentSize } from "./composerAttachments";
 import type { Opt } from "./config";
 import { ElicitationDialog, forgetElicitationDraft } from "./ElicitationDialog";
@@ -107,6 +109,22 @@ export interface ChatNavigationTarget {
   kind: "message" | "permission" | "question";
   id: string;
   nonce: number;
+}
+
+/** Short status for the floating title. Null when the room is idle. */
+function roomTitleActivity(
+  tasks: RoomState["tasks"],
+  cancellations: Record<string, { pending: boolean } | undefined>,
+): "正在停止" | "正在跟进" | "正在回复" | "正在准备" | "等待成员结果" | "等待交接完成" | "排队中" | null {
+  const stopping = tasks.find((task) => task.status === "cancelling" || cancellations[task.id]?.pending);
+  if (stopping) return "正在停止";
+  const running = tasks.find((task) => task.status === "running");
+  if (running) return running.coordination === "review" ? "正在跟进" : running.messageId ? "正在回复" : "正在准备";
+  const waiting = tasks.find((task) => task.status === "waiting");
+  if (waiting)
+    return waiting.coordination === "lead" || waiting.coordination === "review" ? "等待成员结果" : "等待交接完成";
+  if (tasks.some((task) => task.status === "queued" && !cancellations[task.id]?.pending)) return "排队中";
+  return null;
 }
 
 function terminalWasOpen(projectId: string | null) {
@@ -150,6 +168,7 @@ export function ChatView(props: {
   const [cancellations, setCancellations] = useState<Record<string, { pending: boolean; error: string | null }>>({});
   const pendingCancellations = useRef(new Set<string>());
   const pendingPromotes = useRef(new Set<string>());
+  const pendingEdits = useRef(new Set<string>());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [jumpError, setJumpError] = useState<{ source: string; reason?: string } | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<ChatNavigationTarget | null>(null);
@@ -174,11 +193,8 @@ export function ChatView(props: {
   const filesButton = useRef<HTMLButtonElement>(null);
   const dockedFiles = useMediaQuery("(min-width: 1024px)");
   // Compact replies keep the agent's words in separate bubbles; raw activity stays in details.
-  const [compact, setCompact] = useState(() => localStorage.getItem("tuantuan:compact") !== "0");
+  const [compact, setCompact] = useState(() => compactForRoom(localStorage, room.id));
   const densityAnimation = useRef<Animation | null>(null);
-  useEffect(() => {
-    localStorage.setItem("tuantuan:compact", compact ? "1" : "0");
-  }, [compact]);
   useEffect(() => {
     const preference = matchMedia("(prefers-reduced-motion: reduce)");
     const stopMotion = () => {
@@ -644,22 +660,26 @@ export function ChatView(props: {
     }
   };
 
-  // 编辑消息 pulls a queued message back into the composer; the sent copy stays in the transcript.
+  // 编辑消息 withdraws a not-yet-started queued message from the transcript and restores the composer.
   const editQueued = async (task: RoomState["tasks"][number]) => {
-    const human = messages.find((m) => m.runId === task.runId && m.senderKind === "human");
-    if (human) {
-      const parts = human.timeline?.parts ?? [];
+    if (pendingEdits.current.has(task.id)) return;
+    pendingEdits.current.add(task.id);
+    setSendError(null);
+    try {
+      const restored = await api<RetractedQueued>("POST", `/api/rooms/${room.id}/retract/${task.id}`);
+      dispatch({ type: "event", event: { type: "message", message: restored.message } });
       workspace.update({
-        draft: human.content,
-        images: parts.flatMap((part) => (part.kind === "image" ? [{ mimeType: part.mimeType, data: part.data }] : [])),
-        files: parts.flatMap((part) =>
-          part.kind === "file" ? [{ name: part.name, mimeType: part.mimeType, data: part.data }] : [],
-        ),
-        quote: human.quote,
+        draft: restored.draft,
+        images: restored.images,
+        files: restored.files,
+        quote: restored.quote,
       });
+      document.querySelector<HTMLElement>(".composer-box textarea")?.focus();
+    } catch (e) {
+      setSendError({ source: "编辑失败：{reason}。请重试。", reason: (e as Error).message });
+    } finally {
+      pendingEdits.current.delete(task.id);
     }
-    await cancel(task.id);
-    document.querySelector<HTMLElement>(".composer-box textarea")?.focus();
   };
 
   const answer = useCallback(
@@ -774,6 +794,8 @@ export function ChatView(props: {
   }, [messages]);
 
   const changeCompact = (value: boolean) => {
+    if (value === compact) return;
+    rememberCompact(localStorage, room.id, value);
     const list = listRef.current;
     const reversing = densityAnimation.current?.playState === "running";
     const opacity = list && reversing ? getComputedStyle(list).opacity : "0.55";
@@ -793,8 +815,32 @@ export function ChatView(props: {
     };
   };
 
-  const collaborations = useMemo(() => collaborationRuns(messages, state.tasks), [messages, state.tasks]);
-  const groups = groupMessages(messages, collaborations);
+  const transcript = useMemo(() => messages.filter((message) => !messageWithdrawn(message.timeline)), [messages]);
+  const collaborations = useMemo(() => collaborationRuns(transcript, state.tasks), [transcript, state.tasks]);
+  const groups = groupMessages(transcript, collaborations);
+  const activity = roomTitleActivity(tasks, cancellations);
+  const memberNames = room.agentIds
+    .map((id) => agents.find((agent) => agent.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
+  const memberMeta =
+    memberNames.length > 1
+      ? memberNames.length > 2
+        ? `${memberNames.slice(0, 2).join(locale === "en" ? ", " : "、")} +${memberNames.length - 2}`
+        : memberNames.join(locale === "en" ? ", " : "、")
+      : null;
+  // 「草稿」 is the unassigned inbox, not a project name worth repeating in the title.
+  const projectMeta =
+    !memberMeta && props.project && props.project.id !== "drafts" && props.project.name !== room.name
+      ? props.project.name
+      : null;
+  const titleMeta = activity ? tr(activity) : (memberMeta ?? projectMeta);
+  const awake = tasks.some(
+    (task) =>
+      task.status === "running" ||
+      task.status === "waiting" ||
+      task.status === "cancelling" ||
+      cancellations[task.id]?.pending,
+  );
   const stopTask = tasks.length === 1 ? tasks[0] : undefined;
   const selectedMsg = messages.find((m) => m.id === selected);
   const ask = asks.find((item) => selectedRequest?.kind === "permission" && item.id === selectedRequest.id) ?? asks[0];
@@ -842,15 +888,28 @@ export function ChatView(props: {
               <button
                 type="button"
                 className="title-pill"
-                title={roomSubtitle(room, agents)}
+                data-live={activity ? "" : undefined}
+                aria-expanded={panel}
+                title={activity ? `${roomSubtitle(room, agents)} · ${tr(activity)}` : roomSubtitle(room, agents)}
                 onClick={() => {
                   preserveReadingPosition();
                   setFilesOpen(false);
                   setPanel(true);
                 }}
               >
-                <RoomIcon room={room} agents={agents} size={22} />
-                <h2>{room.name}</h2>
+                <span className="title-faces">
+                  <RoomIcon room={room} agents={agents} size={24} busy={awake} />
+                  {awake && <span className="busy-dot" aria-hidden />}
+                </span>
+                <span className="title-copy">
+                  <h2>{room.name}</h2>
+                  {titleMeta && (
+                    <span className="title-meta">
+                      <span className="title-dot" aria-hidden />
+                      <span className="title-meta-text">{titleMeta}</span>
+                    </span>
+                  )}
+                </span>
               </button>
               <div className="chat-head-actions">
                 <button
@@ -2798,17 +2857,17 @@ function RoomInfo(props: {
       {tab === "info" && (
         <>
           <section className="d-section">
-            <label className="chat-display-setting">
-              <span>{tr("仅显示回复正文")}</span>
-              <input
-                type="checkbox"
-                role="switch"
-                className="tg"
-                checked={props.compact}
-                aria-checked={props.compact}
-                onChange={(event) => props.onCompactChange(event.target.checked)}
-              />
-            </label>
+            <div className="chat-display-setting">
+              <span>{tr("详细/简洁模式")}</span>
+              <fieldset className="segmented" aria-label={tr("详细/简洁模式")}>
+                <button type="button" aria-pressed={props.compact} onClick={() => props.onCompactChange(true)}>
+                  {tr("简洁")}
+                </button>
+                <button type="button" aria-pressed={!props.compact} onClick={() => props.onCompactChange(false)}>
+                  {tr("详细")}
+                </button>
+              </fieldset>
+            </div>
           </section>
           {props.members.length > 1 && (
             <section className="d-section">

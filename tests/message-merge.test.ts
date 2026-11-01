@@ -33,6 +33,18 @@ describe("message merge (snapshot vs live events)", () => {
     const longer = msg("s", 1, { content: "do it now", timeline: steer("stopping") });
     expect(mergeMessages([interrupted], [longer], "r")[0]?.content).toBe("do it now");
   });
+  test("a withdrawn queued message replaces the longer sent copy and is not restored by it", () => {
+    const sent = msg("q", 1, { seq: 4, content: "排队编辑", status: "done" });
+    const withdrawn = msg("q", 1, {
+      seq: 4,
+      content: "",
+      status: "cancelled",
+      timeline: { parts: [], tools: {}, plan: null, withdrawn: true },
+    });
+    expect(upsertMessage([sent], withdrawn)[0]?.timeline?.withdrawn).toBe(true);
+    expect(mergeMessages([withdrawn], [sent], "r")[0]?.timeline?.withdrawn).toBe(true);
+    expect(mergeMessages([sent], [withdrawn], "r")[0]?.content).toBe("");
+  });
   test("ignores other rooms and keeps chronological order", () => {
     const out = mergeMessages([msg("a", 1), msg("c", 3)], [msg("b", 2), msg("x", 0, { roomId: "other" })], "r");
     expect(out.map((m) => m.id)).toEqual(["a", "b", "c"]);

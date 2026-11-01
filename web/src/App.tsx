@@ -977,6 +977,7 @@ function Welcome({ agents, go }: { agents: Agent[]; go: (p: string) => void }) {
     <>
       <header className="main-head chat-head">
         <div className="title-pill static">
+          <BrandMark size={22} />
           <h2>{agents.length === 0 ? t("开始") : t("团团")}</h2>
         </div>
       </header>

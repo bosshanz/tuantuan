@@ -6,6 +6,7 @@ import {
   applyUpdate,
   emptyTimeline,
   type Handoff,
+  messageWithdrawn,
   type TaskContext,
   type Timeline,
   timelineText,
@@ -52,6 +53,15 @@ export interface RoomState {
   activeRunId: string | null;
   queued: number;
   tasks: RoomTask[];
+}
+
+/** A still-queued message pulled back into the composer. `message` is the hidden transcript tombstone. */
+export interface RetractedQueued {
+  draft: string;
+  images: ImageAttachment[];
+  files: FileAttachment[];
+  quote: Message["quote"];
+  message: Message;
 }
 
 export type { ImageAttachment } from "../shared/attachments";
@@ -237,6 +247,46 @@ export class Orchestrator implements ToolProvider {
     // The lane is already reserved by this queued steer, so nothing else jumps in.
     this.cancelTasks(roomId, rt, new Set([target.id]), "被新消息打断");
     return run.human;
+  }
+
+  /**
+   * Pull a not-yet-started queued message back into the composer and out of the transcript.
+   * The row stays, with its sequence, so history paging does not see a gap. Every task of that
+   * same human message must still be queued; a message that has already started stays put.
+   */
+  retractQueued(roomId: string, taskId: string): RetractedQueued {
+    if (this.closed) throw new ValidationError("服务正在关闭", 503);
+    const rt = this.rooms.get(roomId);
+    const task = rt?.tasks.get(taskId);
+    if (!rt || !task || task.status !== "queued" || task.steer)
+      throw new ValidationError("只能撤回尚未开始的排队消息", 409);
+    const run = rt.runs.get(task.runId);
+    const siblings = [...rt.tasks.values()].filter((item) => item.runId === task.runId);
+    if (
+      !run ||
+      siblings.length === 0 ||
+      siblings.some((item) => item.status !== "queued" || item.steer || rt.executions.has(item.id))
+    )
+      throw new ValidationError("只能撤回尚未开始的排队消息", 409);
+    const restored = {
+      draft: run.human.content,
+      images: run.images,
+      files: run.files,
+      quote: run.human.quote,
+    };
+    for (const item of siblings) {
+      item.abort.abort(new DOMException("用户撤回编辑", "AbortError"));
+      item.status = "cancelled";
+    }
+    const message = this.store.updateReply(run.human.id, {
+      content: "",
+      status: "cancelled",
+      timeline: { ...emptyTimeline(), withdrawn: true },
+    });
+    run.human = message;
+    this.publish(roomId, { type: "message", message });
+    this.pump(roomId, rt);
+    return { ...restored, message };
   }
 
   private post(
@@ -719,7 +769,10 @@ export class Orchestrator implements ToolProvider {
     );
     const fresh = history
       .slice(lastOwn + 1)
-      .filter((m) => m.senderKind !== "system" && m.status !== "streaming" && m.content.trim())
+      .filter(
+        (m) =>
+          m.senderKind !== "system" && m.status !== "streaming" && m.content.trim() && !messageWithdrawn(m.timeline),
+      )
       .map((m) => {
         const body = m.content.trim();
         const clipped = contextPreview(body, RELAY_MESSAGE_MAX_CHARS);
@@ -1090,6 +1143,7 @@ export class Orchestrator implements ToolProvider {
           message.roomId !== ctx.roomId ||
           message.senderKind === "system" ||
           message.status === "streaming" ||
+          messageWithdrawn(message.timeline) ||
           (message.seq > active.run.human.seq && message.runId !== active.task.runId)
         )
           throw new Error("只能读取本任务可见的同会话已结束消息，不能读取后来独立请求的内容");

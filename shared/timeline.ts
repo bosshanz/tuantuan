@@ -44,6 +44,16 @@ export interface Timeline {
     agentName: string;
     stage: "stopping" | "sent" | "interrupted";
   };
+  /**
+   * A queued human message pulled back into the composer. The row stays so room
+   * sequence numbers remain contiguous; transcript, search and previews skip it.
+   */
+  withdrawn?: boolean;
+}
+
+/** True when a queued message was pulled back into the composer and must not be shown. */
+export function messageWithdrawn(timeline: { withdrawn?: boolean } | null | undefined): boolean {
+  return timeline?.withdrawn === true;
 }
 
 export interface TaskContext {

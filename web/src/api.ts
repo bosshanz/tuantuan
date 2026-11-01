@@ -2,7 +2,7 @@ import type { TerminalSnapshot } from "../../server/acp";
 import type { CustomFormat } from "../../server/custom";
 import type { HarnessStatus } from "../../server/harness";
 import type { ElicitationAsk, PermissionAsk, SessionView } from "../../server/host";
-import type { RoomEvent, RoomState } from "../../server/orchestrator";
+import type { RetractedQueued, RoomEvent, RoomState } from "../../server/orchestrator";
 import type {
   Agent,
   AgentInput,
@@ -28,6 +28,7 @@ export type {
   Message,
   PermissionAsk,
   Project,
+  RetractedQueued,
   Room,
   RoomConclusion,
   RoomEvent,
