@@ -17,7 +17,7 @@ import remarkGfm from "remark-gfm";
 import { type AvatarShape, defaultAvatar } from "../../server/avatars";
 import { localFileTarget } from "../../shared/localFileLink";
 import type { Agent, Room } from "./api";
-import type { Expression } from "./avatarState";
+import type { AvatarState, Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
 import { PreviewImage } from "./ImagePreview";
 import { getLocale, intlLocale, type Locale, translate, useI18n } from "./i18n";
@@ -86,17 +86,20 @@ export function HumanAvatar({ name, size = 32 }: { name: string; size?: number }
   );
 }
 
+const IDLE: AvatarState = { expression: "idle", live: false };
+
 export function RoomIcon({
   room,
   agents,
   size = 32,
-  busy = false,
+  state = IDLE,
   reactToHover = false,
 }: {
   room: Room;
   agents: Agent[];
   size?: number;
-  busy?: boolean;
+  /** What the room's agents are doing; every member shown takes the same pose. */
+  state?: AvatarState;
   reactToHover?: boolean;
 }) {
   const members = room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
@@ -105,8 +108,8 @@ export function RoomIcon({
       <AgentAvatar
         agent={members[0]}
         size={size}
-        expression={busy ? "thinking" : "idle"}
-        animate={busy}
+        expression={state.expression}
+        animate={state.live}
         reactToHover={reactToHover}
       />
     );
@@ -124,8 +127,8 @@ export function RoomIcon({
           key={a.id}
           agent={a}
           size={mini}
-          expression={busy ? "thinking" : "idle"}
-          animate={busy}
+          expression={state.expression}
+          animate={state.live}
           reactToHover={reactToHover}
         />
       ))}

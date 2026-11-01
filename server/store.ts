@@ -332,6 +332,8 @@ export interface Room {
   last?: RoomPreview;
   /** List endpoint only: an agent chain is running in this room. */
   busy?: boolean;
+  /** List endpoint only: an agent is waiting on a permission request or question. */
+  awaiting?: boolean;
 }
 
 export type MessageStatus = "streaming" | "done" | "error" | "cancelled" | "interrupted";

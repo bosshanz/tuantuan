@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { notifyForMessage, preview } from "../shared/notify";
-import { agentActivity, messageExpression } from "../web/src/avatarState";
+import { agentActivity, avatarState } from "../web/src/avatarState";
 import { bumpUnread, DEFAULT_NOTIFY, shouldNotify, totalUnread } from "../web/src/notifications";
 
 const msg = (o: Partial<Parameters<typeof notifyForMessage>[1]>) => ({
@@ -50,9 +50,9 @@ test("avatar shows working while a tool call runs", () => {
     plan: null,
   };
   const m = { status: "streaming" as const, content: "", senderKind: "agent" as const, senderId: "a", timeline };
-  expect(messageExpression(m).expression).toBe("working");
-  expect(agentActivity("a", [m])).toBe("working");
-  expect(messageExpression({ ...m, timeline: undefined }).expression).toBe("thinking");
+  expect(avatarState(m).expression).toBe("working");
+  expect(agentActivity("a", [m]).expression).toBe("working");
+  expect(avatarState({ ...m, timeline: undefined }).expression).toBe("thinking");
 });
 
 test("profile: 关于我 block for agents; empty profile adds nothing", async () => {

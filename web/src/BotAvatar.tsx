@@ -210,14 +210,20 @@ function Face({
           <path d={`M${R + 2} ${y - eyeHeight - 1}Q${R + 4} ${y - 1} ${R - 1} ${y + eyeHeight}`} />
         </g>
       );
-    case "surprised":
+    case "awaiting":
+      // Looking straight at you, bright round eyes and a small "hey" smile.
       return (
         <>
-          <g className="ba-eyes">
-            <ellipse className="ba-dot" cx={L} cy={y} rx="3.7" ry="5.5" />
-            <ellipse className="ba-dot" cx={R} cy={y - 1} rx="3.7" ry="6" />
+          <g className="ba-look">
+            <g className="ba-eyes">
+              <circle className="ba-dot" cx={L} cy={y} r="4.6" />
+              <circle className="ba-dot" cx={R} cy={y} r="4.6" />
+            </g>
           </g>
-          <circle className="ba-dot ba-mouth" cx={x - 1} cy={y + mouthOffset - 1} r="2.8" />
+          <path
+            className="ba-mouth"
+            d={`M${x - 5} ${y + mouthOffset - 2}Q${x - 1} ${y + mouthOffset + 3} ${x + 3} ${y + mouthOffset - 2}`}
+          />
         </>
       );
     case "sad":
@@ -278,10 +284,22 @@ function Face({
 
 let seq = 0;
 
+/** Size tiers: full pose + motion, face + quiet loops only, or a still face with a status badge. */
+export function avatarTier(size: number): "full" | "subtle" | "static" {
+  if (size >= 28) return "full";
+  if (size > 18) return "subtle";
+  return "static";
+}
+
+/** States that must stay legible when the avatar is too small for its face to read. */
+const BADGE: Partial<Record<Expression, string>> = { awaiting: "ba-badge-awaiting", sad: "ba-badge-error" };
+
 /**
- * Bot avatar. Static unless `animate` (blink, breathing, glance and the expression's own loop);
- * `pulse` changes trigger a one-shot hop. Animations pause offscreen / in hidden tabs and are off
- * under prefers-reduced-motion. Below 24px only the blink runs.
+ * Bot avatar. Every state is one coordinated pose: the face (eyes / mouth) and a body motion applied
+ * to the whole silhouette group, so all shapes share the same behaviour. Loops run only while
+ * `animate` (a live agent) and the avatar is visible; one-shots (finish celebration, error shake,
+ * `pulse` hop) play once. Motion is tiered by size (see `avatarTier`), and under
+ * prefers-reduced-motion the poses stay but nothing loops. CSS keys off data-expr / data-tier / data-anim.
  */
 export function BotAvatar({
   shape,
@@ -307,23 +325,31 @@ export function BotAvatar({
   // Per-instance offsets so a row of avatars never blinks in unison.
   const [offset] = useState(() => (seq++ * 1.7) % 5);
   const [shown, setShown] = useState<Expression>(expression);
+  // A run that just ended plays its one-shot (celebration hop / error shake) even though it is no longer live.
+  const [settling, setSettling] = useState(false);
   const [hop, setHop] = useState(animate && pulse !== undefined ? 1 : 0);
   const prev = useRef(expression);
-  // Remember whether the reply was live, so the finishing smile plays even though animate drops now.
+  // Remember whether the agent was live, so the finishing celebration plays even though animate drops now.
   const wasLive = useRef(animate);
   useEffect(() => {
     if (animate) wasLive.current = true;
   }, [animate]);
   useEffect(() => {
-    // Finishing a reply earns a brief smile before settling back to the target expression.
+    // A finished run earns a short celebration hop with happy eyes, then settles to the target state.
     const was = prev.current;
     prev.current = expression;
-    if ((was === "speaking" || was === "working" || was === "thinking") && expression === "idle" && wasLive.current) {
-      setShown("happy");
+    const ran = was === "speaking" || was === "working" || was === "thinking";
+    if (ran && wasLive.current && (expression === "idle" || expression === "sad")) {
       wasLive.current = false;
-      const t = setTimeout(() => setShown("idle"), 1600);
+      setShown(expression === "idle" ? "happy" : "sad");
+      setSettling(true);
+      const t = setTimeout(() => {
+        setShown(expression);
+        setSettling(false);
+      }, 1400);
       return () => clearTimeout(t);
     }
+    setSettling(false);
     setShown(expression);
   }, [expression]);
   const first = useRef(true);
@@ -343,6 +369,10 @@ export function BotAvatar({
     io.observe(el);
     return () => io.disconnect();
   }, [animate]);
+  const tier = avatarTier(size);
+  const badge = tier === "static" ? BADGE[shown] : undefined;
+  const mouthOffset = shape === "cow" ? 28 : 16;
+  const face = { x, y, eyeSpacing: s.eyeSpacing, eyeHeight: s.eyeHeight, mouthOffset };
   return (
     <svg
       ref={ref}
@@ -352,41 +382,33 @@ export function BotAvatar({
       height={size}
       data-shape={shape}
       data-expr={shown}
-      data-anim={animate || shown === "happy" ? (size >= 24 ? "full" : "blink") : undefined}
+      data-tier={tier}
+      data-anim={animate || settling ? "" : undefined}
       style={{ ["--c" as string]: color, ["--blink-delay" as string]: `${offset}s` }}
       aria-hidden
     >
-      <g className="ba-root" key={hop} data-hop={hop > 0 ? "" : undefined}>
-        <g className="ba-body">{s.body}</g>
-        <g className="ba-face">
-          {reactToHover && !animate && shown === "idle" ? (
-            <>
-              <g className="ba-face-rest">
-                <Face
-                  e={shown}
-                  x={x}
-                  y={y}
-                  eyeSpacing={s.eyeSpacing}
-                  eyeHeight={s.eyeHeight}
-                  mouthOffset={shape === "cow" ? 28 : 16}
-                />
-              </g>
-              <g className="ba-face-curious">
-                <Face e="curious" x={x} y={y} eyeSpacing={s.eyeSpacing} eyeHeight={s.eyeHeight} />
-              </g>
-            </>
-          ) : (
-            <Face
-              e={shown}
-              x={x}
-              y={y}
-              eyeSpacing={s.eyeSpacing}
-              eyeHeight={s.eyeHeight}
-              mouthOffset={shape === "cow" ? 28 : 16}
-            />
-          )}
+      {/* pose: the state's resting posture (transitioned); root: its loop / one-shot (restarted by `pulse`) */}
+      <g className="ba-pose">
+        <g className="ba-root" key={hop} data-hop={hop > 0 ? "" : undefined}>
+          <g className="ba-body">{s.body}</g>
+          {/* keyed by state so the new face fades in instead of snapping */}
+          <g className="ba-face" key={shown}>
+            {reactToHover && !animate && shown === "idle" ? (
+              <>
+                <g className="ba-face-rest">
+                  <Face e={shown} {...face} />
+                </g>
+                <g className="ba-face-curious">
+                  <Face e="curious" {...face} mouthOffset={16} />
+                </g>
+              </>
+            ) : (
+              <Face e={shown} {...face} />
+            )}
+          </g>
         </g>
       </g>
+      {badge && <circle className={`ba-badge ${badge}`} cx="84" cy="84" r="15" />}
     </svg>
   );
 }

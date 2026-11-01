@@ -69,7 +69,7 @@ import {
   type TerminalSnapshot,
   type WsEvent,
 } from "./api";
-import { agentActivity, messageExpression } from "./avatarState";
+import { agentActivity, avatarState, roomAvatarState } from "./avatarState";
 import { SessionChips } from "./ConfigChips";
 import { ConversationFiles } from "./ConversationFiles";
 import { type ChatSnapshot, chatReducer, emptyChat, historyCursor, type MessagePage } from "./chatState";
@@ -842,6 +842,19 @@ export function ChatView(props: {
   );
   const stopTask = tasks.length === 1 ? tasks[0] : undefined;
   const selectedMsg = messages.find((m) => m.id === selected);
+  const awaitingAgentIds = useMemo(
+    () => new Set([...asks, ...elicitations].map((item) => item.agentId)),
+    [asks, elicitations],
+  );
+  // The title island shows the room's live agent: whoever is streaming, else any running task.
+  const streamingReply = messages.findLast((m) => m.senderKind === "agent" && m.status === "streaming");
+  const titleAvatar = awaitingAgentIds.size
+    ? avatarState(undefined, { awaiting: true })
+    : streamingReply
+      ? avatarState(streamingReply)
+      : awake
+        ? roomAvatarState({ busy: true })
+        : avatarState(undefined);
   const ask = asks.find((item) => selectedRequest?.kind === "permission" && item.id === selectedRequest.id) ?? asks[0];
   // Inline questions stay mounted while another agent asks for permission, preserving draft answers.
   const elicitation =
@@ -899,8 +912,7 @@ export function ChatView(props: {
                 }}
               >
                 <span className="title-faces">
-                  <RoomIcon room={room} agents={agents} size={28} busy={awake} reactToHover />
-                  {awake && <span className="busy-dot" aria-hidden />}
+                  <RoomIcon room={room} agents={agents} size={28} state={titleAvatar} reactToHover />
                 </span>
                 <span className="title-copy">
                   <h2>{room.name}</h2>
@@ -1070,6 +1082,7 @@ export function ChatView(props: {
                           agent={agentById.get(g.senderId ?? "")}
                           name={g.senderName}
                           last={g.messages.at(-1)}
+                          awaiting={awaitingAgentIds.has(g.senderId ?? "")}
                         />
                       ) : (
                         <HumanAvatar name={g.senderName} size={36} />
@@ -1311,6 +1324,7 @@ export function ChatView(props: {
                         agents={agents}
                         members={members}
                         messages={messages}
+                        awaitingAgentIds={awaitingAgentIds}
                         sessions={sessions}
                         compact={compact}
                         onCompactChange={changeCompact}
@@ -2700,6 +2714,8 @@ function RoomInfo(props: {
   agents: Agent[];
   members: Agent[];
   messages: Message[];
+  /** Agents with a pending permission request or question. */
+  awaitingAgentIds: ReadonlySet<string>;
   sessions: Record<string, SessionView>;
   compact: boolean;
   onCompactChange: (compact: boolean) => void;
@@ -2766,11 +2782,11 @@ function RoomInfo(props: {
           {props.members.length === 0 && <p className="muted">{tr("没有 Agent 成员。")}</p>}
           {props.members.map((a) => {
             const n = replyCount.get(a.id) ?? 0;
-            const doing = agentActivity(a.id, props.messages);
+            const doing = agentActivity(a.id, props.messages, { awaiting: props.awaitingAgentIds.has(a.id) });
             return (
               <div key={a.id} className="member-row">
                 <a className="member-link" href={`#/a/${a.id}`} title={tr("编辑这个 Agent")}>
-                  <AgentAvatar agent={a} size={28} expression={doing} animate />
+                  <AgentAvatar agent={a} size={28} expression={doing.expression} animate={doing.live} />
                   <span className="member-body">
                     <span className="member-name">{a.name}</span>
                     <span className="member-sub">
@@ -3324,8 +3340,9 @@ function Recipients(props: { text: string; members: Agent[] }) {
 }
 
 /** Message-column avatar: animated only while this group's latest reply is in flight. */
-function LiveAvatar(props: { agent?: Agent; name: string; last?: Message }) {
-  const state = props.last ? messageExpression(props.last) : { expression: "idle" as const, live: false };
+function LiveAvatar(props: { agent?: Agent; name: string; last?: Message; awaiting: boolean }) {
+  // Only the reply in flight is waiting on the user; older groups of the same agent stay as they ended.
+  const state = avatarState(props.last, { awaiting: props.awaiting && props.last?.status === "streaming" });
   return (
     <AgentAvatar
       agent={props.agent}
