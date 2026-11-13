@@ -912,7 +912,7 @@ export function ChatView(props: {
                 }}
               >
                 <span className="title-faces">
-                  <RoomIcon room={room} agents={agents} size={28} state={titleAvatar} reactToHover />
+                  <RoomIcon room={room} agents={agents} size={28} state={titleAvatar} reactToHover followPointer />
                 </span>
                 <span className="title-copy">
                   <h2>{room.name}</h2>
@@ -1020,7 +1020,7 @@ export function ChatView(props: {
                 )}
                 {messages.length === 0 && replay.length === 0 && !loadError && (
                   <div className="empty">
-                    <RoomIcon room={room} agents={agents} />
+                    <RoomIcon room={room} agents={agents} size={64} followPointer />
                     <h2 style={{ fontSize: 17 }}>
                       {members.length > 1
                         ? tr("开始聊天")
@@ -2754,7 +2754,7 @@ function RoomInfo(props: {
   return (
     <>
       <div className="d-hero">
-        <RoomIcon room={room} agents={props.agents} size={64} />
+        <RoomIcon room={room} agents={props.agents} size={64} followPointer />
         <h3>{room.name}</h3>
         <div className="d-tabs" role="tablist" aria-label={tr("会话信息")}>
           {(

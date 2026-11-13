@@ -673,11 +673,13 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 /*
  * One coordinated pose per state (single source of truth; table in docs/ui.md).
  * .ba-pose = resting posture, transitioned between states; .ba-root = the state's loop or one-shot;
- * .ba-body / .ba-look / .ba-eyes / .ba-talk = secondary motion. Loops need data-anim (live + visible)
+ * .ba-lean / .ba-gaze = pointer follow (inline transform, cleared at rest); .ba-body / .ba-look /
+ * .ba-eyes / .ba-talk = secondary motion. Loops need data-anim (live + visible)
  * and data-tier="full" (>= 28px); "subtle" (20-24px) keeps blink and mouth; "static" (<= 18px) never moves.
  */
-.bot-avatar :is(.ba-pose, .ba-root, .ba-body, .ba-look, .ba-eyes, .ba-mouth, .ba-face) { transform-box: fill-box; transform-origin: 50% 50%; }
-.bot-avatar :is(.ba-pose, .ba-root) { transform-origin: 50% 100%; }
+.bot-avatar :is(.ba-pose, .ba-root, .ba-lean, .ba-gaze, .ba-body, .ba-look, .ba-eyes, .ba-mouth, .ba-face) { transform-box: fill-box; transform-origin: 50% 50%; }
+.bot-avatar :is(.ba-pose, .ba-root, .ba-lean) { transform-origin: 50% 100%; }
+.bot-avatar[data-gaze] .ba-look { animation: none; }
 .bot-avatar .ba-pose { transition: transform 180ms var(--ease); }
 .bot-avatar .ba-face { animation: ba-face-in 180ms var(--ease) both; }
 .bot-avatar .ba-badge { stroke: var(--bg); stroke-width: 7; }

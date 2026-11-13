@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../../server/avatars";
+import { useAvatarGaze } from "./avatarGaze";
 import type { Expression } from "./avatarState";
 
 /** Hand-authored silhouettes in a 100×100 box; the face anchor and spacing fit each silhouette. */
@@ -177,21 +178,19 @@ const SHAPES: Record<
   },
 };
 
-/** Eyes (and mouth) per expression, drawn around each shape's face anchor. */
-function Face({
+/** Eyes per expression, drawn around each shape's face anchor (moved by `.ba-gaze`). */
+function FaceEyes({
   e,
   x,
   y,
   eyeSpacing = 9,
   eyeHeight = 6,
-  mouthOffset = 16,
 }: {
   e: Expression | "curious";
   x: number;
   y: number;
   eyeSpacing?: number;
   eyeHeight?: number;
-  mouthOffset?: number;
 }) {
   const L = x - 1 - eyeSpacing;
   const R = x - 1 + eyeSpacing;
@@ -211,33 +210,21 @@ function Face({
         </g>
       );
     case "awaiting":
-      // Looking straight at you, bright round eyes and a small "hey" smile.
+      // Looking straight at you, bright round eyes.
       return (
-        <>
-          <g className="ba-look">
-            <g className="ba-eyes">
-              <circle className="ba-dot" cx={L} cy={y} r="4.6" />
-              <circle className="ba-dot" cx={R} cy={y} r="4.6" />
-            </g>
+        <g className="ba-look">
+          <g className="ba-eyes">
+            <circle className="ba-dot" cx={L} cy={y} r="4.6" />
+            <circle className="ba-dot" cx={R} cy={y} r="4.6" />
           </g>
-          <path
-            className="ba-mouth"
-            d={`M${x - 5} ${y + mouthOffset - 2}Q${x - 1} ${y + mouthOffset + 3} ${x + 3} ${y + mouthOffset - 2}`}
-          />
-        </>
+        </g>
       );
     case "sad":
       return (
-        <>
-          <g className="ba-eyes">
-            <path d={`M${L - 1} ${y - 4}Q${L + 1} ${y} ${L + 1} ${y + 5}`} />
-            <path d={`M${R + 1} ${y - 4}Q${R - 1} ${y} ${R - 1} ${y + 5}`} />
-          </g>
-          <path
-            className="ba-mouth"
-            d={`M${x - 5} ${y + mouthOffset + 2}Q${x - 1} ${y + mouthOffset - 1} ${x + 3} ${y + mouthOffset + 2}`}
-          />
-        </>
+        <g className="ba-eyes">
+          <path d={`M${L - 1} ${y - 4}Q${L + 1} ${y} ${L + 1} ${y + 5}`} />
+          <path d={`M${R + 1} ${y - 4}Q${R - 1} ${y} ${R - 1} ${y + 5}`} />
+        </g>
       );
     case "sleepy":
       return (
@@ -267,18 +254,37 @@ function Face({
       );
     default:
       return (
-        <>
-          <g className="ba-look">
-            <g className="ba-eyes">
-              <path d={`M${L + 1} ${y - eyeHeight}Q${L + 2} ${y} ${L - 1} ${y + eyeHeight}`} />
-              <path d={`M${R + 1} ${y - eyeHeight}Q${R + 2} ${y} ${R - 1} ${y + eyeHeight}`} />
-            </g>
+        <g className="ba-look">
+          <g className="ba-eyes">
+            <path d={`M${L + 1} ${y - eyeHeight}Q${L + 2} ${y} ${L - 1} ${y + eyeHeight}`} />
+            <path d={`M${R + 1} ${y - eyeHeight}Q${R + 2} ${y} ${R - 1} ${y + eyeHeight}`} />
           </g>
-          {e === "speaking" && (
-            <ellipse className="ba-dot ba-mouth ba-talk" cx={x - 1} cy={y + mouthOffset} rx="3.5" ry="2.8" />
-          )}
-        </>
+        </g>
       );
+  }
+}
+
+/** Mouth per expression, kept anchored to the body face rather than shifted by eye gaze. */
+function FaceMouth({ e, x, y, mouthOffset = 16 }: { e: Expression; x: number; y: number; mouthOffset?: number }) {
+  switch (e) {
+    case "awaiting":
+      return (
+        <path
+          className="ba-mouth"
+          d={`M${x - 5} ${y + mouthOffset - 2}Q${x - 1} ${y + mouthOffset + 3} ${x + 3} ${y + mouthOffset - 2}`}
+        />
+      );
+    case "sad":
+      return (
+        <path
+          className="ba-mouth"
+          d={`M${x - 5} ${y + mouthOffset + 2}Q${x - 1} ${y + mouthOffset - 1} ${x + 3} ${y + mouthOffset + 2}`}
+        />
+      );
+    case "speaking":
+      return <ellipse className="ba-dot ba-mouth ba-talk" cx={x - 1} cy={y + mouthOffset} rx="3.5" ry="2.8" />;
+    default:
+      return null;
   }
 }
 
@@ -300,6 +306,11 @@ const BADGE: Partial<Record<Expression, string>> = { awaiting: "ba-badge-awaitin
  * `animate` (a live agent) and the avatar is visible; one-shots (finish celebration, error shake,
  * `pulse` hop) play once. Motion is tiered by size (see `avatarTier`), and under
  * prefers-reduced-motion the poses stay but nothing loops. CSS keys off data-expr / data-tier / data-anim.
+ *
+ * Pointer gaze (spring-smoothed, shared listener) is opt-in per instance: `true` follows from
+ * anywhere on the page, `"hover"` only when the pointer is near this avatar (the default at
+ * ≥28px). Only the eyes track via `.ba-gaze`, leaving `.ba-mouth` anchored to the body face.
+ * Thinking, working, happy, sad and sleepy keep their scripted looks and do not follow.
  */
 export function BotAvatar({
   shape,
@@ -308,6 +319,7 @@ export function BotAvatar({
   expression = "idle",
   animate = false,
   reactToHover = false,
+  followPointer,
   pulse,
 }: {
   shape: AvatarShape;
@@ -316,12 +328,16 @@ export function BotAvatar({
   expression?: Expression;
   animate?: boolean;
   reactToHover?: boolean;
+  /** `true` = follow from anywhere; `"hover"` = only when the pointer is near; default is hover at ≥28px. */
+  followPointer?: boolean | "hover";
   /** Change this value to play the squash-and-stretch hop once (e.g. a new reply or hand-off). */
   pulse?: unknown;
 }) {
   const s = SHAPES[shape] ?? SHAPES.orb;
   const [x, y] = s.eyes;
   const ref = useRef<SVGSVGElement>(null);
+  const leanRef = useRef<SVGGElement>(null);
+  const gazeRef = useRef<SVGGElement>(null);
   // Per-instance offsets so a row of avatars never blinks in unison.
   const [offset] = useState(() => (seq++ * 1.7) % 5);
   const [shown, setShown] = useState<Expression>(expression);
@@ -370,9 +386,11 @@ export function BotAvatar({
     return () => io.disconnect();
   }, [animate]);
   const tier = avatarTier(size);
+  const follow = followPointer === false || tier !== "full" ? false : (followPointer ?? "hover");
+  useAvatarGaze(ref, leanRef, gazeRef, { follow, expression: shown, size, hop });
   const badge = tier === "static" ? BADGE[shown] : undefined;
   const mouthOffset = shape === "cow" ? 28 : 16;
-  const face = { x, y, eyeSpacing: s.eyeSpacing, eyeHeight: s.eyeHeight, mouthOffset };
+  const face = { x, y, eyeSpacing: s.eyeSpacing, eyeHeight: s.eyeHeight };
   return (
     <svg
       ref={ref}
@@ -387,24 +405,29 @@ export function BotAvatar({
       style={{ ["--c" as string]: color, ["--blink-delay" as string]: `${offset}s` }}
       aria-hidden
     >
-      {/* pose: the state's resting posture (transitioned); root: its loop / one-shot (restarted by `pulse`) */}
+      {/* pose: the state's resting posture (transitioned); lean: pointer tilt; root: loop / one-shot */}
       <g className="ba-pose">
-        <g className="ba-root" key={hop} data-hop={hop > 0 ? "" : undefined}>
-          <g className="ba-body">{s.body}</g>
-          {/* keyed by state so the new face fades in instead of snapping */}
-          <g className="ba-face" key={shown}>
-            {reactToHover && !animate && shown === "idle" ? (
-              <>
-                <g className="ba-face-rest">
-                  <Face e={shown} {...face} />
-                </g>
-                <g className="ba-face-curious">
-                  <Face e="curious" {...face} mouthOffset={16} />
-                </g>
-              </>
-            ) : (
-              <Face e={shown} {...face} />
-            )}
+        <g className="ba-lean" ref={leanRef}>
+          <g className="ba-root" key={hop} data-hop={hop > 0 ? "" : undefined}>
+            <g className="ba-body">{s.body}</g>
+            {/* keyed by state so the new face fades in instead of snapping; only eyes shift on .ba-gaze */}
+            <g className="ba-face" key={shown}>
+              <g className="ba-gaze" ref={gazeRef}>
+                {reactToHover && !animate && shown === "idle" ? (
+                  <>
+                    <g className="ba-face-rest">
+                      <FaceEyes e={shown} {...face} />
+                    </g>
+                    <g className="ba-face-curious">
+                      <FaceEyes e="curious" {...face} />
+                    </g>
+                  </>
+                ) : (
+                  <FaceEyes e={shown} {...face} />
+                )}
+              </g>
+              <FaceMouth e={shown} x={x} y={y} mouthOffset={mouthOffset} />
+            </g>
           </g>
         </g>
       </g>
