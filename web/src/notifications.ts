@@ -121,6 +121,23 @@ export function setBadge(n: number) {
   if (!bridge()?.setBadge) void (n ? nav.setAppBadge?.(n) : nav.clearAppBadge?.())?.catch(() => {});
 }
 
+/** Inline CSS embedded into detached notification avatar SVGs so cutouts, tusks and mouths render identically. */
+export function notificationAvatarCss(color: string): string {
+  return [
+    `.ba-body>*{fill:${color};stroke:${color}}`,
+    `.ba-body>*:not(.ba-stroke){stroke-width:0}`,
+    `.ba-body>.ba-white,.ba-body>.ba-cutout{fill:#fff;stroke:none}`,
+    `.ba-body>.ba-detail{fill:none;stroke:#fff;stroke-width:4}`,
+    `.ba-face line,.ba-face path{stroke:#fff;stroke-width:7.5;stroke-linecap:round;fill:none}`,
+    `.ba-dot{fill:#fff;stroke:none}`,
+    `[data-shape="panda"] .ba-eyes line,[data-shape="panda"] .ba-eyes path{stroke-width:6}`,
+    `[data-expr="happy"] .ba-eyes path,.ba-face-curious .ba-eyes path{stroke-width:6}`,
+    `.ba-mouth:not(.ba-dot){stroke-width:5}`,
+    `[data-shape="panda"] .ba-mouth{stroke:${color}}`,
+    `[data-shape="panda"] .ba-dot.ba-mouth{fill:${color};stroke:none}`,
+  ].join("");
+}
+
 /** PNG data URL of an agent avatar, rendered from its SVG (for the notification icon). */
 export async function avatarIcon(svg: SVGSVGElement | null, color: string): Promise<string | undefined> {
   if (!svg) return undefined;
@@ -130,7 +147,7 @@ export async function avatarIcon(svg: SVGSVGElement | null, color: string): Prom
     clone.setAttribute("height", "128");
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-    style.textContent = `.ba-body>*{fill:${color};stroke:${color}}.ba-body>*:not(.ba-stroke){stroke-width:0}.ba-face line,.ba-face path{stroke:#fff;stroke-width:7.5;stroke-linecap:round;fill:none}.ba-dot{fill:#fff;stroke:none}`;
+    style.textContent = notificationAvatarCss(color);
     clone.prepend(style);
     const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`;
     const img = new Image();

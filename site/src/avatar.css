@@ -1,9 +1,10 @@
 /* Mirrored from web/src/styles.css (bot avatars + brand mark) so the site renders the app's own SVGs identically. */
 /* ================= bot avatars ================= */
-.bot-avatar { display: block; overflow: visible; --fill: var(--c); }
+.bot-avatar { display: block; overflow: visible; --fill: var(--c); --ba-bg: var(--surface, #fff); }
 .bot-avatar .ba-body > * { fill: var(--fill); stroke: var(--fill); }
 .bot-avatar .ba-body > *:not(.ba-stroke) { stroke-width: 0; }
-.bot-avatar .ba-body > .ba-cutout { fill: #fff; stroke: none; }
+.bot-avatar .ba-body > .ba-cutout { fill: var(--ba-bg); stroke: none; }
+.bot-avatar .ba-body > .ba-white { fill: #fff; stroke: none; }
 .bot-avatar .ba-body > .ba-detail { fill: none; stroke: #fff; stroke-width: 4; }
 .bot-avatar .ba-eyes line { stroke: #fff; stroke-width: 7.5; stroke-linecap: round; }
 @media (prefers-color-scheme: dark) {

@@ -15,7 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type AvatarShape, defaultAvatar } from "../../server/avatars";
+import { type AvatarShape, defaultAvatar, newAgentAvatar } from "../../server/avatars";
 import { CUSTOM_FORMATS, DEFAULT_BASE_URL } from "../../server/custom";
 import { providerSupports, supportsProviderProfiles } from "../../shared/providerSupport";
 import { AvatarPicker } from "./AvatarPicker";
@@ -35,7 +35,7 @@ type Form = Omit<AgentInput, "custom"> & { color: string; avatarShape: AvatarSha
 const draftSeed = () => crypto.randomUUID();
 
 function emptyAgent(seed: string): Form {
-  const d = defaultAvatar(seed);
+  const d = newAgentAvatar(seed);
   return {
     name: "",
     color: d.color,
@@ -214,7 +214,7 @@ export function AgentEditor(props: {
                   color={form.color}
                   onChange={(shape, color) => setForm((f) => ({ ...f, avatarShape: shape, color }))}
                   onReset={() => {
-                    const d = defaultAvatar(seed);
+                    const d = agent ? defaultAvatar(seed) : newAgentAvatar(seed);
                     setForm((f) => ({ ...f, avatarShape: d.shape, color: d.color }));
                   }}
                 />

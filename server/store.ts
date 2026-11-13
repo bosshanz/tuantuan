@@ -9,7 +9,7 @@ import {
 } from "../shared/messageSearch";
 import { messagePreview, type RoomPreview } from "../shared/roomPreview";
 import { emptyTimeline, type RoomConclusion, type Timeline } from "../shared/timeline";
-import { type AvatarShape, defaultAvatar, isAvatarShape } from "./avatars";
+import { type AvatarShape, defaultAvatar, isAvatarShape, newAgentAvatar } from "./avatars";
 import { type CustomFormat, type CustomSecret, type Item, maskKey } from "./custom";
 import { ModelCatalog } from "./model-catalog";
 import type { ProviderSecret } from "./providers";
@@ -488,13 +488,14 @@ export class Store {
           apiKey: a.custom.apiKey?.trim() || old?.apiKey || "",
         }
       : null;
+    const fallback = op === "insert" ? newAgentAvatar(id) : defaultAvatar(id);
     const params = {
       custom: custom ? JSON.stringify(custom) : null,
       id,
       name: a.name,
-      color: a.color || defaultAvatar(id).color,
+      color: a.color || fallback.color,
       avatar: a.avatar,
-      avatar_shape: isAvatarShape(a.avatarShape) ? a.avatarShape : defaultAvatar(id).shape,
+      avatar_shape: isAvatarShape(a.avatarShape) ? a.avatarShape : fallback.shape,
       identity: a.identity,
       harness: a.harness,
       env: JSON.stringify(a.env),

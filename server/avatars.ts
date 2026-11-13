@@ -2,8 +2,8 @@
  * Agent avatars: a small set of hand-authored "bot" silhouettes (100×100 viewBox) filled with one
  * colour, plus two slanted eye strokes. Shared by server (defaults) and web (rendering).
  */
-/** Current choices for new avatars and deterministic defaults. */
-export const SELECTABLE_AVATAR_SHAPES = [
+/** Frozen pool for deterministic defaults so existing agents keep the same look. */
+export const DEFAULT_AVATAR_SHAPES = [
   "orb",
   "cloud",
   "clover",
@@ -17,9 +17,27 @@ export const SELECTABLE_AVATAR_SHAPES = [
   "cow",
 ] as const;
 
+/** Current choices for new avatars and new-agent assignment. Excludes retired shapes. */
+export const SELECTABLE_AVATAR_SHAPES = [
+  "orb",
+  "cloud",
+  "clover",
+  "flower",
+  "burst",
+  "cat",
+  "dog",
+  "rabbit",
+  "bear",
+  "fox",
+  "elephant",
+] as const;
+
 /** Saved avatars remain valid and renderable after leaving the picker. */
 export const AVATAR_SHAPES = [
   ...SELECTABLE_AVATAR_SHAPES,
+  "panda",
+  "cow",
+  "goat",
   "tile",
   "spark",
   "bean",
@@ -51,6 +69,9 @@ export const SHAPE_LABEL: Record<AvatarShape, string> = {
   panda: "熊猫",
   goat: "山羊",
   cow: "小牛",
+  bear: "小熊",
+  fox: "狐狸",
+  elephant: "小象",
 };
 
 /** Vivid modern colours; the first ten are the default set. */
@@ -98,12 +119,26 @@ function hash(s: string): number {
   return h;
 }
 
-export function defaultAvatar(id: string): { shape: AvatarShape; color: string } {
+function avatarFrom(pool: readonly AvatarShape[], id: string): { shape: AvatarShape; color: string } {
   const h = hash(id);
   return {
-    shape: SELECTABLE_AVATAR_SHAPES[h % SELECTABLE_AVATAR_SHAPES.length] as AvatarShape,
+    shape: pool[h % pool.length] as AvatarShape,
     color: AVATAR_COLORS[(h >>> 8) % DEFAULT_COLOR_COUNT] as string,
   };
+}
+
+/** Frozen 11-shape assignment used by already-stored agents, Reset, and empty-shape backfill. */
+export function defaultAvatar(id: string): { shape: AvatarShape; color: string } {
+  return avatarFrom(DEFAULT_AVATAR_SHAPES, id);
+}
+
+/** Assignment for newly created agents: current picker pool, never a retired shape. */
+export function newAgentAvatar(id: string): { shape: AvatarShape; color: string } {
+  return avatarFrom(SELECTABLE_AVATAR_SHAPES, id);
+}
+
+export function isSelectableAvatarShape(s: unknown): s is AvatarShape {
+  return typeof s === "string" && (SELECTABLE_AVATAR_SHAPES as readonly string[]).includes(s);
 }
 
 export function isAvatarShape(s: unknown): s is AvatarShape {

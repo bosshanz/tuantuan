@@ -552,6 +552,21 @@ export const coreMessages = {
     en: "Cow",
     ja: "牛",
   },
+  小熊: {
+    "zh-TW": "小熊",
+    en: "Bear",
+    ja: "クマ",
+  },
+  狐狸: {
+    "zh-TW": "狐狸",
+    en: "Fox",
+    ja: "キツネ",
+  },
+  小象: {
+    "zh-TW": "小象",
+    en: "Elephant",
+    ja: "ゾウ",
+  },
   平静: {
     "zh-TW": "平靜",
     en: "Calm",

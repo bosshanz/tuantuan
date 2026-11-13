@@ -635,10 +635,12 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 
 /* ================= bot avatars ================= */
 .avatar.bot { background: none !important; box-shadow: none; border-radius: 0; overflow: visible; }
-.bot-avatar { display: block; overflow: visible; --fill: var(--c); }
+.bot-avatar { display: block; overflow: visible; --fill: var(--c); --ba-bg: var(--surface); }
+.chat .bot-avatar, .page .bot-avatar, .showcase .bot-avatar { --ba-bg: var(--bg); }
 .bot-avatar .ba-body > * { fill: var(--fill); stroke: var(--fill); }
 .bot-avatar .ba-body > *:not(.ba-stroke) { stroke-width: 0; }
-.bot-avatar .ba-body > .ba-cutout { fill: #fff; stroke: none; }
+.bot-avatar .ba-body > .ba-cutout { fill: var(--ba-bg); stroke: none; }
+.bot-avatar .ba-body > .ba-white { fill: #fff; stroke: none; }
 .bot-avatar .ba-body > .ba-detail { fill: none; stroke: #fff; stroke-width: 4; }
 .bot-avatar .ba-eyes line { stroke: #fff; stroke-width: 7.5; stroke-linecap: round; }
 @media (prefers-color-scheme: dark) {
@@ -651,7 +653,8 @@ kbd, kbd.combo { line-height: 1; vertical-align: middle; }
 .avatar-pop { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: 332px; padding: var(--s4); background: var(--surface); border-radius: 6px; box-shadow: var(--shadow-2); }
 .avatar-pop-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s3); }
 .avatar-pop-head h4 { margin: 0; font-family: var(--display); font-size: 15px; }
-.shape-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.shape-grid, .shape-current { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.shape-current { margin-bottom: var(--s3); padding-bottom: var(--s3); border-bottom: 1px solid var(--border); }
 .shape-opt { display: flex; align-items: center; justify-content: center; height: 56px; border: none; background: none; border-radius: 6px; }
 .shape-opt:hover { background: var(--surface-hover); }
 .shape-opt[aria-checked="true"] { box-shadow: inset 0 0 0 1.5px var(--text-2); }
