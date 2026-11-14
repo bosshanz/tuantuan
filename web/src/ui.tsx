@@ -45,6 +45,7 @@ export function AgentAvatar({
   expression,
   animate,
   reactToHover,
+  followPointer,
   pulse,
 }: {
   agent?: Pick<Agent, "color" | "name"> & { avatarShape?: AvatarShape };
@@ -53,6 +54,7 @@ export function AgentAvatar({
   expression?: Expression;
   animate?: boolean;
   reactToHover?: boolean;
+  followPointer?: boolean | "hover";
   pulse?: unknown;
 }) {
   if (!agent) {
@@ -72,6 +74,7 @@ export function AgentAvatar({
         expression={expression}
         animate={animate}
         reactToHover={reactToHover}
+        followPointer={followPointer}
         pulse={pulse}
       />
     </span>
@@ -94,6 +97,7 @@ export function RoomIcon({
   size = 32,
   state = IDLE,
   reactToHover = false,
+  followPointer,
 }: {
   room: Room;
   agents: Agent[];
@@ -101,6 +105,7 @@ export function RoomIcon({
   /** What the room's agents are doing; every member shown takes the same pose. */
   state?: AvatarState;
   reactToHover?: boolean;
+  followPointer?: boolean | "hover";
 }) {
   const members = room.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
   if (members.length === 1 && members[0])
@@ -111,6 +116,7 @@ export function RoomIcon({
         expression={state.expression}
         animate={state.live}
         reactToHover={reactToHover}
+        followPointer={followPointer}
       />
     );
   if (members.length === 0)
@@ -130,6 +136,7 @@ export function RoomIcon({
           expression={state.expression}
           animate={state.live}
           reactToHover={reactToHover}
+          followPointer={followPointer}
         />
       ))}
       {members.length > 2 && <span className="room-stack-more">+{members.length - 2}</span>}

@@ -84,6 +84,7 @@ export function AvatarPicker(props: {
           color={props.color}
           size={56}
           animate
+          followPointer
           expression={hover ? (EXPRESSIONS[tick % EXPRESSIONS.length] as Expression) : "idle"}
         />
       </button>

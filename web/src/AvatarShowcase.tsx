@@ -50,6 +50,7 @@ export function AvatarShowcase() {
                     size={size}
                     expression={e}
                     animate={animate}
+                    followPointer
                     pulse={pulse || undefined}
                   />
                 </td>

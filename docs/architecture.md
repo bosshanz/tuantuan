@@ -55,7 +55,7 @@
 | `desktop/src/power.ts` / `shared/desktopPower.ts` | 桌面任务防休眠：主进程拥有唯一 prevent-app-suspension 实例，监听全局 activity 并用全部房间快照校准；增量覆盖在途旧快照，断线释放并重连恢复。偏好保存到 userData/settings.json，preload 只提供状态与开关 |
 | `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
-| `web/src/BotAvatar.tsx` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
+| `web/src/BotAvatar.tsx` / `avatarGaze.ts` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、共享指针监听与弹簧跟随、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |
 | `web/src/useChatScroll.ts` | 聊天自动跟随意图与阅读锚点；上滑立即暂停，消息增量和布局变化保持阅读位置，引用导航保存并恢复消息位置，回到底部或点击「回到最新」恢复跟随 |
 | `web/src/ui.tsx` / `MermaidBlock.tsx` / `mermaidRendering.ts` | 稳定的 Markdown renderer；显式 Mermaid 围栏按需加载，串行渲染、资源语法校验、主题重绘与源码回退，见下方「消息渲染」 |

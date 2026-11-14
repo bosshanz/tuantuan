@@ -42,7 +42,34 @@ describe("avatar expressions", () => {
   test("motion is applied to one pose group around every silhouette", () => {
     for (const shape of AVATAR_SHAPES) {
       const markup = renderToStaticMarkup(<BotAvatar shape={shape} color="#3280d6" expression="working" animate />);
-      expect(markup).toMatch(/<g class="ba-pose"><g class="ba-root"><g class="ba-body">/);
+      expect(markup).toMatch(/<g class="ba-pose"><g class="ba-lean"><g class="ba-root"><g class="ba-body">/);
     }
+  });
+
+  test("pointer gaze wraps only the eyes while keeping mouths anchored to the face", () => {
+    for (const expression of ["awaiting", "speaking", "sad"] as const) {
+      const markup = renderToStaticMarkup(
+        <BotAvatar shape="cow" color="#3280d6" size={48} followPointer expression={expression} />,
+      );
+      expect(markup).toMatch(/<g class="ba-gaze">[\s\S]*<\/g><(?:path|ellipse)[^>]*class="[^"]*ba-mouth/);
+      const gazeStart = markup.indexOf('<g class="ba-gaze">');
+      const mouthIdx = markup.indexOf('class="ba-mouth"');
+      const altMouthIdx = markup.indexOf("ba-mouth");
+      const targetIdx = mouthIdx >= 0 ? mouthIdx : altMouthIdx;
+      expect(gazeStart).toBeGreaterThan(-1);
+      expect(targetIdx).toBeGreaterThan(gazeStart);
+      expect(markup.slice(gazeStart, targetIdx)).toContain("</g>");
+    }
+  });
+
+  test("resting markup has no gaze transform so a still avatar matches the previous drawing", () => {
+    const markup = renderToStaticMarkup(
+      <BotAvatar shape="orb" color="#3280d6" size={48} followPointer expression="idle" />,
+    );
+    expect(markup).toContain('class="ba-gaze"');
+    expect(markup).toContain('class="ba-lean"');
+    expect(markup).not.toContain("data-gaze");
+    expect(markup).not.toMatch(/ba-gaze[^>]*style/);
+    expect(markup).not.toMatch(/ba-lean[^>]*style/);
   });
 });

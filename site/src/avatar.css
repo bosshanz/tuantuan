@@ -16,8 +16,8 @@
 .bot-avatar[data-shape="panda"] .ba-mouth { stroke: var(--fill); }
 .bot-avatar[data-shape="panda"] .ba-dot.ba-mouth { fill: var(--fill); stroke: none; }
 .bot-avatar .ba-eyes line { stroke: #fff; }
-.bot-avatar .ba-root, .bot-avatar .ba-eyes, .bot-avatar .ba-look, .bot-avatar .ba-mouth, .bot-avatar .ba-body { transform-box: fill-box; transform-origin: 50% 50%; }
-.bot-avatar .ba-root { transform-origin: 50% 100%; }
+.bot-avatar :is(.ba-root, .ba-lean, .ba-gaze, .ba-eyes, .ba-look, .ba-mouth, .ba-body) { transform-box: fill-box; transform-origin: 50% 50%; }
+.bot-avatar :is(.ba-root, .ba-lean) { transform-origin: 50% 100%; }
 .bot-avatar[data-anim] .ba-eyes { animation: ba-blink 5.2s var(--blink-delay, 0s) infinite; }
 .bot-avatar[data-anim="full"] .ba-body { animation: ba-breathe 3.6s ease-in-out infinite; }
 .bot-avatar[data-anim="full"][data-expr="idle"] .ba-look { animation: ba-glance 9s calc(var(--blink-delay, 0s) * 2) ease-in-out infinite; }
