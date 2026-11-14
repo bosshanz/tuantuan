@@ -6,7 +6,7 @@ import type { Expression } from "./avatarState";
 /** Hand-authored silhouettes in a 100×100 box; the face anchor and spacing fit each silhouette. */
 const SHAPES: Record<
   AvatarShape,
-  { body: ReactNode; eyes: [number, number]; eyeSpacing?: number; eyeHeight?: number }
+  { body: ReactNode; eyes: [number, number]; eyeSpacing?: number; eyeHeight?: number; mouthOffset?: number }
 > = {
   orb: { body: <circle cx="50" cy="52" r="40" />, eyes: [50, 46] },
   cloud: {
@@ -95,42 +95,70 @@ const SHAPES: Record<
     body: (
       <>
         <path
-          d="M17 50L19 14Q20 9 25 12L46 28Z"
-          strokeWidth="6"
+          d="M17 53L16 14Q18 7 27 12L46 33Z"
+          strokeWidth="5"
           strokeLinejoin="round"
           className="ba-stroke ba-fillstroke"
         />
         <path
-          d="M83 50L81 14Q80 9 75 12L54 28Z"
-          strokeWidth="6"
+          d="M83 53L84 14Q82 7 73 12L54 33Z"
+          strokeWidth="5"
           strokeLinejoin="round"
           className="ba-stroke ba-fillstroke"
         />
-        <ellipse cx="50" cy="58" rx="38" ry="32" />
+        <path className="ba-cutout" d="M23 30L22 16L37 31Z" />
+        <path className="ba-cutout" d="M77 30L78 16L63 31Z" />
+        <ellipse cx="50" cy="60" rx="35" ry="30" />
       </>
     ),
     eyes: [50, 56],
+    mouthOffset: 17,
   },
   dog: {
     body: (
       <>
-        <circle cx="50" cy="54" r="34" />
-        <ellipse cx="20" cy="46" rx="12" ry="24" transform="rotate(18 20 46)" />
-        <ellipse cx="80" cy="46" rx="12" ry="24" transform="rotate(-18 80 46)" />
-        <ellipse cx="50" cy="74" rx="16" ry="12" />
+        <path
+          d="M26 31C12 33 6 53 10 75C12 83 20 82 23 71C26 60 27 45 28 34Z"
+          strokeWidth="4"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <path
+          d="M74 31C88 33 94 53 90 75C88 83 80 82 77 71C74 60 73 45 72 34Z"
+          strokeWidth="4"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <circle cx="50" cy="48" r="27" />
+        <path d="M25 63C25 50 35 45 50 45C65 45 75 50 75 63C75 78 64 86 50 86C36 86 25 78 25 63Z" />
       </>
     ),
-    eyes: [50, 52],
+    eyes: [50, 48],
+    eyeSpacing: 9.5,
+    mouthOffset: 18,
   },
   rabbit: {
     body: (
       <>
-        <rect x="27" y="4" width="17" height="46" rx="8.5" transform="rotate(-10 35 40)" />
-        <rect x="56" y="4" width="17" height="46" rx="8.5" transform="rotate(10 65 40)" />
-        <ellipse cx="50" cy="64" rx="34" ry="29" />
+        <path
+          d="M27 54L24 12Q29 5 38 12L44 52Z"
+          strokeWidth="5"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <path
+          d="M73 54L76 12Q71 5 62 12L56 52Z"
+          strokeWidth="5"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <path className="ba-cutout" d="M30 20Q31 12 35 17L39 46L34 48Z" />
+        <path className="ba-cutout" d="M70 20Q69 12 65 17L61 46L66 48Z" />
+        <ellipse cx="50" cy="65" rx="33" ry="27" />
       </>
     ),
-    eyes: [50, 63],
+    eyes: [50, 64],
+    mouthOffset: 15,
   },
   panda: {
     body: (
@@ -138,7 +166,7 @@ const SHAPES: Record<
         <circle cx="24" cy="24" r="15" />
         <circle cx="76" cy="24" r="15" />
         <ellipse cx="50" cy="57" rx="39" ry="35" />
-        <ellipse className="ba-cutout" cx="50" cy="57" rx="32" ry="28" />
+        <ellipse className="ba-white" cx="50" cy="57" rx="32" ry="28" />
         <ellipse cx="34" cy="51" rx="11" ry="14" transform="rotate(24 34 51)" />
         <ellipse cx="66" cy="51" rx="11" ry="14" transform="rotate(-24 66 51)" />
       </>
@@ -175,6 +203,64 @@ const SHAPES: Record<
       </>
     ),
     eyes: [50, 43],
+    mouthOffset: 28,
+  },
+  bear: {
+    body: (
+      <>
+        <circle cx="27" cy="28" r="10" />
+        <circle cx="73" cy="28" r="10" />
+        <circle className="ba-cutout" cx="27.5" cy="29" r="4" />
+        <circle className="ba-cutout" cx="72.5" cy="29" r="4" />
+        <path d="M14 58C14 34 29 24 50 24C71 24 86 34 86 58C87 79 72 88 50 88C28 88 13 79 14 58Z" />
+      </>
+    ),
+    eyes: [50, 52],
+    eyeSpacing: 10.5,
+    mouthOffset: 18,
+  },
+  fox: {
+    body: (
+      <>
+        <path
+          d="M21 51L15 13Q19 6 30 13L49 38Z"
+          strokeWidth="5"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <path
+          d="M79 51L85 13Q81 6 70 13L51 38Z"
+          strokeWidth="5"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <path className="ba-cutout" d="M25 29L22 14L39 33Z" />
+        <path className="ba-cutout" d="M75 29L78 14L61 33Z" />
+        <path d="M17 50C20 31 33 24 50 24C67 24 80 31 83 50C85 65 69 78 50 91C31 78 15 65 17 50Z" />
+      </>
+    ),
+    eyes: [50, 49],
+    mouthOffset: 22,
+  },
+  elephant: {
+    body: (
+      <>
+        <path d="M46 35C22 20 6 34 9 59C12 78 27 81 44 63Z" />
+        <path d="M54 35C78 20 94 34 91 59C88 78 73 81 56 63Z" />
+        <ellipse cx="50" cy="43" rx="26" ry="26" />
+        <path
+          d="M43 63C40 77 39 87 48 92C57 95 66 89 61 82C56 86 55 77 55 63Z"
+          strokeWidth="5"
+          strokeLinejoin="round"
+          className="ba-stroke ba-fillstroke"
+        />
+        <path className="ba-white" d="M31 62Q27 73 33 74Q37 66 31 62Z" />
+        <path className="ba-white" d="M69 62Q73 73 67 74Q63 66 69 62Z" />
+      </>
+    ),
+    eyes: [50, 38],
+    eyeSpacing: 8.5,
+    mouthOffset: 16,
   },
 };
 
@@ -389,7 +475,7 @@ export function BotAvatar({
   const follow = followPointer === false || tier !== "full" ? false : (followPointer ?? "hover");
   useAvatarGaze(ref, leanRef, gazeRef, { follow, expression: shown, size, hop });
   const badge = tier === "static" ? BADGE[shown] : undefined;
-  const mouthOffset = shape === "cow" ? 28 : 16;
+  const mouthOffset = s.mouthOffset ?? 16;
   const face = { x, y, eyeSpacing: s.eyeSpacing, eyeHeight: s.eyeHeight };
   return (
     <svg

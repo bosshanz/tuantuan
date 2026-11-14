@@ -1,19 +1,53 @@
 import { useEffect, useRef, useState } from "react";
-import { AVATAR_COLORS, type AvatarShape, SELECTABLE_AVATAR_SHAPES, SHAPE_LABEL } from "../../server/avatars";
+import {
+  AVATAR_COLORS,
+  type AvatarShape,
+  isSelectableAvatarShape,
+  SELECTABLE_AVATAR_SHAPES,
+  SHAPE_LABEL,
+} from "../../server/avatars";
 import { EXPRESSIONS, type Expression } from "./avatarState";
 import { BotAvatar } from "./BotAvatar";
 import { useI18n } from "./i18n";
 import { usePresence } from "./motion";
 
+export function nextPickerIndex(
+  index: number,
+  key: string,
+  total: number,
+  cols: number,
+  hasHeaderSlot = false,
+): number | null {
+  if (total <= 0 || index < 0 || index >= total) return null;
+  if (key === "ArrowRight") return (index + 1) % total;
+  if (key === "ArrowLeft") return (index - 1 + total) % total;
+  if (!hasHeaderSlot) {
+    if (key === "ArrowDown") return (index + cols) % total;
+    if (key === "ArrowUp") return (index - cols + total) % total;
+    return null;
+  }
+  const gridCount = total - 1;
+  if (gridCount <= 0) return 0;
+  const lastRowStart = 1 + Math.floor((gridCount - 1) / cols) * cols;
+  if (key === "ArrowDown") {
+    if (index === 0) return 1;
+    return index + cols < total ? index + cols : 0;
+  }
+  if (key === "ArrowUp") {
+    if (index === 0) return lastRowStart;
+    return index - cols >= 1 ? index - cols : 0;
+  }
+  return null;
+}
+
 /** Radio-group keyboard model: arrows move within the group, Tab leaves it. */
-function arrowNav(e: React.KeyboardEvent<HTMLDivElement>, cols: number) {
+function arrowNav(e: React.KeyboardEvent<HTMLDivElement>, cols: number, hasHeaderSlot = false) {
   const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("[role=radio]")];
   const i = items.indexOf(document.activeElement as HTMLButtonElement);
-  if (i < 0) return;
-  const d = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[e.key];
-  if (!d) return;
+  const nextIndex = nextPickerIndex(i, e.key, items.length, cols, hasHeaderSlot);
+  if (nextIndex === null) return;
   e.preventDefault();
-  const next = items[(i + d + items.length) % items.length];
+  const next = items[nextIndex];
   next?.focus();
   next?.click();
 }
@@ -38,7 +72,19 @@ export function AvatarPicker(props: {
   }, [hover]);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const focusShape = SELECTABLE_AVATAR_SHAPES.find((s) => s === props.shape) ?? SELECTABLE_AVATAR_SHAPES[0];
+  // Keep a retired saved shape visible while the popover stays open so clicking options does not resize it or trap edits.
+  const [pinnedRetired, setPinnedRetired] = useState<AvatarShape | null>(() =>
+    isSelectableAvatarShape(props.shape) ? null : props.shape,
+  );
+  useEffect(() => {
+    if (!open) {
+      setPinnedRetired(isSelectableAvatarShape(props.shape) ? null : props.shape);
+      return;
+    }
+    if (!isSelectableAvatarShape(props.shape)) setPinnedRetired(props.shape);
+  }, [open, props.shape]);
+  const retired = isSelectableAvatarShape(props.shape) ? pinnedRetired : props.shape;
+  const focusShape = props.shape;
   useEffect(() => {
     if (!open) return;
     root.current?.querySelector<HTMLButtonElement>('.shape-opt[tabindex="0"]')?.focus();
@@ -50,6 +96,30 @@ export function AvatarPicker(props: {
     setOpen(false);
     trigger.current?.focus();
   };
+  const shapeOpt = (s: AvatarShape) => (
+    // biome-ignore lint/a11y/useSemanticElements: visual swatch radios; native radio inputs cannot render the shape
+    <button
+      key={s}
+      type="button"
+      role="radio"
+      aria-checked={props.shape === s}
+      aria-label={t(SHAPE_LABEL[s])}
+      tabIndex={focusShape === s ? 0 : -1}
+      className="shape-opt"
+      onClick={() => props.onChange(s, props.color)}
+      onMouseEnter={() => setHoverShape(s)}
+      onMouseLeave={() => setHoverShape(null)}
+    >
+      <BotAvatar
+        shape={s}
+        color={props.color}
+        size={36}
+        animate={hoverShape === s}
+        expression={hoverShape === s ? "happy" : "idle"}
+        pulse={hoverShape === s ? s : undefined}
+      />
+    </button>
+  );
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: Escape closes the popover; controls inside are buttons
     <div
@@ -96,31 +166,9 @@ export function AvatarPicker(props: {
               {t("重置")}
             </button>
           </div>
-          <div className="shape-grid" role="radiogroup" aria-label={t("形状")} onKeyDown={(e) => arrowNav(e, 5)}>
-            {SELECTABLE_AVATAR_SHAPES.map((s) => (
-              // biome-ignore lint/a11y/useSemanticElements: visual swatch radios; native radio inputs cannot render the shape
-              <button
-                key={s}
-                type="button"
-                role="radio"
-                aria-checked={props.shape === s}
-                aria-label={t(SHAPE_LABEL[s])}
-                tabIndex={focusShape === s ? 0 : -1}
-                className="shape-opt"
-                onClick={() => props.onChange(s, props.color)}
-                onMouseEnter={() => setHoverShape(s)}
-                onMouseLeave={() => setHoverShape(null)}
-              >
-                <BotAvatar
-                  shape={s}
-                  color={props.color}
-                  size={36}
-                  animate={hoverShape === s}
-                  expression={hoverShape === s ? "happy" : "idle"}
-                  pulse={hoverShape === s ? s : undefined}
-                />
-              </button>
-            ))}
+          <div role="radiogroup" aria-label={t("形状")} onKeyDown={(e) => arrowNav(e, 5, !!retired)}>
+            {retired && <div className="shape-current">{shapeOpt(retired)}</div>}
+            <div className="shape-grid">{SELECTABLE_AVATAR_SHAPES.map((s) => shapeOpt(s))}</div>
           </div>
           <div className="color-grid" role="radiogroup" aria-label={t("颜色")} onKeyDown={(e) => arrowNav(e, 7)}>
             {AVATAR_COLORS.map((c) => (

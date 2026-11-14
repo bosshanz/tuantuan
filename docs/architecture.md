@@ -53,7 +53,7 @@
 | `web/src/Onboarding.tsx` / `Setup.tsx` / `Registry.tsx` | 首次引导（一页三步）；Harness 管理页；「更多 Agent」（Registry 列表、安装、握手、图标） |
 | `desktop/` | Electron 壳：主进程启动随包 Bun 服务端（子进程组、`/api/health`、父进程看门狗）、单实例、菜单、preload（文件夹对话框、全屏状态、`revealPath` 系统文件管理器定位）；`scripts/` 打包（stage / electron-builder / afterPack）与 Xvfb 冒烟 |
 | `desktop/src/power.ts` / `shared/desktopPower.ts` | 桌面任务防休眠：主进程拥有唯一 prevent-app-suspension 实例，监听全局 activity 并用全部房间快照校准；增量覆盖在途旧快照，断线释放并重连恢复。偏好保存到 userData/settings.json，preload 只提供状态与开关 |
-| `server/avatars.ts` | 头像轮廓与颜色定义、按 Agent id 的确定性默认头像（FNV-1a），前后端共用 |
+| `server/avatars.ts` | 头像轮廓（11 种新选 + 11 种已退场兼容共 22 种）与颜色定义、按 Agent id 的确定性默认头像（`defaultAvatar` / `newAgentAvatar`，FNV-1a），前后端共用 |
 | `web/src/*` | React 前端：哈希路由、三栏布局、Agent 编辑、聊天视图、Cmd+K；样式为手写 CSS 变量（无 Tailwind），主题 token（颜色、圆角、阴影、字体）在 `styles.css` 顶部；字体由 `@fontsource-variable/plus-jakarta-sans` 自托管 |
 | `web/src/BotAvatar.tsx` / `avatarGaze.ts` / `avatarState.ts` / `AvatarPicker.tsx` | SVG Bot 头像（轮廓 + 表情 + 仅 transform 的动画）、共享指针监听与弹簧跟随、消息/成员状态 → 表情映射、头像选择器；预览页 `#/dev/avatars` |
 | `web/src/chatState.ts` | ChatView 的服务端投影视图 reducer：只落地当前房间最新请求的快照，重放请求期间的运行状态 / 会话 / 权限 / 终端事件；完成或失败即释放事件日志 |

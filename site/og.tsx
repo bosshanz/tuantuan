@@ -50,6 +50,7 @@ html,body{margin:0;width:1200px;height:630px;overflow:hidden;background:#f5f5f3}
 .og h1{margin:26px 0 0;font-size:76px;line-height:1.05;font-weight:800;letter-spacing:-.035em;color:#18181a}
 .og p{margin:16px 60px 0;font-size:31px;font-weight:650;letter-spacing:-.01em;color:#55555b}
 .og-bots{display:flex;gap:26px;margin-top:44px}
+.og .bot-avatar{--ba-bg:#f5f5f3}
 .og-url{position:absolute;bottom:34px;font-size:20px;font-weight:600;color:#d03b20}
 `;
 

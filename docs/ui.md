@@ -63,11 +63,11 @@ Agent 默认设置和输入框旁的思考选项以 Harness 实际返回为准�
 ![输入框旁的模型选择](screenshots/model-picker.png)
 
 - 现代简洁风格：干净的中性底色（浅色近白 / 深色石墨），品牌色是 Logo 里的番茄珊瑚红，只用在关键动作和状态上；Agent 头像用鲜亮的彩色区分。字体为 Plus Jakarta Sans（已自托管）+ 苹方，浅色/深色跟随系统。设置开关以当前主题强调色表示开启，关闭和禁用使用中性灰，滑块在深浅主题下均保持清晰。
-- Agent 头像是 SVG Bot（11 种可选轮廓 × 13 种颜色，含小猫、小狗、兔子、熊猫、山羊、牛），默认按 Agent id 生成，在编辑页点击头像修改。已保存的旧造型仍可显示和保存。头像保持卡通风格，按下表的「表情 + 动作」组合姿态表达状态；标题岛的空闲头像在悬停或键盘聚焦时呈现好奇表情，工作中的状态优先。预览全部状态：`/#/dev/avatars`。
+- Agent 头像是 SVG Bot（11 种可选轮廓 × 13 种颜色，含 5 种几何造型与小猫、小狗、兔子、小熊、狐狸、小象），新建 Agent 按 id 从可选集确定性生成，在编辑页点击头像修改。未存头像字段的既有 Agent 保持 `defaultAvatar` 回填，已退场旧造型（熊猫、山羊、牛及 8 种旧几何造型）仍兼容显示与保存，并在选择器顶部单独固定展示一行。内耳/鼻孔使用 `.ba-cutout` 适配深浅背景色，熊猫脸与象牙使用 `.ba-white` 保持纯白，系统通知图标亦保持白色描边与不穿孔填充。头像保持卡通风格，按下表的「表情 + 动作」组合姿态表达状态；标题岛的空闲头像在悬停或键盘聚焦时呈现好奇表情，工作中的状态优先。预览全部状态：`/#/dev/avatars`。
 
 ### Bot 头像状态
 
-状态由 `web/src/avatarState.ts` 统一推导（`avatarState` / `agentActivity` / `roomAvatarState`），绘制在 `BotAvatar.tsx`，循环与一次性动作仍只在 `styles.css` 的 bot avatar 段落按 `data-expr` / `data-tier` / `data-anim` 定义；指针跟随由 `avatarGaze.ts` 写在 `.ba-gaze`（仅眼睛）和 `.ba-lean`（身体与嘴）的 transform 上，静止时清除，避免和 CSS 抢同一层。表情画在共用的脸部层，动作作用在整个头像组上，所以 19 种轮廓行为一致。
+状态由 `web/src/avatarState.ts` 统一推导（`avatarState` / `agentActivity` / `roomAvatarState`），绘制在 `BotAvatar.tsx`，循环与一次性动作仍只在 `styles.css` 的 bot avatar 段落按 `data-expr` / `data-tier` / `data-anim` 定义；指针跟随由 `avatarGaze.ts` 写在 `.ba-gaze`（仅眼睛）和 `.ba-lean`（身体与嘴）的 transform 上，静止时清除，避免和 CSS 抢同一层。表情画在共用的脸部层，动作作用在整个头像组上，所以全部轮廓行为一致。
 
 | 状态 | 触发 | 表情 | 动作（≥28px） |
 | --- | --- | --- | --- |
