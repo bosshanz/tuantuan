@@ -44,7 +44,7 @@ export interface HarnessInfo {
   auth: string;
   login: string;
   docs: string;
-  identity: "claude-meta" | "grok-meta" | "codex-env" | "first-prompt";
+  identity: "claude-meta" | "antigravity-meta" | "grok-meta" | "codex-env" | "first-prompt";
 }
 
 export interface Meta {
@@ -55,6 +55,7 @@ export interface Meta {
 
 export const IDENTITY_DELIVERY: Record<HarnessInfo["identity"], string> = {
   "claude-meta": "追加到系统提示",
+  "antigravity-meta": "支持时追加到原生系统提示，否则随首条普通消息传入",
   "grok-meta": "作为系统规则追加（_meta.rules）",
   "codex-env": "作为 developer_instructions（CODEX_CONFIG 环境变量）",
   "first-prompt": "放在每个新会话的第一条消息前",

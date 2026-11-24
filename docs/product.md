@@ -2,24 +2,24 @@
 
 ## 用户任务
 
-1. 用编码 Harness（Claude Code / Codex / DeepSeek / Grok Build / OpenCode / Pi / MiniMax Code，或 ACP Registry 里的其他 Agent）组合出不同角色的 Agent：Harness、身份文档、Skills、服务商、MCP 服务器、环境变量、权限策略。
+1. 用编码 Harness（Claude Code / Codex / Google Antigravity / DeepSeek / Grok Build / OpenCode / Pi / MiniMax Code，或 ACP Registry 里的其他 Agent）组合出不同角色的 Agent：Harness、身份文档、Skills、服务商、MCP 服务器、环境变量、权限策略。
 2. 按项目组织会话：单 Agent 会话直接对话；多 Agent 会话不 @ 时由群主（主 Agent）负责分工、跟进、接收结果和最终汇总，明确 @ 成员仍然直接对话，@所有人 时每个都回答。
 3. 完整看到 Harness 的能力：流式回复、思考、工具调用（diff / 终端）、计划、权限请求、配置项、斜杠命令、图片、会话历史、用量。
 
 ## 业务规则
 
-- 模型列表以 Harness 实际返回的选项为准。登录成功、额度可查询与某个模型可选是独立状态；本机 Antigravity ACP 1.4.0 对团团只返回 Gemini，不据此声称 Antigravity 所有客户端都不支持 Opus。
+- 模型列表以 Harness 实际返回的选项为准。Google Antigravity 的模型、思考等级与模式来自当前选择的 CLI 或 Registry 运行时。登录、模型可选、真实推理和额度查询分别由对应操作验证。
 - 团团不做模型路由；模型、原生登录由 Harness 管理。例外：「自定义 API（BYOK）」轻量 harness 只做对话。服务商按进程环境 / ACP 传给 Harness，不写用户文件。团团保存的服务商、BYOK 与 Harness `env_var` Key 当前为 SQLite 明文，专用接口只给前端掩码；普通 Agent 环境变量是可读写配置。系统钥匙串仍是未完成的计划。
 - 本机边界：API 默认监听 `127.0.0.1`，HTTP（含 MCP）和 WebSocket 升级都检查本机 Host、浏览器 Origin、跨站请求标记；兼容本机 Vite 代理及不带 Origin 的原生客户端。`TUANTUAN_HOST` 只改变监听地址，不提供远程鉴权或放宽请求检查。
 - 首次启动：一页三步引导（选 Harness 并可一键安装 → 需要时登录 → 给第一个 Agent 起名，创建后在「草稿」打开会话），随时可跳过，只出现一次。
-- Harness 来源：Harness 页填的绝对路径 → 用户自己装的（登录 shell 的 PATH）→ 团团内置（源码运行或 `TUANTUAN_BUNDLE_ADAPTERS=1` 的桌面包）→ 团团管理的固定版本。托管来源包括 ACP Registry 与明确标注来源的补充条目；DeepSeek 当前使用官方 npm 预发布包，不宣称已被上游 Registry 收录。一键安装只在用户点按钮后执行，不用 sudo、不装全局。
+- Harness 来源：Harness 页填的绝对路径 → 用户自己装的（登录 shell 的 PATH）→ 团团内置（源码运行或 `TUANTUAN_BUNDLE_ADAPTERS=1` 的桌面包）→ 团团管理的固定版本。Google Antigravity 新装直接运行本机 `agy acp`，已有 Registry 安装或自定义路径由用户显式切换，继续沿用同一个 Agent 绑定。托管来源包括 ACP Registry 与明确标注来源的补充条目；DeepSeek 当前使用官方 npm 预发布包，不宣称已被上游 Registry 收录。一键安装只在用户点按钮后执行，不用 sudo、不装全局。
 - DeepSeek：优先本机 `dsh`，按需安装官方 `@deepseek-ai/dsh@0.2.1-rc.2`，通过 `--profile acp` 连接，需要 Node ≥ 22.19，符合版本的本机 Node 优先，否则下载托管版本；不捆进桌面包。可填写 `DEEPSEEK_API_KEY` 或沿用原生凭据，不改写本机配置。成功握手不验证 Key，登录状态保持未知；可识别的真实认证失败仍显示未登录及错误。模型、推理、MCP、权限、取消与 resume 按实际能力，当前不支持 `session/load` 历史回放。团团原有 DeepSeek 服务商与此 Harness 独立。
 - Agent 名称唯一（不区分大小写），不能包含空白、`@`、反引号，也不能是 `所有人` / `all` / `everyone`；名称即 @ 的目标。
 - Harness 进程按会话 + Agent + 工作目录隔离，每对会话 / Agent 对应一个 ACP session，重启后按能力恢复（resume / load）。
 - 团团 ACP `fs/*` 按真实路径限制在会话工作目录内；当前 Agent 选中的 Skill 目录及附属文件额外允许只读，每轮替换，写入范围不变；拒绝符号链接逃逸。新文件按最近的现存父目录校验。ACP 终端只检查启动 `cwd`，命令本身仍以用户权限运行，不能保证其文件访问留在目录内；Harness 自带工具由自身权限 / 沙箱控制。旧说明将文件与终端都描述为完全受目录限制，范围过宽；当前不是操作系统沙箱，也不隔离校验后发生的并发文件系统变化。
 - 权限请求由 Harness 发起，选项来自 Harness；团团按 Agent 策略展示弹窗或自动选择允许选项。授权 POST 成功后关闭；失败保留原弹窗、显示错误并可重试，提交中禁止重复操作；404 表示请求已失效，关闭弹窗。
 - 提问卡片由 Harness 通过 ACP form elicitation 发起：团团只声明表单模式，不声明 URL 模式（URL 流程会离开团团、无法跟踪）。字段支持字符串（含枚举 / 选项列表）、数字、整数、布尔和多选数组，带必填、长度、格式、数值范围与选项校验；当前版本不认识的字段类型只读显示并阻止提交，只能取消。提问以输入框上方的内联卡片出现，默认收起，不遮挡页面或抢走输入焦点；展开后就地填写。少量枚举直接显示单选行，可选项允许清空；长表单在半屏以内滚动，底部操作始终可达。提交成功后关闭；校验失败定位到首个无效字段，服务端提交失败保留回答并可重试，提交中禁止重复提交。Tab 可自由离开提问；Escape 或摘要入口只收起卡片并保留回答，焦点回到摘要。用户明确取消提问、停止任务或进程退出才以 cancel 回应；切换会话或设置页不会取消提问，返回后保留本次应用运行中填写的答案。提问随房间快照恢复，刷新后仍在；未提交的表单值仅在本次应用运行中保留。OpenCode 会话默认启用其原生提问工具（`OPENCODE_ENABLE_QUESTION_TOOL=1`，显式配置优先）。
-- 身份文档保存在团团，不写入用户仓库：Claude 用 `_meta.systemPrompt.append`，Grok 用 `_meta.rules`，Codex 用进程环境 `CODEX_CONFIG.developer_instructions`，OpenCode / Pi 等其他 Harness 附加在新会话首条普通消息前。Claude Code、OpenCode、Pi、Codex 的基础提示词由实际启动的原生引擎提供，团团不维护固定副本；Codex 目录外模型的通用指令也从当前 CLI 读取。用户原生提示词配置、已有会话的提示词恢复与更新规则仍由 Harness 管理。
+- 身份文档保存在团团，不写入用户仓库：Claude 用 `_meta.systemPrompt.append`，Antigravity 在握手声明支持时用 `_meta.antigravity.systemPrompt.append`，Grok 用 `_meta.rules`，Codex 用进程环境 `CODEX_CONFIG.developer_instructions`，OpenCode / Pi 等其他 Harness 附加在新会话首条普通消息前。Claude Code、Codex、Google Antigravity、OpenCode、Pi 的基础提示词由实际启动的原生引擎提供，团团不维护固定副本；Codex 目录外模型的通用指令也从当前 CLI 读取。用户原生提示词配置、已有会话的提示词恢复与更新规则仍由 Harness 管理。
 - 项目：名称 + 目录（新建或选已有文件夹，根目录默认 `~/Tuantuan`）；未选项目时进「草稿」。普通会话共用项目目录，项目会话创建时也可选择独立 Git worktree。改项目目录会重置共享目录会话的 Harness 上下文，独立 worktree 会话保留原目录及上下文。
 - 独立 Git worktree：新建项目会话时可选择「在独立 Git worktree 中运行」。项目必须位于至少有一次提交的仓库，新 worktree 基于创建时的 HEAD，原目录未提交的修改不会带入。项目位于仓库子目录时保留相同的相对路径。会话成员和该会话内嵌终端使用同一 worktree，默认会话仍使用项目目录。会话详情显示目录和创建时分支；删除会话或项目保留 worktree 目录及分支，用户可在核对内容后自行清理。独立会话不能移动到其他项目。
 - 多 Agent 会话：
@@ -82,7 +82,7 @@
 - 项目终端：从会话右上角或 Ctrl+` 打开，停靠在会话下方；每个共享项目目录及每个独立 worktree 会话可用标签页多开交互式登录 shell，初始目录为对应会话目录。新增、切换、关闭单页互不影响；顶部可拖动或用方向键调整高度。收起、切换会话与浏览器刷新保留全部运行进程，重新打开恢复有限输出；最后一个终端结束后收起面板。项目改目录时回收共享项目终端，独立会话终端保留；删除独立 worktree 会话、删除项目或服务退出时回收所属终端。终端以本机用户权限运行，主动脱离任务遵循 shell 语义；当前支持 macOS / Linux，服务重启后不恢复进程。
 - 终端动效：面板连续展开 / 收起，快速反向操作从当前高度继续，文字保持原尺寸；首次加载和结束终端沿用同一布局过渡。拖动与键盘调整高度立即响应。收起后不再接收输入，焦点原本在终端内时回到工具栏；后台重连不抢焦点。减少动态效果时直接切换终态。聊天原本跟随底部时继续跟随，阅读历史消息时保持位置。
 - Grok 额度：刷新时通过它自己的 ACP billing 扩展只读查询周期额度、套餐和预付余额；本机会话 token / 花费仍单独显示。缺失或查询失败不记为零。额度区移除 OpenCode 的不支持占位卡，其他 OpenCode 功能保留。
-- Registry 额度：已安装或已绑定 Agent 的 Antigravity / ZCode 显示卡片，登录或握手成功后同步，也可单独刷新。Antigravity 只调用已声明且原生拦截的 `/usage`；ZCode 只调用 `account/usage_stats`。来源、查询时间与错误可见，缺失不记为零；缓存可恢复，打开页面不触发登录。ZCode 0.70.0 不支持团队套餐的认证与额度查询，个人渠道返回值不能代表团队余额，也不能仅凭 1113 提示用户充值。
+- Registry 额度：已安装或已绑定 Agent 的 Antigravity / ZCode 显示卡片，登录或握手成功后同步，也可单独刷新。Antigravity 从所选运行时的建会话响应提取套餐，只在该运行时声明原生 `/usage` 后查询额度窗口；切换来源后重新查询；ZCode 只调用 `account/usage_stats`。来源、查询时间与错误可见，缺失不记为零；缓存可恢复，打开页面不触发登录。ZCode 0.70.0 不支持团队套餐的认证与额度查询，个人渠道返回值不能代表团队余额，也不能仅凭 1113 提示用户充值。
 - 额度刷新等待 Harness 返回或达到查询超时，超过 10 秒不会被 HTTP 提前截断；查询失败在对应卡片显示。查询后清理进程的错误记入服务日志，不导致整个应用退出。
 - 阅读流式回复：主动向上滚动立即暂停自动跟随，后续文本和工具更新保留阅读位置；回到底部或点击「回到最新」才恢复。小幅触控板输入同样有效，终端开合和任务面板变化不能重新抢回滚动。
 - 时间线：思考（折叠）、工具卡片（状态、diff、终端输出）、计划清单、权限弹窗、提问卡片；输入 `/` 弹出 Harness 的斜杠命令；可附文件与图片，规则见下方「文件与图片附件」。「回复详情」面板除状态与工具名外还包含完整时间线，打开或关闭面板不改变聊天阅读位置。结论入口与输入框上方的 Agent 回复状态共用一栏，空闲时显示目标摘要；展开为向上浮出的非模态详情，可跳到来源消息。浮层不推动输入框，窄屏可读，长内容内部滚动。

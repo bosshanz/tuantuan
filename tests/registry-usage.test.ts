@@ -2,8 +2,9 @@ import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { shellQuote } from "../server/acp";
 import { serve } from "../server/app";
-import { resetLoginShellEnv } from "../server/harness";
+import { detectHarness, type HarnessStatus, harnessSpec, resetLoginShellEnv } from "../server/harness";
 import { parseAntigravityUsage, parseZcodeUsage, ZCODE_070_NOTE } from "../server/registry-usage";
 import type { HarnessUsage } from "../server/usage";
 import { agentInput, until } from "./helpers";
@@ -367,6 +368,10 @@ test("manual refresh single-flights; failed/unsupported queries clear old values
   saveConfig("antigravity-acp", { unsupported: true });
   await api("POST", "/api/usage/reg%3Aantigravity-acp/live");
   expect((await card("antigravity-acp"))?.limits).toEqual([]);
+  expect(await card("antigravity-acp")).toMatchObject({
+    plan: "Google AI Pro",
+    limitsSource: "Antigravity Registry ACP session/new",
+  });
   expect((await card("antigravity-acp"))?.notes.join(" ")).toContain("未声明 /usage");
   expect(methods("antigravity-acp").some((x) => x.method === "MODEL_CALL")).toBe(false);
   saveConfig("antigravity-acp", { unsupported: false, quotaError: true });
@@ -445,6 +450,132 @@ test("successful login queues a fresh quota read after an older unauthenticated 
     saveConfig(id, { authSensitive: false, delay: 35 });
   }
 });
+
+test.skipIf(process.platform === "win32")(
+  "native CLI selection, existing ACP overrides and quota stay on the same runtime",
+  async () => {
+    const id = "antigravity-acp";
+    const harness = `reg:${id}`;
+    const endpoint = `/api/harnesses/${harness}`;
+    const bin = join(scratch, ".local/bin");
+    mkdirSync(bin, { recursive: true });
+    const agy = join(bin, "agy");
+    const nativeLog = join(scratch, "native-calls");
+    const config = join(scratch, "native.json");
+    const launcher = join(bin, "previous acp launcher");
+    const gate = join(scratch, "finish-managed-refresh");
+    const commands = join(scratch, "cli-invocations");
+    const authFile = configs[id].authFile;
+    writeFileSync(authFile, "fixture");
+    writeFileSync(
+      config,
+      JSON.stringify({ authFile, markdown, plan: "Native account", model: "native-model", log: nativeLog }),
+    );
+    writeFileSync(
+      agy,
+      `#!/bin/sh
+echo "$*" >> ${shellQuote(commands)}
+case "$*" in
+  'acp --help') echo 'Usage: agy acp [flags]' >&2 ;;
+  '--version') echo '1.5.16' ;;
+  'acp') export MOCK_QUOTA_CONFIG=${shellQuote(config)}
+    exec ${shellQuote(process.execPath)} ${shellQuote(join(import.meta.dir, "fixtures/mock-registry-usage-agent.ts"))} ;;
+  *) exit 71 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(launcher, `#!/bin/sh\n[ "$#" -eq 0 ] || exit 72\nexec ${shellQuote(agy)} acp\n`, { mode: 0o755 });
+    const select = (path: string | null) => api("PUT", `${endpoint}/path`, { path });
+    const status = async () =>
+      ((await api("GET", "/api/harnesses")) as HarnessStatus[]).filter((h) => h.id === harness);
+    const currentModel = async () => (await api("GET", `${endpoint}/options`)).configOptions[0]?.currentValue;
+    let oldRefresh: Promise<unknown> | undefined;
+    try {
+      saveConfig(id, { model: "registry-model", plan: "Registry account", quotaError: false });
+      expect(await status()).toMatchObject([{ source: "managed", curated: true, nativeCliPath: agy, login: "" }]);
+      expect((await api("GET", "/api/registry")).agents.find((a: { id: string }) => a.id === id)).toMatchObject({
+        curated: true,
+        harnessId: harness,
+      });
+      current.app.store.setSetting(`registryQuota:${harness}`, { plan: "unattributed old plan", limits: [], at: 1 });
+      expect((await card(id))?.plan).toBeNull();
+      expect(await currentModel()).toBe("registry-model");
+      expect((await card(id))?.plan).toBe("Registry account");
+      const before = methods(id).length;
+      saveConfig(id, { usageGate: gate });
+      oldRefresh = api("POST", `/api/usage/${harness}/live`);
+      await until(() =>
+        methods(id)
+          .slice(before)
+          .some((call) => call.method === "prompt:/usage"),
+      );
+
+      await select(agy);
+      expect(await status()).toMatchObject([{ source: "override", command: agy, args: ["acp"], version: "1.5.16" }]);
+      expect((await card(id))?.limitsAt).toBeNull();
+      expect(await currentModel()).toBe("native-model");
+      const native = await card(id);
+      expect(native).toMatchObject({ plan: "Native account", limitsSource: "Antigravity CLI (agy acp) /usage" });
+      writeFileSync(gate, "release");
+      await oldRefresh;
+      expect((await card(id))?.limitsAt).toBe(native?.limitsAt);
+      expect((await card(id))?.plan).toBe("Native account");
+
+      const cliBefore = readFileSync(commands, "utf8");
+      await stop();
+      current = serve({ dbPath }, 0);
+      expect((await card(id))?.limitsAt).toBe(native?.limitsAt);
+      expect(readFileSync(commands, "utf8")).toBe(cliBefore); // reading the dashboard didn't start agy
+
+      await select(launcher);
+      expect(await status()).toMatchObject([{ source: "override", command: launcher, args: [], login: "" }]);
+      expect((await card(id))?.limitsAt).toBeNull();
+      expect(await currentModel()).toBe("native-model");
+      await select(join(bin, "missing"));
+      expect(await status()).toMatchObject([{ command: null }]); // explicit paths never fall through
+      await select(null);
+      expect(await status()).toMatchObject([{ source: "managed" }]);
+
+      // A chat using the legacy account must give login guidance for that same source.
+      const agent = current.app.store.createAgent(agentInput("LegacyLogin", { harness }));
+      const project = current.app.store.createProject("Legacy login check", scratch);
+      const room = current.app.store.createRoom("Legacy login", [agent.id], { projectId: project.id });
+      rmSync(authFile);
+      try {
+        await expect(current.app.host.session(room, agent, "")).rejects.toThrow(
+          "按握手结果里 Agent 自己声明的方式登录",
+        );
+      } finally {
+        writeFileSync(authFile, "fixture");
+        current.app.host.dropHarness(harness);
+        current.app.store.deleteAgent(agent.id);
+      }
+
+      // A clean installation detects the native CLI without a wrapper or a stored override.
+      const spec = harnessSpec(harness);
+      if (!spec) throw new Error("Missing curated Antigravity spec");
+      const manifest = join(dirname(dbPath), "harnesses/agents", id, "manifest.json");
+      const previous = readFileSync(manifest);
+      rmSync(manifest);
+      try {
+        expect(await detectHarness(spec, null)).toMatchObject({ source: "path", command: agy, args: ["acp"] });
+        expect(await card(id)).toBeDefined();
+        writeFileSync(agy, "#!/bin/sh\necho 'Usage: agy'\n");
+        expect(await detectHarness(spec, null)).toMatchObject({ command: null, error: expect.stringContaining("acp") });
+      } finally {
+        writeFileSync(manifest, previous);
+      }
+    } finally {
+      writeFileSync(gate, "release");
+      if (oldRefresh) await oldRefresh.catch(() => undefined);
+      rmSync(agy, { force: true });
+      current.app.store.setSetting("harnessPaths", {});
+      saveConfig(id, { usageGate: null });
+    }
+  },
+  30_000,
+);
 
 test("only supported installed/configured registry harnesses get cards", async () => {
   for (const id of ids) rmSync(join(dirname(dbPath), "harnesses/agents", id, "manifest.json"));

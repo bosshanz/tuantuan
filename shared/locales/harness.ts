@@ -1,6 +1,33 @@
 import type { MessageCatalog } from "./types";
 
 export const harnessMessages = {
+  "支持时追加到原生系统提示，否则随首条普通消息传入": {
+    "zh-TW": "支援時附加到原生系統提示，否則隨第一則一般訊息傳入",
+    en: "Append to the native system prompt when supported, otherwise include in the first regular message",
+    ja: "対応時はネイティブのシステムプロンプトに追加し、それ以外は最初の通常メッセージに含めます",
+  },
+  "Registry 兼容版本": { "zh-TW": "Registry 相容版本", en: "Registry compatibility version", ja: "Registry 互換版" },
+  "使用本机 agy acp": { "zh-TW": "使用本機 agy acp", en: "Use local agy acp", ja: "ローカルの agy acp を使う" },
+  "切回 Registry 兼容版本": {
+    "zh-TW": "切回 Registry 相容版本",
+    en: "Switch to the Registry version",
+    ja: "Registry 互換版に戻す",
+  },
+  "agy 或 ACP 启动器的绝对路径": {
+    "zh-TW": "agy 或 ACP 啟動器的絕對路徑",
+    en: "Absolute path to agy or an ACP launcher",
+    ja: "agy または ACP ランチャーの絶対パス",
+  },
+  "当前 agy 未提供可用的 acp 子命令，请更新 Antigravity CLI": {
+    "zh-TW": "目前的 agy 未提供可用的 acp 子命令，請更新 Antigravity CLI",
+    en: "This agy does not provide a usable acp subcommand. Update Antigravity CLI.",
+    ja: "この agy では acp サブコマンドを使えません。Antigravity CLI を更新してください。",
+  },
+  "使用 Antigravity CLI 已登录的账号，或运行 agy acp --login": {
+    "zh-TW": "使用 Antigravity CLI 已登入的帳號，或執行 agy acp --login",
+    en: "Use your Antigravity CLI sign-in or run agy acp --login.",
+    ja: "Antigravity CLI のログインを使用するか、agy acp --login を実行してください。",
+  },
   团团补充目录: { "zh-TW": "團團補充目錄", en: "Tuantuan additions", ja: "Tuantuan 追加カタログ" },
   及团团补充目录: { "zh-TW": "及團團補充目錄", en: "and Tuantuan additions", ja: "および Tuantuan 追加カタログ" },
   "团团补充的官方 npm 预发布包 @deepseek-ai/dsh@0.2.1-rc.2（需要 Node ≥ 22.19）": {

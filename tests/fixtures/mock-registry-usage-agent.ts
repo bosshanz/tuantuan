@@ -10,6 +10,9 @@ const config = () =>
     unsupported?: boolean;
     delay?: number;
     usageDelay?: number;
+    usageGate?: string;
+    plan?: string;
+    model?: string;
     markdown?: string;
     quotaError?: boolean;
     initializeError?: boolean;
@@ -56,7 +59,22 @@ acp
         },
       });
     }, c.delay ?? 25);
-    return { sessionId, _meta: { antigravity: { tier: { name: "Google AI Pro", id: "pro" } } } };
+    return {
+      sessionId,
+      configOptions: c.model
+        ? [
+            {
+              id: "model",
+              name: "Model",
+              category: "model",
+              type: "select",
+              currentValue: c.model,
+              options: [{ value: c.model, name: c.model }],
+            },
+          ]
+        : [],
+      _meta: { antigravity: { tier: { name: c.plan ?? "Google AI Pro", id: "pro" } } },
+    };
   })
   .onRequest("account/usage_stats", { parse: () => ({}) }, async () => {
     record("account/usage_stats");
@@ -86,6 +104,8 @@ acp
     if (config().quotaError) throw acp.RequestError.internalError(undefined, "fixture failure");
     const usageDelay = config().usageDelay;
     if (usageDelay) await Bun.sleep(usageDelay);
+    const gate = config().usageGate;
+    if (gate) while (!existsSync(gate)) await Bun.sleep(10);
     await ctx.client.notify(acp.methods.client.session.update, {
       sessionId: ctx.params.sessionId,
       update: {

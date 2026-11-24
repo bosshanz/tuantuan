@@ -8,7 +8,7 @@
 
 **一群 Agent，团团协作。** 本机多 Agent 协作工作台。
 
-把 Claude Code、Codex、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code，以及其他编码 Agent 放进按项目组织的会话。团团通过 [Agent Client Protocol（ACP）](https://agentclientprotocol.com)连接这些编码运行时（Harness）。
+把 Claude Code、Codex、Google Antigravity、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code，以及其他编码 Agent 放进按项目组织的会话。团团通过 [Agent Client Protocol（ACP）](https://agentclientprotocol.com)连接这些编码运行时（Harness）。
 
 可使用 macOS、Windows、Linux 的 Electron 桌面版，或浏览器 + 本机服务。模型由你自己的 Harness 账号或 API 服务商提供，团团不自带模型服务。
 

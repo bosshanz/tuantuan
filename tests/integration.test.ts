@@ -457,6 +457,7 @@ describe("ACP harness integration (mock ACP agent)", () => {
     expect(list.map((h) => h.id)).toEqual([
       "claude-code",
       "codex",
+      "reg:antigravity-acp",
       "grok",
       "opencode",
       "pi",

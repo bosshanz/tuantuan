@@ -18,8 +18,14 @@ interface Probe {
 }
 
 /** Curated harnesses (+ the test harness when TUANTUAN_MOCK_HARNESS=1). */
-const FIRST = ["claude-code", "codex", "grok", "opencode", "pi", "minimax", "deepseek", "mock"];
-const SHORT: Record<string, string> = { "claude-code": "Claude", codex: "Codex", grok: "Grok", opencode: "OpenCode" };
+const FIRST = ["claude-code", "codex", "reg:antigravity-acp", "grok", "opencode", "pi", "minimax", "deepseek", "mock"];
+const SHORT: Record<string, string> = {
+  "claude-code": "Claude",
+  codex: "Codex",
+  "reg:antigravity-acp": "Antigravity",
+  grok: "Grok",
+  opencode: "OpenCode",
+};
 
 /** A successful connection with unknown credentials may continue; an explicit failure may not. */
 export function onboardingAuthState(probe: Probe | "running" | null) {
