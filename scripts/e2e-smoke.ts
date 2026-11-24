@@ -1160,14 +1160,13 @@ try {
   await page.locator('.chat-head .title-pill[aria-expanded="true"]').waitFor();
   await page.getByRole("heading", { name: "会话信息", exact: true }).waitFor();
   await showReplyDetails(lastReply);
+  // Offscreen avatars can pause mid-animation. Only running finite animations affect settling.
   const settle = () =>
-    page.evaluate(() =>
-      Promise.all(
-        document
+    page.waitForFunction(
+      () =>
+        !document
           .getAnimations()
-          .filter((a) => a.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY)
-          .map((a) => a.finished.catch(() => undefined)),
-      ),
+          .some((a) => a.playState === "running" && a.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY),
     );
   await settle();
   // Alignment: the chat controls share a line, sidebar edges align, and headers do not collide.
@@ -1189,7 +1188,7 @@ try {
     const main = r(document.querySelector(".chat-head"));
     if (!pill || !main) out.push("missing title pill");
     else {
-      near(main.top, 8, "chat header top offset");
+      near(main.top, 0, "chat header aligned to top");
       near(pill.top + pill.height / 2, main.top + main.height / 2, "title pill centred on header line");
       near(pill.left + pill.width / 2, main.left + main.width / 2, "title pill centred");
       const action = r(document.querySelector(".chat-head-actions button"));
