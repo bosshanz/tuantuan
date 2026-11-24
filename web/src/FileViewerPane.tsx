@@ -77,6 +77,8 @@ export function FileViewerPane(props: {
   gitStepPrev?: (() => void) | null;
   gitStepNext?: (() => void) | null;
   agentChange?: SessionFileChange | null;
+  /** Restrict reported edits to this original user request. */
+  editsRunId?: string;
   revision: string;
   refreshToken: number;
   compact: boolean;
@@ -310,17 +312,17 @@ export function FileViewerPane(props: {
       setEditsLoading(false);
       return;
     }
-    if (editsFor.current !== selection.path) {
-      editsFor.current = selection.path;
+    const editsKey = `${roomId}:${props.editsRunId ?? "all"}:${selection.path}`;
+    if (editsFor.current !== editsKey) {
+      editsFor.current = editsKey;
       setEditsDetail(null);
     }
     let live = true;
     setEditsLoading(true);
     setEditsError(null);
-    api<SessionChangeDetailResponse>(
-      "GET",
-      `/api/rooms/${encodeURIComponent(roomId)}/changes/detail?path=${encodeURIComponent(selection.path)}`,
-    )
+    const query = new URLSearchParams({ path: selection.path });
+    if (props.editsRunId) query.set("runId", props.editsRunId);
+    api<SessionChangeDetailResponse>("GET", `/api/rooms/${encodeURIComponent(roomId)}/changes/detail?${query}`)
       .then((value) => {
         if (live) setEditsDetail(value);
       })
@@ -340,6 +342,7 @@ export function FileViewerPane(props: {
     roomId,
     selection?.kind === "workspace" ? selection.path : "",
     effectiveLens,
+    props.editsRunId,
     props.revision,
     props.refreshToken,
   ]);
@@ -456,7 +459,12 @@ export function FileViewerPane(props: {
       ? gitDetail
       : null;
   const displayedEdits =
-    selection.kind === "workspace" && editsDetail && editsDetail.path === selection.path ? editsDetail : null;
+    selection.kind === "workspace" &&
+    editsFor.current === `${roomId}:${props.editsRunId ?? "all"}:${selection.path}` &&
+    editsDetail &&
+    editsDetail.path === selection.path
+      ? editsDetail
+      : null;
   const patchLines =
     displayedGit?.state === "text" && displayedGit.section !== "untracked" ? displayedGit.content?.split("\n") : null;
 

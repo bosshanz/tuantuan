@@ -9,6 +9,7 @@ import { IMAGE_MIME_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT } from "..
 import { missingKeyVar } from "../shared/auth";
 import { translate } from "../shared/i18n";
 import { type GlobalEvent, notifyForMessage, preview } from "../shared/notify";
+import { worktreeTerminalKey } from "../shared/project-terminal";
 import { messagePreview } from "../shared/roomPreview";
 import { messageWithdrawn, replayTurns } from "../shared/timeline";
 import { AcpProcess, shellQuote, withTimeout } from "./acp";
@@ -71,7 +72,7 @@ import {
   registryUsageSource,
   ZCODE_070_NOTE,
 } from "./registry-usage";
-import { handleSessionChangeDetail, handleSessionChanges } from "./session-changes";
+import { handleSessionChangeDetail, handleSessionChangeRequests, handleSessionChanges } from "./session-changes";
 import * as skills from "./skills";
 import { type AgentInput, PERMISSION_POLICIES, Store, ValidationError } from "./store";
 import { TuantuanMcp } from "./tuantuan-mcp";
@@ -100,6 +101,7 @@ import {
   handleWorkspaceSearch,
   handleWorkspaceTree,
 } from "./workspace-files";
+import { createRoomWorktree, validateRoomWorktree } from "./worktrees";
 
 const CustomSchema = z.object({
   format: z.enum(CUSTOM_FORMATS),
@@ -148,6 +150,7 @@ const RoomInputSchema = z.object({
   agentIds: z.array(z.string()).min(1, "至少选择 1 个 Agent"),
   mainAgentId: z.string().nullable().optional(),
   projectId: z.string().optional(),
+  worktree: z.boolean().optional(),
 });
 
 const ProjectInputSchema = z.object({
@@ -211,6 +214,7 @@ export function createApp(deps: AppDeps) {
   const store = new Store(deps.dbPath);
   const projectTerminals = new ProjectTerminals();
   const changingProjects = new Set<string>();
+  const creatingWorktrees = new Map<string, number>();
   const dataDir =
     deps.dbPath === ":memory:" ? join(tmpdir(), `tuantuan-data-${process.pid}`) : dirname(resolve(deps.dbPath));
   let server: Server<WsData> | null = null;
@@ -1015,6 +1019,43 @@ export function createApp(deps: AppDeps) {
     return { room, agent, identity: orchestrator.identityFor(room, agent) };
   }
 
+  async function handleTerminal(req: Request, url: URL, projectId: string, roomId?: string): Promise<Response> {
+    const owner = roomId ? worktreeTerminalKey(roomId) : projectId;
+    if (req.method === "GET")
+      return json(
+        url.searchParams.get("all") === "1" ? projectTerminals.list(owner) : projectTerminals.forProject(owner),
+      );
+    if (req.method === "DELETE") {
+      const terminalId = url.searchParams.get("terminalId");
+      if (!terminalId) throw new ValidationError("缺少 terminalId");
+      await projectTerminals.remove(owner, terminalId);
+      return json({ ok: true });
+    }
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    const text = await req.text();
+    const size = z
+      .object({ cols: z.number().optional(), rows: z.number().optional(), create: z.boolean().optional() })
+      .parse(text ? JSON.parse(text) : {});
+    const env = await loginShellEnv();
+    // Re-read the owner after the asynchronous shell lookup, immediately before opening a PTY.
+    if (changingProjects.has(projectId)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
+    const project = store.getProject(projectId);
+    if (!project) throw new ValidationError("项目不存在", 404);
+    let cwd = project.cwd;
+    if (roomId) {
+      const room = store.getRoom(roomId);
+      if (!room?.worktree || room.projectId !== projectId) throw new ValidationError("房间不存在", 404);
+      validateRoomWorktree(room);
+      cwd = room.cwd;
+    }
+    const workspace = { id: projectId, cwd, roomId };
+    return json(
+      size.create
+        ? projectTerminals.create(workspace, env, size.cols, size.rows)
+        : projectTerminals.open(workspace, env, size.cols, size.rows),
+    );
+  }
+
   async function handleApi(req: Request, url: URL, srv: Server<WsData>): Promise<Response> {
     const parts = url.pathname
       .split("/")
@@ -1522,40 +1563,12 @@ export function createApp(deps: AppDeps) {
       }
       const project = id ? store.getProject(id) : null;
       if (id && !project) return json({ error: "项目不存在" }, 404);
-      if (project && sub === "terminal") {
-        if (method === "GET")
-          return json(
-            url.searchParams.get("all") === "1"
-              ? projectTerminals.list(project.id)
-              : projectTerminals.forProject(project.id),
-          );
-        if (method === "POST") {
-          const text = await req.text();
-          const size = z
-            .object({ cols: z.number().optional(), rows: z.number().optional(), create: z.boolean().optional() })
-            .parse(text ? JSON.parse(text) : {});
-          const env = await loginShellEnv();
-          // Login environment loading is async; a project may have been deleted or moved meanwhile.
-          if (changingProjects.has(project.id)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
-          const current = store.getProject(project.id);
-          if (!current) throw new ValidationError("项目不存在", 404);
-          return json(
-            size.create
-              ? projectTerminals.create(current, env, size.cols, size.rows)
-              : projectTerminals.open(current, env, size.cols, size.rows),
-          );
-        }
-        if (method === "DELETE") {
-          const terminalId = url.searchParams.get("terminalId");
-          if (!terminalId) throw new ValidationError("缺少 terminalId");
-          await projectTerminals.remove(project.id, terminalId);
-          return json({ ok: true });
-        }
-      }
+      if (project && sub === "terminal" && !subId) return handleTerminal(req, url, project.id);
       if (project && !sub && method === "PATCH") {
         const p = ProjectInputSchema.partial().parse(await body());
         const cwd = p.cwd === undefined ? undefined : existingFolder(p.cwd);
-        if (changingProjects.has(project.id)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
+        if (changingProjects.has(project.id) || creatingWorktrees.has(project.id))
+          throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
         const current = store.getProject(project.id);
         if (!current) throw new ValidationError("项目不存在", 404);
         changingProjects.add(project.id);
@@ -1563,7 +1576,7 @@ export function createApp(deps: AppDeps) {
           if (cwd !== undefined && cwd !== current.cwd) {
             await projectTerminals.remove(project.id);
             for (const r of store.listRooms())
-              if (r.projectId === project.id) {
+              if (r.projectId === project.id && !r.worktree) {
                 orchestrator.cancelAll(r.id);
                 host.releaseRoom(r.id);
               }
@@ -1575,10 +1588,15 @@ export function createApp(deps: AppDeps) {
       }
       if (project && !sub && method === "DELETE") {
         if (project.id === DRAFTS_PROJECT_ID) throw new ValidationError("「草稿」不能删除");
-        if (changingProjects.has(project.id)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
+        if (changingProjects.has(project.id) || creatingWorktrees.has(project.id))
+          throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
         changingProjects.add(project.id);
         try {
-          await projectTerminals.remove(project.id);
+          const isolated = store.listRooms().filter((r) => r.projectId === project.id && r.worktree);
+          await Promise.all([
+            projectTerminals.remove(project.id),
+            ...isolated.map((r) => projectTerminals.remove(worktreeTerminalKey(r.id))),
+          ]);
           for (const r of store.listRooms())
             if (r.projectId === project.id) {
               orchestrator.cancelAll(r.id);
@@ -1598,11 +1616,44 @@ export function createApp(deps: AppDeps) {
       if (!id && method === "POST") {
         const r = RoomInputSchema.parse(await body());
         const projectId = r.projectId || ensureDrafts(store).id;
-        if (!store.getProject(projectId)) throw new ValidationError("项目不存在", 404);
-        return json(store.createRoom(r.name, r.agentIds, { mainAgentId: r.mainAgentId, projectId }), 201);
+        const project = store.getProject(projectId);
+        if (!project) throw new ValidationError("项目不存在", 404);
+        if (!r.worktree)
+          return json(store.createRoom(r.name, r.agentIds, { mainAgentId: r.mainAgentId, projectId }), 201);
+        if (projectId === DRAFTS_PROJECT_ID) throw new ValidationError("草稿会话不能创建独立 worktree");
+        if (changingProjects.has(project.id)) throw new ValidationError("项目正在更新或删除，请稍后重试", 409);
+        for (const agentId of r.agentIds)
+          if (!store.getAgent(agentId)) throw new ValidationError(`Agent ${agentId} 不存在`);
+        srv.timeout(req, 0); // Each Git operation has its own deadline; a large checkout can outlast HTTP idle timeout.
+        creatingWorktrees.set(project.id, (creatingWorktrees.get(project.id) ?? 0) + 1);
+        try {
+          const checkout = await createRoomWorktree(project.cwd, dataDir);
+          try {
+            return json(
+              store.createRoom(r.name, r.agentIds, { mainAgentId: r.mainAgentId, projectId, worktree: checkout }),
+              201,
+            );
+          } catch (error) {
+            const cleaned = await checkout.cleanup();
+            if (!cleaned)
+              throw new ValidationError(
+                `会话创建失败，worktree 保留在 ${checkout.root}，分支为 ${checkout.branch}，请检查后手动清理`,
+                500,
+              );
+            throw error;
+          }
+        } finally {
+          const remaining = (creatingWorktrees.get(project.id) ?? 1) - 1;
+          if (remaining) creatingWorktrees.set(project.id, remaining);
+          else creatingWorktrees.delete(project.id);
+        }
       }
       const room = id ? store.getRoom(id) : null;
       if (id && !room) return json({ error: "房间不存在" }, 404);
+      if (room && method === "GET" && (sub === "tree" || sub === "workspace-file" || sub === "git-status"))
+        validateRoomWorktree(room);
+      if (room?.worktree && room.projectId && sub === "terminal" && !subId)
+        return handleTerminal(req, url, room.projectId, room.id);
       if (room && sub === "files" && method === "GET") {
         if (!subId && !action) return handleConversationFiles(store, room.id, url);
         if (subId && action === "content" && parts.length === 5)
@@ -1619,7 +1670,8 @@ export function createApp(deps: AppDeps) {
         if (subId === "content" && !action) return handleWorkspaceFileContent(store, room.id, url);
       }
       if (room && sub === "changes" && method === "GET") {
-        if (!subId && !action) return handleSessionChanges(store, room.id);
+        if (!subId && !action) return handleSessionChanges(store, room.id, url);
+        if (subId === "requests" && !action) return handleSessionChangeRequests(store, room.id, url);
         if (subId === "detail" && !action) return handleSessionChangeDetail(store, room.id, url);
       }
       if (room && sub === "git-status" && method === "GET") {
@@ -1645,6 +1697,7 @@ export function createApp(deps: AppDeps) {
         orchestrator.cancelAll(room.id);
         host.releaseRoom(room.id);
         store.deleteRoom(room.id);
+        if (room.worktree) await projectTerminals.remove(worktreeTerminalKey(room.id));
         publishAll({ type: "attention.changed" });
         return json({ ok: true });
       }
@@ -1657,6 +1710,8 @@ export function createApp(deps: AppDeps) {
           })
           .parse(await body());
         if (g.projectId && !store.getProject(g.projectId)) throw new ValidationError("项目不存在", 404);
+        if (g.projectId && g.projectId !== room.projectId && room.worktree)
+          throw new ValidationError("独立 worktree 会话无法移动到其他项目", 409);
         if (g.projectId && g.projectId !== room.projectId) {
           orchestrator.cancelAll(room.id);
           host.releaseRoom(room.id);

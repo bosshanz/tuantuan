@@ -21,6 +21,7 @@ export function NewRoom({
 }) {
   const { t: tr } = useI18n();
   const [project, setProject] = useState(projectId);
+  const [worktree, setWorktree] = useState(false);
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [main, setMain] = useState<string>("");
@@ -40,6 +41,7 @@ export function NewRoom({
           agentIds: selected,
           mainAgentId: mainId || null,
           projectId: project,
+          worktree: project !== "drafts" && worktree,
         }),
       );
     } catch (err) {
@@ -66,8 +68,32 @@ export function NewRoom({
               {tr("项目")}
               <span className="muted">{tr("（可选）")}</span>
             </span>
-            <ProjectPicker projects={projects} value={project} onChange={setProject} />
+            <ProjectPicker
+              projects={projects}
+              value={project}
+              onChange={(id) => {
+                setProject(id);
+                setWorktree(false);
+              }}
+            />
           </div>
+          {project !== "drafts" && (
+            <label className="field">
+              <span className="label">
+                <input
+                  type="checkbox"
+                  aria-label={tr("在独立 Git worktree 中运行")}
+                  aria-describedby="worktree-description"
+                  checked={worktree}
+                  onChange={(event) => setWorktree(event.target.checked)}
+                />{" "}
+                {tr("在独立 Git worktree 中运行")}
+              </span>
+              <span id="worktree-description" className="muted">
+                {tr("从项目当前提交创建独立分支和目录，未提交的改动不会带入。")}
+              </span>
+            </label>
+          )}
           <label className="field">
             <span className="label">
               {tr("名称")}

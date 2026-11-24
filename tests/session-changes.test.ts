@@ -2,9 +2,17 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handleSessionChangeDetail, handleSessionChanges } from "../server/session-changes";
+import {
+  handleSessionChangeDetail,
+  handleSessionChangeRequests,
+  handleSessionChanges,
+} from "../server/session-changes";
 import { type Message, Store } from "../server/store";
-import type { SessionChangeDetailResponse, SessionChangesResponse } from "../shared/sessionChanges";
+import type {
+  SessionChangeDetailResponse,
+  SessionChangeRequestsResponse,
+  SessionChangesResponse,
+} from "../shared/sessionChanges";
 import {
   aggregateSessionChanges,
   editPathCounts,
@@ -120,6 +128,136 @@ describe("session edit extraction", () => {
 });
 
 describe("session changes API", () => {
+  test("scopes reported edits and detail to the selected request across interleaved runs", async () => {
+    const f = fixture();
+    const human = (id: string, roomId = f.room.id) =>
+      f.store.insertMessage({
+        id,
+        roomId,
+        runId: id,
+        hop: 0,
+        senderKind: "human",
+        senderId: null,
+        senderName: "User",
+        content: id,
+        status: "done",
+      });
+    const old = human("old-request");
+    const next = human("steer-request");
+    // Steer references the prior request in its timeline, but owns a separate run id.
+    f.store.updateReply(next.id, {
+      content: next.content,
+      status: "done",
+      timeline: {
+        ...emptyTimeline(),
+        steer: { taskId: "t", runId: old.id, agentId: "agent-a", agentName: "Alpha", stage: "stopping" },
+      },
+    });
+    const edit = (name: string, value: string) => ({
+      ...tool(name, "edit"),
+      locations: [{ path: "same.ts" }],
+      content: [{ type: "diff" as const, path: "same.ts", oldText: "before", newText: value }],
+    });
+    const reply = f.insert(
+      { first: edit("first", "old-a") },
+      { runId: old.id, senderId: "agent-a", senderName: "Alpha" },
+    );
+    f.insert({ second: edit("second", "new") }, { runId: next.id, senderId: "agent-b", senderName: "Beta" });
+    f.insert(
+      { third: edit("third", "old-b") },
+      { runId: old.id, senderId: "agent-b", senderName: "Beta", status: "cancelled" },
+    );
+    const list = async (id: string) =>
+      (await handleSessionChanges(
+        f.store,
+        f.room.id,
+        new URL(`http://localhost/changes?runId=${id}`),
+      ).json()) as SessionChangesResponse;
+    expect((await list(old.id)).items[0]).toMatchObject({ path: "same.ts", editCount: 2, overlap: true });
+    expect((await list(next.id)).items[0]).toMatchObject({ path: "same.ts", editCount: 1, overlap: false });
+    expect((await f.list()).items[0]).toMatchObject({ editCount: 3, overlap: true });
+    const detail = (await handleSessionChangeDetail(
+      f.store,
+      f.room.id,
+      new URL(`http://localhost/changes/detail?path=same.ts&runId=${next.id}`),
+    ).json()) as SessionChangeDetailResponse;
+    expect(detail.edits.map((item) => item.newText)).toEqual(["new"]);
+
+    const foreignRoom = f.store.createRoom("other", [], { projectId: f.room.projectId });
+    const foreign = human("foreign-request", foreignRoom.id);
+    for (const id of [foreign.id, "missing", reply.id]) {
+      expect(handleSessionChanges(f.store, f.room.id, new URL(`http://localhost/changes?runId=${id}`)).status).toBe(
+        404,
+      );
+      expect(
+        handleSessionChangeDetail(
+          f.store,
+          f.room.id,
+          new URL(`http://localhost/changes/detail?path=same.ts&runId=${id}`),
+        ).status,
+      ).toBe(404);
+    }
+    expect(handleSessionChanges(f.store, f.room.id, new URL("http://localhost/changes?runId=")).status).toBe(400);
+  });
+
+  test("request selector pages roots without exposing attachments or withdrawn requests", async () => {
+    const f = fixture();
+    const human = (id: string, content: string) =>
+      f.store.insertMessage({
+        id,
+        roomId: f.room.id,
+        runId: id,
+        hop: 0,
+        senderKind: "human",
+        senderId: null,
+        senderName: "User",
+        content,
+        status: "done",
+      });
+    human("first-request", "first");
+    human("second-request", "x".repeat(220));
+    const withdrawn = human("withdrawn-request", "withdrawn");
+    f.store.updateReply(withdrawn.id, {
+      content: "",
+      status: "cancelled",
+      timeline: { ...emptyTimeline(), withdrawn: true },
+    });
+    const attachment = human("attachment-request", "");
+    f.store.updateReply(attachment.id, {
+      content: "",
+      status: "done",
+      timeline: {
+        ...emptyTimeline(),
+        parts: [{ kind: "file", name: "private.txt", mimeType: "text/plain", data: "c2VjcmV0" }],
+      },
+    });
+    const firstResponse = handleSessionChangeRequests(
+      f.store,
+      f.room.id,
+      new URL("http://localhost/changes/requests?limit=2"),
+    );
+    const first = (await firstResponse.json()) as SessionChangeRequestsResponse;
+    expect(first.items.map((item) => item.id)).toEqual([attachment.id, "second-request"]);
+    expect(first.items[0]?.content).toBe("");
+    expect(first.items[1]?.content).toHaveLength(200);
+    expect(JSON.stringify(first)).not.toContain("c2VjcmV0");
+    const second = (await handleSessionChangeRequests(
+      f.store,
+      f.room.id,
+      new URL(`http://localhost/changes/requests?limit=2&beforeSeq=${first.nextBeforeSeq}`),
+    ).json()) as SessionChangeRequestsResponse;
+    expect(second.items.map((item) => item.id)).toEqual(["first-request"]);
+    expect(second.nextBeforeSeq).toBeNull();
+    expect(
+      handleSessionChanges(f.store, f.room.id, new URL(`http://localhost/changes?runId=${withdrawn.id}`)).status,
+    ).toBe(404);
+    for (const query of ["limit=0", "limit=abc", "beforeSeq=-1", "beforeSeq=9007199254740992"]) {
+      expect(
+        handleSessionChangeRequests(f.store, f.room.id, new URL(`http://localhost/changes/requests?${query}`)).status,
+      ).toBe(400);
+    }
+  });
+
   test("retains completed edits from unsuccessful replies without treating pending tools as edits", async () => {
     const f = fixture();
     const ids = new Map<string, string>();

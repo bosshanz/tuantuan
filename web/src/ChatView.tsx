@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleSlash,
   Clock3,
+  FileDiff,
   FileText,
   FolderOpen,
   History,
@@ -48,6 +49,7 @@ import {
   isAssistantMessage,
 } from "../../shared/collaboration";
 import { canQuoteMessage, type MessageQuote, messageQuote } from "../../shared/messageQuote";
+import { worktreeTerminalKey } from "../../shared/project-terminal";
 import { intlLocale, translateError, useI18n } from "./i18n";
 import "./messageQuote.css";
 import "./chatTasks.css";
@@ -188,6 +190,8 @@ export function ChatView(props: {
   const [selected, setSelected] = useState<string | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [filesJump, setFilesJump] = useState<{ path: string; tick: number } | null>(null);
+  const [filesRun, setFilesRun] = useState<{ id: string; content: string; tick: number } | null>(null);
+  const filesRunTick = useRef(0);
   const filesPresence = usePresence(filesOpen, 150);
   const filesButton = useRef<HTMLButtonElement>(null);
   const dockedFiles = useMediaQuery("(min-width: 1024px)");
@@ -207,7 +211,8 @@ export function ChatView(props: {
   }, []);
   const wide = useMediaQuery("(min-width: 1181px)");
   const [panel, setPanel] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(() => terminalWasOpen(room.projectId));
+  const terminalOwner = room.worktree ? worktreeTerminalKey(room.id) : room.projectId;
+  const [terminalOpen, setTerminalOpen] = useState(() => terminalWasOpen(terminalOwner));
   const [terminalMounted, setTerminalMounted] = useState(terminalOpen);
   const [terminalHeight, setTerminalHeight] = useState(280);
   const [terminalEpoch, setTerminalEpoch] = useState(0);
@@ -267,13 +272,13 @@ export function ChatView(props: {
         setTerminalFocusRequest({ origin: document.activeElement });
       } else setTerminalFocusRequest(null);
       try {
-        sessionStorage.setItem(`tuantuan.terminal.${room.projectId}`, open ? "open" : "closed");
+        sessionStorage.setItem(`tuantuan.terminal.${terminalOwner}`, open ? "open" : "closed");
       } catch {
         /* Private browsing may disable session storage. */
       }
       if (!open && terminalSlot.current?.contains(document.activeElement)) terminalButton.current?.focus();
     },
-    [room.projectId],
+    [terminalOwner],
   );
   useEffect(() => {
     const toggle = (event: KeyboardEvent) => {
@@ -601,6 +606,7 @@ export function ChatView(props: {
     if (link.relative !== null) {
       preserveReadingPosition();
       setPanel(false);
+      setFilesRun(null);
       setFilesOpen(true);
       setFilesJump({ path: link.relative, tick: Date.now() });
       return;
@@ -874,6 +880,17 @@ export function ChatView(props: {
       compact={compact}
       selected={selected === m.id && panel}
       onDetails={() => openDetails(m.id)}
+      onOpenChanges={
+        m.senderKind === "human"
+          ? () => {
+              preserveReadingPosition();
+              setPanel(false);
+              setFilesJump(null);
+              setFilesRun({ id: m.id, content: m.content, tick: ++filesRunTick.current });
+              setFilesOpen(true);
+            }
+          : undefined
+      }
       onJumpToQuote={jumpToMessage}
       harnessId={agentById.get(m.senderId ?? "")?.harness}
       hideAuthPrompt={assistant}
@@ -1348,6 +1365,7 @@ export function ChatView(props: {
               roomName={room.name}
               revision={settledRevision}
               openPath={filesJump}
+              openRun={filesRun}
               returnFocusTo={filesButton.current}
               onClose={() => {
                 preserveReadingPosition();
@@ -1394,6 +1412,7 @@ export function ChatView(props: {
                     <ProjectTerminal
                       key={terminalEpoch}
                       project={props.project}
+                      room={room}
                       visible={terminalOpen}
                       height={terminalHeight}
                       onHeightChange={setTerminalHeight}
@@ -1695,6 +1714,7 @@ function MessageItem(props: {
   compact: boolean;
   selected: boolean;
   onDetails: () => void;
+  onOpenChanges?: () => void;
   onJumpToQuote: (messageId: string, partIndex?: number) => void;
   harnessId?: string;
   onQuote?: (partIndex?: number) => void;
@@ -1871,6 +1891,12 @@ function MessageItem(props: {
         )}
       </div>
       {(!compact || !compactHasBody) && renderActions(compact ? "" : undefined)}
+      {props.onOpenChanges && (
+        <button type="button" className="message-run-changes" onClick={props.onOpenChanges}>
+          <FileDiff size={13} aria-hidden="true" />
+          {tr("查看本轮改动")}
+        </button>
+      )}
     </div>
   );
 }
@@ -2867,6 +2893,17 @@ function RoomInfo(props: {
               </fieldset>
             </div>
           </section>
+          {room.worktree && (
+            <section className="d-section">
+              <h4>{tr("独立 Git worktree")}</h4>
+              <p>
+                {tr("创建时的分支")} <span className="mono">{room.worktree.branch}</span>
+              </p>
+              <p>
+                {tr("工作目录")} <span className="mono">{room.cwd}</span>
+              </p>
+            </section>
+          )}
           {props.members.length > 1 && (
             <section className="d-section">
               <label className="field">
@@ -2902,7 +2939,12 @@ function RoomInfo(props: {
               type="button"
               className="btn danger"
               onClick={async () => {
-                if (!confirm(tr("删除会话「{name}」及其全部消息？此操作不可撤销。", { name: room.name }))) return;
+                const message = room.worktree
+                  ? tr("删除会话「{name}」及其全部消息？worktree 目录和分支会保留。此操作不可撤销。", {
+                      name: room.name,
+                    })
+                  : tr("删除会话「{name}」及其全部消息？此操作不可撤销。", { name: room.name });
+                if (!confirm(message)) return;
                 await api("DELETE", `/api/rooms/${room.id}`).then(props.onDeleted, (e) =>
                   setError((e as Error).message),
                 );

@@ -23,9 +23,11 @@ import { registryUsageSmoke } from "./e2e-registry-usage";
 import { repliesSmoke } from "./e2e-replies";
 import { richMediaSmoke } from "./e2e-rich-media";
 import { schedulingSmoke } from "./e2e-scheduling";
+import { sessionChangesSmoke } from "./e2e-session-changes";
 import { taskContextSmoke } from "./e2e-task-context";
 import { terminalSmoke } from "./e2e-terminal";
 import { v025Smoke } from "./e2e-v025";
+import { worktreeSmoke } from "./e2e-worktrees";
 
 process.env.TUANTUAN_MOCK_HARNESS = "1";
 // The mock harness starts logged out; onboarding logs in through ACP `authenticate`, which creates this file.
@@ -579,6 +581,8 @@ try {
   );
   await filePreviewSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
   await gitWorkspaceSmoke(browser, `http://localhost:${server.port}`);
+  await sessionChangesSmoke(browser, `http://localhost:${server.port}`, app.store);
+  await worktreeSmoke(browser, `http://localhost:${server.port}`);
   await v025Smoke(
     browser,
     `http://localhost:${server.port}`,
@@ -1156,14 +1160,13 @@ try {
   await page.locator('.chat-head .title-pill[aria-expanded="true"]').waitFor();
   await page.getByRole("heading", { name: "会话信息", exact: true }).waitFor();
   await showReplyDetails(lastReply);
+  // Offscreen avatars can pause mid-animation. Only running finite animations affect settling.
   const settle = () =>
-    page.evaluate(() =>
-      Promise.all(
-        document
+    page.waitForFunction(
+      () =>
+        !document
           .getAnimations()
-          .filter((a) => a.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY)
-          .map((a) => a.finished.catch(() => undefined)),
-      ),
+          .some((a) => a.playState === "running" && a.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY),
     );
   await settle();
   // Alignment: the chat controls share a line, sidebar edges align, and headers do not collide.
@@ -1185,7 +1188,7 @@ try {
     const main = r(document.querySelector(".chat-head"));
     if (!pill || !main) out.push("missing title pill");
     else {
-      near(main.top, 8, "chat header top offset");
+      near(main.top, 0, "chat header aligned to top");
       near(pill.top + pill.height / 2, main.top + main.height / 2, "title pill centred on header line");
       near(pill.left + pill.width / 2, main.left + main.width / 2, "title pill centred");
       const action = r(document.querySelector(".chat-head-actions button"));

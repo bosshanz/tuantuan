@@ -725,6 +725,7 @@ export function App() {
               key={editingProject.id}
               project={editingProject}
               conversations={rooms.filter((r) => r.projectId === editingProject.id).length}
+              isolatedConversations={rooms.filter((r) => r.projectId === editingProject.id && r.worktree).length}
               onChange={reload}
               onBack={() => go("c")}
               onDeleted={async () => {

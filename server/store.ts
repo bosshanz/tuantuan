@@ -225,6 +225,11 @@ export const MIGRATIONS: string[] = [
    );
    CREATE INDEX messages_attention_failed ON messages(created_at DESC, id DESC)
      WHERE sender_kind = 'agent' AND status IN ('error','interrupted');`,
+  // An isolated conversation keeps its checkout independently of later project directory changes.
+  `ALTER TABLE rooms ADD COLUMN worktree_root TEXT;
+   ALTER TABLE rooms ADD COLUMN worktree_branch TEXT;
+   ALTER TABLE rooms ADD COLUMN worktree_cwd TEXT;
+   CREATE INDEX messages_room_run_seq ON messages(room_id, run_id, seq);`,
 ];
 
 export const PERMISSION_POLICIES = ["ask", "allow"] as const;
@@ -289,7 +294,7 @@ export type AgentInput = Omit<
 export interface Project {
   id: string;
   name: string;
-  /** Working directory of every conversation in the project. */
+  /** Default directory for conversations in this project. */
   cwd: string;
   createdAt: number;
   /** Sidebar preview: last message (list endpoint only). sender null = the user. */
@@ -325,8 +330,9 @@ export interface Room {
   /** 2+ agents: who answers when nobody is @-mentioned. */
   mainAgentId: string | null;
   projectId: string | null;
-  /** The project's directory (read-only here). */
+  /** The project's directory, or the isolated worktree's conversation directory. */
   cwd: string;
+  worktree?: { root: string; branch: string };
   createdAt: number;
   /** Sidebar preview: last message (list endpoint only). sender null = the user. */
   last?: RoomPreview;
@@ -617,17 +623,33 @@ export class Store {
   createRoom(
     name: string,
     agentIds: string[],
-    opts: { mainAgentId?: string | null; projectId?: string | null } = {},
+    opts: {
+      mainAgentId?: string | null;
+      projectId?: string | null;
+      worktree?: { root: string; branch: string; cwd: string };
+    } = {},
   ): Room {
     const id = crypto.randomUUID();
-    this.db.transaction(() => {
+    return this.db.transaction(() => {
       this.db
-        .query("INSERT INTO rooms (id, name, kind, created_at, cwd, project_id) VALUES (?,?,?,?,?,?)")
-        .run(id, name, kindFor(agentIds), Date.now(), "", opts.projectId ?? null);
+        .query(
+          "INSERT INTO rooms (id, name, kind, created_at, cwd, project_id, worktree_root, worktree_branch, worktree_cwd) VALUES (?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          id,
+          name,
+          kindFor(agentIds),
+          Date.now(),
+          "",
+          opts.projectId ?? null,
+          opts.worktree?.root ?? null,
+          opts.worktree?.branch ?? null,
+          opts.worktree?.cwd ?? null,
+        );
       this.setRoomAgentsTx(id, agentIds);
       this.setMainTx(id, opts.mainAgentId ?? null);
+      return this.getRoom(id) as Room;
     })();
-    return this.getRoom(id) as Room;
   }
 
   setRoomAgents(roomId: string, agentIds: string[]): Room {
@@ -644,6 +666,7 @@ export class Store {
     this.db.transaction(() => {
       if (patch.name !== undefined) this.db.query("UPDATE rooms SET name = ? WHERE id = ?").run(patch.name, roomId);
       if (patch.projectId !== undefined && patch.projectId !== this.getRoom(roomId)?.projectId) {
+        if (this.getRoom(roomId)?.worktree) throw new ValidationError("独立 worktree 会话无法移动到其他项目", 409);
         // Another project = another directory: harness sessions belong to the old one.
         this.db.query("UPDATE rooms SET project_id = ? WHERE id = ?").run(patch.projectId, roomId);
         this.db.query("DELETE FROM acp_sessions WHERE room_id = ?").run(roomId);
@@ -686,7 +709,11 @@ export class Store {
       if (patch.name !== undefined) this.db.query("UPDATE projects SET name = ? WHERE id = ?").run(patch.name, id);
       if (patch.cwd !== undefined && patch.cwd !== p.cwd) {
         this.db.query("UPDATE projects SET cwd = ? WHERE id = ?").run(patch.cwd, id);
-        this.db.query("DELETE FROM acp_sessions WHERE room_id IN (SELECT id FROM rooms WHERE project_id = ?)").run(id);
+        this.db
+          .query(
+            "DELETE FROM acp_sessions WHERE room_id IN (SELECT id FROM rooms WHERE project_id = ? AND worktree_root IS NULL)",
+          )
+          .run(id);
       }
     })();
     return this.getProject(id) as Project;
@@ -731,7 +758,14 @@ export class Store {
       agentIds,
       mainAgentId: (r.main_agent_id as string | null) ?? null,
       projectId: (r.project_id as string | null) ?? null,
-      cwd: r.project_id ? (this.getProject(r.project_id as string)?.cwd ?? "") : "",
+      cwd: r.worktree_root
+        ? (r.worktree_cwd as string)
+        : r.project_id
+          ? (this.getProject(r.project_id as string)?.cwd ?? "")
+          : "",
+      ...(r.worktree_root
+        ? { worktree: { root: r.worktree_root as string, branch: r.worktree_branch as string } }
+        : {}),
       createdAt: r.created_at as number,
     };
   }
@@ -823,11 +857,11 @@ export class Store {
    * Timelines are loaded so callers can extract paths and diffs; listing UIs should
    * not put every diff on the wire without an explicit detail request.
    */
-  agentEditMessages(roomId: string): Message[] {
+  agentEditMessages(roomId: string, runId?: string): Message[] {
     const rows = this.db
       .query(
         `SELECT * FROM messages m
-         WHERE room_id = ? AND sender_kind = 'agent' AND status IN ('done','error','cancelled','interrupted') AND timeline IS NOT NULL
+         WHERE room_id = ? ${runId === undefined ? "" : "AND run_id = ?"} AND sender_kind = 'agent' AND status IN ('done','error','cancelled','interrupted') AND timeline IS NOT NULL
            AND EXISTS (
              SELECT 1 FROM json_each(CASE WHEN json_valid(timeline) THEN timeline ELSE '{}' END, '$.tools') t
              WHERE t.type = 'object' AND json_extract(t.value, '$.status') = 'completed'
@@ -837,8 +871,29 @@ export class Store {
                  WHERE c.type = 'object' AND json_extract(c.value, '$.type') = 'diff')))
          ORDER BY seq`,
       )
-      .all(roomId) as Row[];
+      .all(...(runId === undefined ? [roomId] : [roomId, runId])) as Row[];
     return rows.map(toMessage);
+  }
+
+  /** Human requests eligible for run-scoped change views, without loading their attachment payloads. */
+  changeRequests(roomId: string, limit: number, beforeSeq = Number.MAX_SAFE_INTEGER) {
+    const rows = this.db
+      .query(
+        `SELECT id, seq, substr(content, 1, 200) AS content, created_at FROM messages m
+       WHERE room_id = ? AND seq < ? AND sender_kind = 'human' AND id = run_id AND ${visibleTranscriptSql("m")}
+       ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(roomId, beforeSeq, limit) as { id: string; seq: number; content: string; created_at: number }[];
+    return rows.map((row) => ({ id: row.id, seq: row.seq, content: row.content, createdAt: row.created_at }));
+  }
+
+  hasChangeRequest(roomId: string, runId: string): boolean {
+    return !!this.db
+      .query(
+        `SELECT 1 FROM messages m
+       WHERE room_id = ? AND id = ? AND run_id = id AND sender_kind = 'human' AND ${visibleTranscriptSql("m")}`,
+      )
+      .get(roomId, runId);
   }
 
   /** One persisted message at a time keeps attachment blobs out of file-list memory. */

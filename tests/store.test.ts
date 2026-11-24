@@ -70,6 +70,30 @@ describe("Store", () => {
     }
   });
 
+  test("existing v0.3.2 rooms keep the shared directory and request history after migration", () => {
+    const path = join(tmpdir(), `tuantuan-v032-${crypto.randomUUID()}.db`);
+    try {
+      const old = new Database(path);
+      for (const migration of MIGRATIONS.slice(0, 20)) old.exec(migration);
+      old.exec(`PRAGMA user_version = 20;
+        INSERT INTO projects (id, name, cwd, created_at) VALUES ('proj', 'old project', '/project', 1);
+        INSERT INTO rooms (id, name, kind, created_at, project_id) VALUES ('room', 'old room', 'dm', 1, 'proj');
+        INSERT INTO messages (id, room_id, seq, run_id, hop, sender_kind, sender_name, content, status, created_at)
+          VALUES ('request', 'room', 1, 'request', 0, 'human', 'User', 'Original request', 'done', 1);`);
+      old.close();
+      const store = new Store(path);
+      try {
+        expect(store.getRoom("room")?.cwd).toBe("/project");
+        expect(store.getRoom("room")?.worktree).toBeUndefined();
+        expect(store.changeRequests("room", 10)).toMatchObject([{ id: "request", content: "Original request" }]);
+      } finally {
+        store.db.close();
+      }
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
   test("migration 6: system prompt becomes the identity doc, MCP tool ids become servers, groups get a main agent", () => {
     const path = join(tmpdir(), `agent-hub-m6-${Date.now()}.db`);
     try {

@@ -50,6 +50,7 @@ import type { Agent, Room, Store } from "./store";
 import { ValidationError } from "./store";
 import type { TuantuanMcp } from "./tuantuan-mcp";
 import { expandHome } from "./workspace";
+import { validateRoomWorktree } from "./worktrees";
 
 /** Live, per-(room, agent) view of the harness session the UI needs: pickers, slash commands, usage. */
 export interface SessionView {
@@ -174,6 +175,7 @@ export class HarnessHost {
 
   /** Working directory for this conversation: the room's own folder (shared by every agent in it). */
   cwdFor(room: Room, _agent?: Agent): string {
+    validateRoomWorktree(room);
     return room.cwd ? expandHome(room.cwd) : homedir();
   }
 
@@ -239,12 +241,13 @@ export class HarnessHost {
 
   /** A cancellation escalation can only terminate the process owned by this room and agent. */
   private async proc(
-    roomId: string,
+    room: Room,
     agent: Agent,
     cwd: string,
     identity: string,
     assertCurrent: () => void,
   ): Promise<Proc> {
+    const roomId = room.id;
     const spec = harnessSpec(agent.harness);
     if (!spec) throw new ValidationError(`「${agent.name}」还没有绑定 Harness，请在 Agent 设置或新手引导里选择`);
     const overrides = this.store.getSetting<Record<string, string>>("harnessPaths", {});
@@ -338,6 +341,7 @@ export class HarnessHost {
           skillReadRoots: mat.skills.map((s) => s.dir),
         },
         {
+          validateCwd: room.worktree ? () => validateRoomWorktree(room) : undefined,
           onUpdate: (n) => this.onUpdate(proc, n),
           requestPermission: (p) => this.requestPermission(proc, agent.id, p),
           requestElicitation: (p) => this.requestElicitation(proc, agent.id, p),
@@ -544,7 +548,7 @@ export class HarnessHost {
     assertCurrent: () => void,
   ): Promise<{ proc: Proc; slot: SessionSlot }> {
     const cwd = this.cwdFor(room, agent);
-    const proc = await this.proc(room.id, agent, cwd, identity, assertCurrent);
+    const proc = await this.proc(room, agent, cwd, identity, assertCurrent);
     const assertConfiguration = assertCurrent;
     assertCurrent = () => {
       assertConfiguration();
