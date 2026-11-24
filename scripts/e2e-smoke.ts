@@ -23,9 +23,11 @@ import { registryUsageSmoke } from "./e2e-registry-usage";
 import { repliesSmoke } from "./e2e-replies";
 import { richMediaSmoke } from "./e2e-rich-media";
 import { schedulingSmoke } from "./e2e-scheduling";
+import { sessionChangesSmoke } from "./e2e-session-changes";
 import { taskContextSmoke } from "./e2e-task-context";
 import { terminalSmoke } from "./e2e-terminal";
 import { v025Smoke } from "./e2e-v025";
+import { worktreeSmoke } from "./e2e-worktrees";
 
 process.env.TUANTUAN_MOCK_HARNESS = "1";
 // The mock harness starts logged out; onboarding logs in through ACP `authenticate`, which creates this file.
@@ -579,6 +581,8 @@ try {
   );
   await filePreviewSmoke(browser, `http://localhost:${server.port}`, app.store, shotsDir);
   await gitWorkspaceSmoke(browser, `http://localhost:${server.port}`);
+  await sessionChangesSmoke(browser, `http://localhost:${server.port}`, app.store);
+  await worktreeSmoke(browser, `http://localhost:${server.port}`);
   await v025Smoke(
     browser,
     `http://localhost:${server.port}`,

@@ -2,6 +2,41 @@ import type { MessageCatalog } from "./types";
 
 /** Application-owned errors only. Placeholder values retain paths, names and third-party details. */
 export const errorMessages: MessageCatalog = {
+  请求不存在或不属于当前会话: {
+    "zh-TW": "請求不存在或不屬於目前對話",
+    en: "The request does not exist in this conversation",
+    ja: "リクエストが存在しないか、この会話に属していません",
+  },
+  "项目必须位于包含至少一次提交的 Git 仓库中": {
+    "zh-TW": "專案必須位於包含至少一次提交的 Git 儲存庫中",
+    en: "The project must be in a Git repository with at least one commit",
+    ja: "プロジェクトは少なくとも 1 回コミットされた Git リポジトリ内にある必要があります",
+  },
+  "会话的 Git worktree 不存在或已失效，请恢复原目录后重试": {
+    "zh-TW": "對話的 Git worktree 不存在或已失效，請恢復原目錄後重試",
+    en: "The conversation's Git worktree is missing or invalid. Restore its original directory and try again.",
+    ja: "会話の Git worktree が見つからないか無効です。元のディレクトリを復元してから再試行してください。",
+  },
+  "worktree 目录必须位于项目仓库之外": {
+    "zh-TW": "worktree 目錄必須位於專案儲存庫之外",
+    en: "The worktree directory must be outside the project repository",
+    ja: "worktree ディレクトリはプロジェクトのリポジトリ外に置く必要があります",
+  },
+  "草稿会话不能创建独立 worktree": {
+    "zh-TW": "草稿對話無法建立獨立 worktree",
+    en: "Draft conversations cannot create separate worktrees",
+    ja: "下書きの会話では独立した worktree を作成できません",
+  },
+  "独立 worktree 会话无法移动到其他项目": {
+    "zh-TW": "獨立 worktree 對話無法移至其他專案",
+    en: "A separate worktree conversation cannot be moved to another project",
+    ja: "独立した worktree の会話は別のプロジェクトに移動できません",
+  },
+  "无法创建会话 worktree：{detail}": {
+    "zh-TW": "無法建立對話 worktree：{detail}",
+    en: "Could not create the conversation worktree: {detail}",
+    ja: "会話の worktree を作成できません：{detail}",
+  },
   "每条消息最多添加 8 个附件": {
     "zh-TW": "每則訊息最多新增 8 個附件",
     en: "Each message can include up to 8 attachments",

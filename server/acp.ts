@@ -19,6 +19,8 @@ export interface AcpLaunch {
 }
 
 export interface AcpHandlers {
+  /** Recheck an isolated conversation's checkout before client-provided fs/terminal operations. */
+  validateCwd?(): void;
   onUpdate(n: acp.SessionNotification): void;
   requestPermission(p: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse>;
   /** Omitted by protocol-focused tests; those clients cancel form questions. */
@@ -158,6 +160,7 @@ export class AcpProcess {
 
   /** Resolves a path the agent sent and refuses anything outside the agent's working directory. */
   inside(path: string): string {
+    this.h.validateCwd?.();
     const lexicalRoot = resolve(this.launch.cwd);
     const p = resolve(lexicalRoot, path);
     const within = (candidate: string, root: string) =>

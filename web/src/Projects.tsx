@@ -118,6 +118,7 @@ export function NewProject(props: { workspacesRoot: string; onCreated: (p: Proje
 export function ProjectSettings(props: {
   project: Project;
   conversations: number;
+  isolatedConversations: number;
   onChange: () => Promise<void>;
   onDeleted: () => void;
   onBack: () => void;
@@ -139,7 +140,17 @@ export function ProjectSettings(props: {
     if (
       dirChanged &&
       props.conversations > 0 &&
-      !confirm(tr("更换目录会重置 {count} 个会话的 Agent 上下文。继续？", { count: props.conversations }))
+      !confirm(
+        props.isolatedConversations
+          ? tr(
+              "更换目录会重置 {count} 个共享目录会话的 Agent 上下文，{isolated} 个独立 worktree 会话保持原目录。继续？",
+              {
+                count: props.conversations - props.isolatedConversations,
+                isolated: props.isolatedConversations,
+              },
+            )
+          : tr("更换目录会重置 {count} 个会话的 Agent 上下文。继续？", { count: props.conversations }),
+      )
     )
       return;
     setSaving(true);

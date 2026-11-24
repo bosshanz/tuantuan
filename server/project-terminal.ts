@@ -1,6 +1,6 @@
 import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { ProjectTerminalEvent, ProjectTerminalMeta } from "../shared/project-terminal";
+import { type ProjectTerminalEvent, type ProjectTerminalMeta, worktreeTerminalKey } from "../shared/project-terminal";
 import { ValidationError } from "./store";
 
 export const PROJECT_TERMINAL_LIMITS = {
@@ -15,6 +15,8 @@ export const PROJECT_TERMINAL_LIMITS = {
   minRows: 1,
   maxRows: 200,
 } as const;
+
+type TerminalWorkspace = { id: string; cwd: string; roomId?: string };
 
 type Listener = (event: ProjectTerminalEvent) => void;
 type ProcessRow = { pid: number; ppid: number; tty: string; identity: string };
@@ -98,10 +100,11 @@ export class ProjectTerminals {
     });
   }
 
-  open(project: { id: string; cwd: string }, env: Record<string, string>, cols = 80, rows = 24): ProjectTerminalMeta {
+  open(project: TerminalWorkspace, env: Record<string, string>, cols = 80, rows = 24): ProjectTerminalMeta {
     if (this.closed) throw new ValidationError("服务正在关闭", 503);
-    if (this.removingProjects.has(project.id)) throw new ValidationError("项目终端正在关闭，请稍后重试", 409);
-    const existingId = this.projects.get(project.id)?.values().next().value;
+    const owner = project.roomId ? worktreeTerminalKey(project.roomId) : project.id;
+    if (this.removingProjects.has(owner)) throw new ValidationError("项目终端正在关闭，请稍后重试", 409);
+    const existingId = this.projects.get(owner)?.values().next().value;
     const existing = existingId ? this.entries.get(existingId) : null;
     if (existing?.removing || (existing?.stopping && existing.meta.status === "running"))
       throw new ValidationError("终端正在关闭，请稍后重试", 409);
@@ -109,9 +112,10 @@ export class ProjectTerminals {
     return this.create(project, env, cols, rows);
   }
 
-  create(project: { id: string; cwd: string }, env: Record<string, string>, cols = 80, rows = 24): ProjectTerminalMeta {
+  create(project: TerminalWorkspace, env: Record<string, string>, cols = 80, rows = 24): ProjectTerminalMeta {
     if (this.closed) throw new ValidationError("服务正在关闭", 503);
-    if (this.removingProjects.has(project.id)) throw new ValidationError("项目终端正在关闭，请稍后重试", 409);
+    const owner = project.roomId ? worktreeTerminalKey(project.roomId) : project.id;
+    if (this.removingProjects.has(owner)) throw new ValidationError("项目终端正在关闭，请稍后重试", 409);
     if (process.platform !== "darwin" && process.platform !== "linux")
       throw new ValidationError("内嵌终端需要 macOS 或 Linux", 501);
     if (typeof Bun.Terminal !== "function")
@@ -165,7 +169,8 @@ export class ProjectTerminals {
     const meta: ProjectTerminalMeta = {
       id: crypto.randomUUID(),
       projectId: project.id,
-      number: Math.max(0, ...this.list(project.id).map((terminal) => terminal.number)) + 1,
+      roomId: project.roomId,
+      number: Math.max(0, ...this.list(owner).map((terminal) => terminal.number)) + 1,
       cwd: project.cwd,
       shell,
       ...size,
@@ -206,9 +211,9 @@ export class ProjectTerminals {
       throw new ValidationError(`终端启动失败：${(error as Error).message}`, 503);
     }
     this.entries.set(meta.id, entry);
-    const terminals = this.projects.get(project.id) ?? new Set<string>();
+    const terminals = this.projects.get(owner) ?? new Set<string>();
     terminals.add(meta.id);
-    this.projects.set(project.id, terminals);
+    this.projects.set(owner, terminals);
     for (const data of early) this.output(entry, data);
     const current = entry;
     void proc.exited.then(async (code) => {
@@ -277,7 +282,8 @@ export class ProjectTerminals {
       return;
     }
     const entry = this.entries.get(terminalId);
-    if (!entry || entry.meta.projectId !== projectId) throw new ValidationError("终端已更换，请刷新后重试", 409);
+    if (!entry || (entry.meta.roomId ? worktreeTerminalKey(entry.meta.roomId) : entry.meta.projectId) !== projectId)
+      throw new ValidationError("终端已更换，请刷新后重试", 409);
     entry.removing = true;
     await this.stop(entry);
     await entry.proc.exited;

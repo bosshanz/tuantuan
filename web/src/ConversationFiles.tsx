@@ -28,7 +28,11 @@ import {
 } from "../../shared/conversationFiles";
 import { getFilePreviewType } from "../../shared/filePreview";
 import type { GitStatusItem, GitStatusResponse, GitStatusSection } from "../../shared/gitStatus";
-import type { SessionChangesResponse, SessionFileChange } from "../../shared/sessionChanges";
+import type {
+  SessionChangeRequestsResponse,
+  SessionChangesResponse,
+  SessionFileChange,
+} from "../../shared/sessionChanges";
 import type { WorkspaceEntry, WorkspaceSearchResponse, WorkspaceTreeResponse } from "../../shared/workspaceFiles";
 import { api } from "./api";
 import { formatAttachmentSize } from "./composerAttachments";
@@ -125,6 +129,8 @@ export function ConversationFiles(props: {
   revision: string;
   /** Clicked a file link in chat: open the workbench at this workspace path. */
   openPath?: { path: string; tick: number } | null;
+  /** Open the edits reported for the original user request. */
+  openRun?: { id: string; content: string; tick: number } | null;
   onClose: () => void;
   onSelectMessage: (messageId: string) => void;
   returnFocusTo?: HTMLElement | null;
@@ -138,7 +144,9 @@ export function ConversationFiles(props: {
   const restoreFocusKey = useRef<string | null>(null);
   const downloadActions = useRef(new Map<string, AbortController>());
 
-  const [tab, setTab] = useState<FileWorkbenchTab>(() => (props.hasProject ? "tree" : "chat"));
+  const [tab, setTab] = useState<FileWorkbenchTab>(() =>
+    props.openRun ? "edits" : props.hasProject ? "tree" : "chat",
+  );
   const [query, setQuery] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [normalWidth, setNormalWidth] = useState<number>(readSavedWidth);
@@ -181,6 +189,27 @@ export function ConversationFiles(props: {
   const [agentEdits, setAgentEdits] = useState<SessionFileChange[]>([]);
   const [editsLoading, setEditsLoading] = useState(false);
   const [editsError, setEditsError] = useState<string | null>(null);
+  const [editScope, setEditScope] = useState(() => (props.openRun ? `request:${props.openRun.id}` : "all"));
+  const [requestHint, setRequestHint] = useState(props.openRun ?? null);
+  const [requests, setRequests] = useState<SessionChangeRequestsResponse>({ items: [], nextBeforeSeq: null });
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [requestsError, setRequestsError] = useState<string | null>(null);
+  const requestsGen = useRef(0);
+  const requestsInFlight = useRef(false);
+  const [scopedEdits, setScopedEdits] = useState<SessionFileChange[]>([]);
+  const [scopedEditsFor, setScopedEditsFor] = useState<string | undefined>();
+  const [scopedEditsLoading, setScopedEditsLoading] = useState(false);
+  const [scopedEditsError, setScopedEditsError] = useState<string | null>(null);
+  const selectedRunId =
+    editScope === "latest" ? requests.items[0]?.id : editScope.startsWith("request:") ? editScope.slice(8) : undefined;
+  const activeEdits =
+    tab === "edits" && editScope !== "all" ? (selectedRunId === scopedEditsFor ? scopedEdits : []) : agentEdits;
+  const activeEditsLoading =
+    tab === "edits" && editScope !== "all"
+      ? scopedEditsLoading || (editScope === "latest" && !requestsLoaded && !requestsError)
+      : editsLoading;
+  const activeEditsError = tab === "edits" && editScope !== "all" ? scopedEditsError : editsError;
 
   // Chat attachments & referenced deliverables state
   const [chatFiles, setChatFiles] = useState<ChatFilesState>(emptyChatFiles);
@@ -371,9 +400,11 @@ export function ConversationFiles(props: {
     };
   }, [roomId, props.hasProject, tab === "git", refresh, props.revision]);
 
-  // Load Agent reported changes (decorates tree + powers Agent Edits tab)
+  const needAllEdits = tab !== "edits" || editScope === "all";
+  // Load whole-room badges only when the current view uses them.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refresh and revision silently update Agent edits
   useEffect(() => {
+    if (!needAllEdits) return;
     let live = true;
     setEditsLoading(true);
     setEditsError(null);
@@ -391,7 +422,104 @@ export function ConversationFiles(props: {
     return () => {
       live = false;
     };
-  }, [roomId, refresh, props.revision]);
+  }, [roomId, needAllEdits, refresh, props.revision]);
+
+  // Refresh the newest requests without discarding older pages already loaded.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: settled revision refreshes recent requests
+  useEffect(() => {
+    if (tab !== "edits") return;
+    const generation = ++requestsGen.current;
+    requestsInFlight.current = true;
+    setRequestsLoading(true);
+    setRequestsError(null);
+    api<SessionChangeRequestsResponse>("GET", `/api/rooms/${encodeURIComponent(roomId)}/changes/requests?limit=40`)
+      .then((page) => {
+        if (generation !== requestsGen.current) return;
+        setRequests((previous) => {
+          const boundary = page.items.at(-1);
+          // Keep only a contiguous tail. After a long disconnect, page backwards from the new first page.
+          if (!boundary || !page.nextBeforeSeq || !previous.items.some((item) => item.id === boundary.id)) return page;
+          return {
+            items: [...page.items, ...previous.items.filter((item) => item.seq < boundary.seq)],
+            nextBeforeSeq: previous.nextBeforeSeq,
+          };
+        });
+        setRequestsLoaded(true);
+      })
+      .catch((error: unknown) => {
+        if (generation === requestsGen.current) setRequestsError(errorText(error));
+      })
+      .finally(() => {
+        if (generation === requestsGen.current) {
+          requestsInFlight.current = false;
+          setRequestsLoading(false);
+        }
+      });
+    return () => {
+      ++requestsGen.current;
+    };
+  }, [roomId, tab === "edits", refresh, props.revision]);
+
+  const loadMoreRequests = async () => {
+    if (!requests.nextBeforeSeq || requestsInFlight.current) return;
+    const generation = requestsGen.current;
+    requestsInFlight.current = true;
+    setRequestsLoading(true);
+    setRequestsError(null);
+    const params = new URLSearchParams({ limit: "40", beforeSeq: String(requests.nextBeforeSeq) });
+    try {
+      const page = await api<SessionChangeRequestsResponse>(
+        "GET",
+        `/api/rooms/${encodeURIComponent(roomId)}/changes/requests?${params}`,
+      );
+      if (generation !== requestsGen.current) return;
+      setRequests((previous) => {
+        const seen = new Set(previous.items.map((item) => item.id));
+        return {
+          items: [...previous.items, ...page.items.filter((item) => !seen.has(item.id))],
+          nextBeforeSeq: page.nextBeforeSeq,
+        };
+      });
+    } catch (error) {
+      if (generation === requestsGen.current) setRequestsError(errorText(error));
+    } finally {
+      if (generation === requestsGen.current) {
+        requestsInFlight.current = false;
+        setRequestsLoading(false);
+      }
+    }
+  };
+
+  // The tree keeps all-history badges; the edits tab scopes both its list and details.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refresh and revision reload completed edits
+  useEffect(() => {
+    if (tab !== "edits" || editScope === "all") return;
+    let live = true;
+    setScopedEdits([]);
+    setScopedEditsError(null);
+    if (!selectedRunId) {
+      setScopedEditsLoading(false);
+      return;
+    }
+    setScopedEditsLoading(true);
+    const params = new URLSearchParams({ runId: selectedRunId });
+    api<SessionChangesResponse>("GET", `/api/rooms/${encodeURIComponent(roomId)}/changes?${params}`)
+      .then((response) => {
+        if (live) {
+          setScopedEditsFor(selectedRunId);
+          setScopedEdits(response.items);
+        }
+      })
+      .catch((error: unknown) => {
+        if (live) setScopedEditsError(errorText(error));
+      })
+      .finally(() => {
+        if (live) setScopedEditsLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [roomId, tab === "edits", editScope, selectedRunId, refresh, props.revision]);
 
   // Load Chat attachments & referenced deliverables
   // biome-ignore lint/correctness/useExhaustiveDependencies: refresh and revision silently refresh first page
@@ -504,13 +632,13 @@ export function ConversationFiles(props: {
     const byPath = new Map<string, SessionFileChange>();
     const folders = new Set<string>();
     const overlaps = new Set<string>();
-    for (const item of agentEdits) {
+    for (const item of activeEdits) {
       byPath.set(item.path, item);
       addAncestorDirs(folders, item.path);
       if (item.overlap) addAncestorDirs(overlaps, item.path);
     }
     return { editsByPath: byPath, editFolders: folders, overlapFolders: overlaps };
-  }, [agentEdits]);
+  }, [activeEdits]);
 
   // Flatten visible directory tree
   const flatTreeRows = useMemo<FlatTreeRow[]>(() => {
@@ -573,13 +701,13 @@ export function ConversationFiles(props: {
   const filteredEdits = useMemo(
     () =>
       queryLower
-        ? agentEdits.filter(
+        ? activeEdits.filter(
             (item) =>
               item.path.toLowerCase().includes(queryLower) ||
               item.authors.some((a) => a.agentName.toLowerCase().includes(queryLower)),
           )
-        : agentEdits,
-    [agentEdits, queryLower],
+        : activeEdits,
+    [activeEdits, queryLower],
   );
 
   // Filtered Chat attachment & deliverable items
@@ -752,6 +880,27 @@ export function ConversationFiles(props: {
     }
   }, [props.openPath, dirMap, fetchDirectory, splitLayout]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the selected file when its request scope changes
+  useEffect(() => {
+    if (tab === "edits") {
+      setSelection(null);
+      setMobileDetail(false);
+    }
+  }, [editScope, selectedRunId, tab === "edits"]);
+
+  const openRunTick = useRef(0);
+  useEffect(() => {
+    const request = props.openRun;
+    if (!request || request.tick === openRunTick.current) return;
+    openRunTick.current = request.tick;
+    setRequestHint(request);
+    setEditScope(`request:${request.id}`);
+    setSelection(null);
+    setMobileDetail(false);
+    setQuery("");
+    setTab("edits");
+  }, [props.openRun]);
+
   const backToList = () => {
     if (selection) {
       if (selection.kind === "chat") restoreFocusKey.current = `chat:${selection.file.id}`;
@@ -872,14 +1021,14 @@ export function ConversationFiles(props: {
   const tabs = [
     ["tree", "全部文件", Folder, null],
     ["git", "Git 变更", GitBranch, gitChangeCount || null],
-    ["edits", "Agent 改动", FileDiff, agentEdits.length || null],
+    ["edits", "Agent 改动", FileDiff, activeEdits.length || null],
     ["chat", "聊天附件", Paperclip, chatFiles.items.length || null],
   ] as const;
 
   const isRefreshing =
     (tab === "tree" && Boolean(dirMap[""]?.loading || searchResult.loading)) ||
     (tab === "git" && gitLoading) ||
-    (tab === "edits" && editsLoading) ||
+    (tab === "edits" && activeEditsLoading) ||
     (tab === "chat" && chatFiles.loading);
 
   return (
@@ -1029,6 +1178,57 @@ export function ConversationFiles(props: {
             ))}
           </div>
 
+          {tab === "edits" && (
+            <div className="file-workbench-run-filter">
+              <select
+                aria-label={t("改动范围")}
+                value={editScope}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  const request = requests.items.find((item) => `request:${item.id}` === value);
+                  if (request) setRequestHint({ id: request.id, content: request.content, tick: 0 });
+                  setEditScope(value);
+                  setSelection(null);
+                  setMobileDetail(false);
+                }}
+              >
+                <option value="all">{t("全部历史")}</option>
+                <option value="latest">{t("最近一次请求")}</option>
+                {requestHint &&
+                  editScope === `request:${requestHint.id}` &&
+                  !requests.items.some((item) => item.id === requestHint.id) && (
+                    <option value={`request:${requestHint.id}`}>
+                      {requestHint.content.trim().replace(/\s+/g, " ").slice(0, 60) || t("附件请求")}
+                    </option>
+                  )}
+                {requests.items.map((request) => (
+                  <option key={request.id} value={`request:${request.id}`}>
+                    {new Date(request.createdAt).toLocaleString()} ·{" "}
+                    {request.content.trim().replace(/\s+/g, " ").slice(0, 60) || t("附件请求")}
+                  </option>
+                ))}
+              </select>
+              {requests.nextBeforeSeq && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={requestsLoading}
+                  onClick={() => void loadMoreRequests()}
+                >
+                  {t("加载更早请求")}
+                </button>
+              )}
+              {requestsError && (
+                <span role="alert">
+                  {t("请求列表加载失败：{reason}", { reason: translateError(requestsError) })}{" "}
+                  <button type="button" className="btn sm" onClick={() => setRefresh((value) => value + 1)}>
+                    {t("重试")}
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="file-workbench-search">
             <Search size={13} aria-hidden="true" />
             <input
@@ -1087,9 +1287,9 @@ export function ConversationFiles(props: {
                 <span>{t("工作区加载失败：{reason}", { reason: translateError(gitError) })}</span>
               </div>
             )}
-            {tab === "edits" && editsError && (
+            {tab === "edits" && activeEditsError && (
               <div className="file-workbench-notice" role="alert">
-                <span>{t("改动列表加载失败：{reason}", { reason: translateError(editsError) })}</span>
+                <span>{t("改动列表加载失败：{reason}", { reason: translateError(activeEditsError) })}</span>
               </div>
             )}
             {tab === "chat" && chatFiles.error && (
@@ -1143,7 +1343,7 @@ export function ConversationFiles(props: {
                   <strong>{trimmedQuery ? t("没有匹配的文件") : t("会话目录没有 Git 改动")}</strong>
                 </div>
               )}
-            {tab === "edits" && !editsLoading && !editsError && filteredEdits.length === 0 && (
+            {tab === "edits" && !activeEditsLoading && !activeEditsError && filteredEdits.length === 0 && (
               <div className="file-workbench-empty">
                 <FileDiff size={24} strokeWidth={1.5} aria-hidden="true" />
                 <strong>{trimmedQuery ? t("没有匹配的文件") : t("还没有报告的改动")}</strong>
@@ -1656,6 +1856,7 @@ export function ConversationFiles(props: {
               selectedGitIndex >= 0 && selectedGitIndex < gitFileEntries.length - 1 ? () => stepGit(1) : null
             }
             agentChange={selectedWorkspacePath ? (editsByPath.get(selectedWorkspacePath) ?? null) : null}
+            editsRunId={tab === "edits" && editScope !== "all" ? selectedRunId : undefined}
             revision={props.revision}
             refreshToken={refresh}
             compact={!splitLayout}

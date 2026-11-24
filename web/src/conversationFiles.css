@@ -843,3 +843,9 @@ html[data-desktop] .file-workbench-head :is(button, a, input, select, textarea, 
     animation: none;
   }
 }
+
+.file-workbench-run-filter { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.file-workbench-run-filter select { min-width: 0; max-width: 100%; flex: 1 1 160px; height: 28px; padding: 0 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px; }
+.file-workbench-run-filter [role="alert"] { flex-basis: 100%; color: var(--danger); font-size: 12px; }
+.message-run-changes { display: flex; align-items: center; gap: 4px; padding: 3px 6px; margin: 2px 2px 0 auto; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: 11.5px; cursor: pointer; }
+.message-run-changes:hover, .message-run-changes:focus-visible { color: var(--accent-text); }

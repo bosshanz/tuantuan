@@ -2,8 +2,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { ChevronDown, Plus, RotateCcw, SquareTerminal, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ProjectTerminalEvent, ProjectTerminalMeta } from "../../shared/project-terminal";
-import { api, type Project } from "./api";
+import {
+  type ProjectTerminalEvent,
+  type ProjectTerminalMeta,
+  worktreeTerminalKey,
+} from "../../shared/project-terminal";
+import { api, type Project, type Room } from "./api";
 import { translateError, useI18n } from "./i18n";
 import "@xterm/xterm/css/xterm.css";
 
@@ -20,6 +24,7 @@ const panelId = (id: string) => `terminal-panel-${id}`;
 /** Project-owned shells retain their sockets, screens and processes while hidden. */
 export default function ProjectTerminal(props: {
   project: Project;
+  room: Room;
   visible: boolean;
   height: number;
   onHeightChange: (height: number) => void;
@@ -43,7 +48,11 @@ export default function ProjectTerminal(props: {
   const [closing, setClosing] = useState<{ id: string; restart: boolean } | null>(null);
   const [maxHeight, setMaxHeight] = useState(600);
   const drag = useRef<{ y: number; height: number } | null>(null);
-  const endpoint = `/api/projects/${encodeURIComponent(project.id)}/terminal`;
+  const room = props.room;
+  const owner = room.worktree ? worktreeTerminalKey(room.id) : project.id;
+  const endpoint = room.worktree
+    ? `/api/rooms/${encodeURIComponent(room.id)}/terminal`
+    : `/api/projects/${encodeURIComponent(project.id)}/terminal`;
   const selected = sessions.find((session) => session.meta.id === active);
   useLayoutEffect(() => {
     sessionsNow.current = sessions;
@@ -58,11 +67,11 @@ export default function ProjectTerminal(props: {
     if (!active) return;
     document.getElementById(tabId(active))?.scrollIntoView({ block: "nearest", inline: "nearest" });
     try {
-      sessionStorage.setItem(`tuantuan.terminal.active.${project.id}`, active);
+      sessionStorage.setItem(`tuantuan.terminal.active.${owner}`, active);
     } catch {
       /* Private browsing may disable session storage. */
     }
-  }, [active, project.id]);
+  }, [active, owner]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: attempt explicitly retries loading the project sessions.
   useEffect(() => {
     let disposed = false;
@@ -75,7 +84,7 @@ export default function ProjectTerminal(props: {
         if (disposed) return;
         let remembered: string | null = null;
         try {
-          remembered = sessionStorage.getItem(`tuantuan.terminal.active.${project.id}`);
+          remembered = sessionStorage.getItem(`tuantuan.terminal.active.${owner}`);
         } catch {
           /* Private browsing may disable session storage. */
         }
@@ -90,7 +99,7 @@ export default function ProjectTerminal(props: {
     return () => {
       disposed = true;
     };
-  }, [endpoint, project.id, attempt]);
+  }, [endpoint, owner, attempt]);
   const update = useCallback((id: string, patch: Partial<Session>) => {
     setSessions((current) => current.map((session) => (session.meta.id === id ? { ...session, ...patch } : session)));
   }, []);
@@ -302,8 +311,8 @@ export default function ProjectTerminal(props: {
         >
           <Plus size={16} />
         </button>
-        <span className="terminal-context" title={selected?.meta.cwd ?? project.cwd}>
-          {project.name}
+        <span className="terminal-context" title={selected?.meta.cwd ?? room.cwd}>
+          {room.worktree ? room.name : project.name}
           <span> / {selected?.meta.shell.split(/[\\/]/).at(-1) ?? "shell"}</span>
         </span>
         <span className="terminal-status" role="status">

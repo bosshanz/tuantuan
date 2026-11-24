@@ -172,15 +172,30 @@ export async function conversationFilesSmoke(
       const moreBtn = workbench.locator(".conversation-files-more");
       if (await moreBtn.count()) {
         if (++pages > 12) throw new Error("file list failed to traverse full history");
+        const previousHeight = await nav.evaluate((el) => el.scrollHeight);
         await moreBtn.click();
         await page.waitForFunction(
-          () => !document.querySelector<HTMLButtonElement>(".conversation-files-more")?.disabled,
+          (height) => (document.querySelector<HTMLElement>(".file-workbench-nav")?.scrollHeight ?? 0) > height,
+          previousHeight,
         );
       }
-      await nav.evaluate((el) => {
-        el.scrollTop = el.scrollHeight;
+      await page.waitForFunction(() => {
+        const list = document.querySelector<HTMLElement>(".file-workbench-nav");
+        if (!list) return false;
+        list.scrollTop = list.scrollHeight;
+        return list.scrollHeight - list.clientHeight - list.scrollTop < 2;
       });
-      await page.waitForTimeout(50);
+      await page.waitForFunction(() => {
+        const list = document.querySelector<HTMLElement>(".file-workbench-nav");
+        if (!list) return false;
+        list.scrollTop = list.scrollHeight;
+        return Boolean(
+          list.querySelector(".conversation-files-more") ||
+            Array.from(list.querySelectorAll(".conversation-file-row")).some((row) =>
+              row.textContent?.includes("历史原件.txt"),
+            ),
+        );
+      });
       if (!(await moreBtn.count()) && !(await row("历史原件.txt").count())) {
         throw new Error("oldest attachment missing after reaching bottom");
       }
@@ -228,6 +243,7 @@ export async function conversationFilesSmoke(
     if (overflow) throw new Error("file workbench horizontally overflows at 320px");
     if (shotsDir)
       await page.screenshot({ path: join(shotsDir, "conversation-files-narrow.png"), animations: "disabled" });
+    await workbench.getByRole("button", { name: "关闭会话文件", exact: true }).focus();
     await page.keyboard.press("Escape");
     await workbench.waitFor({ state: "hidden" });
     if (errors.length) throw new Error(`file list renderer errors: ${errors.join("; ")}`);

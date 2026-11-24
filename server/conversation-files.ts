@@ -28,6 +28,7 @@ import {
   type Store,
   ValidationError,
 } from "./store";
+import { validateRoomWorktree } from "./worktrees";
 
 const INLINE_BYTES_MAX = 20 * 1024 * 1024;
 const SOURCE_BUDGET = 64;
@@ -255,7 +256,15 @@ function fileItem(
   } satisfies FileIdentity);
   const name = reference.path ? reference.name || basename(reference.path) || reference.path : inlineName(source);
   const mimeType = mimeFor(name, source.mimeType);
-  const local = reference.path ? currentFile(room.cwd, reference.path, cache) : null;
+  let local: LocalFile | null = null;
+  if (reference.path) {
+    try {
+      validateRoomWorktree(room);
+      local = currentFile(room.cwd, reference.path, cache);
+    } catch {
+      local = { state: "unavailable", size: null };
+    }
+  }
   const size = local ? local.size : source.size;
   const state = local
     ? local.state
@@ -401,6 +410,7 @@ function requireAvailableFile(item: ConversationFile) {
 }
 
 export function openCheckedFile(room: Room, path: string): { fd: number; size: number } {
+  validateRoomWorktree(room);
   const local = currentFile(room.cwd, path);
   if (local.state !== "available" || !local.realPath || !local.root)
     throw new ValidationError("文件当前不可用", local.state === "missing" ? 404 : 403);
