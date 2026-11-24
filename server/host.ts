@@ -41,7 +41,14 @@ import {
   runTurn,
   turnImageBytes,
 } from "./custom";
-import { detectHarness, type HarnessSpec, harnessSpec, loginShellEnv } from "./harness";
+import {
+  ANTIGRAVITY_ID,
+  detectHarness,
+  type HarnessSpec,
+  harnessSpec,
+  type IdentityDelivery,
+  loginShellEnv,
+} from "./harness";
 import { harnessProcessEnv } from "./harness-env";
 import { harnessRuntimeIdentity } from "./harness-runtime";
 import { pluginOverlay } from "./library";
@@ -321,7 +328,7 @@ export class HarnessHost {
       agentId: agent.id,
       signature,
       runtimeCurrent: () => harnessRuntimeIdentity(status, env) === runtimeIdentity,
-      spec,
+      spec: { ...spec, auth: status.auth, login: status.login },
       provider: prov,
       reasoningPreferences:
         runtime.reasoningPreferences !== undefined || Object.keys(nativePreferences).length
@@ -625,8 +632,13 @@ export class HarnessHost {
       }
     };
     const preferLoad = this.wantLoad.delete(slotKey);
+    const agy = caps._meta?.antigravity as { systemPrompt?: { append?: boolean } } | undefined;
+    const delivery =
+      proc.spec.identity === "antigravity-meta" && agy?.systemPrompt?.append !== true
+        ? "first-prompt"
+        : proc.spec.identity;
     const meta = withClaudePlugins(
-      withProviderMeta(identityMeta(proc.spec, identity), agent, this.store, {
+      withProviderMeta(identityMeta(delivery, identity), agent, this.store, {
         provider: proc.provider,
         env: proc.acp.launch.env,
       }),
@@ -695,7 +707,7 @@ export class HarnessHost {
       checkCurrent();
       view.sessionId = created.sessionId;
       proc.sessions.set(created.sessionId, slot);
-      slot.identityPending = proc.spec.identity === "first-prompt" && identity.trim() !== "";
+      slot.identityPending = delivery === "first-prompt" && identity.trim() !== "";
       res = created;
       fresh = true;
       slot.costBase = 0;
@@ -737,8 +749,9 @@ export class HarnessHost {
           throw new ValidationError(`${proc.spec.name} 未采用服务商模型 ${value}`);
       }
     }
-    // Fresh-session defaults: conversation > Agent > explicit native settings > recommendation.
-    if (fresh) {
+    // agy may return the CLI defaults on resume. Reapply explicit model/mode choices before effort.
+    const nativeAntigravity = agent.harness === ANTIGRAVITY_ID && proc.acp.launch.args[0] === "acp";
+    if (fresh || nativeAntigravity) {
       const preferences = { ...agent.configDefaults, ...this.store.getRoomConfig(room.id, agent.id) };
       // A model change may replace reasoning choices. Derive defaults from its real response,
       // including when a rejected model preference leaves the original model active.
@@ -754,7 +767,9 @@ export class HarnessHost {
         proc,
         slot,
         {
-          ...(proc.reasoningPreferences ?? providerReasoningDefaults(proc.provider, agent.harness, view.configOptions)),
+          ...(fresh
+            ? (proc.reasoningPreferences ?? providerReasoningDefaults(proc.provider, agent.harness, view.configOptions))
+            : {}),
           ...preferences,
         },
         checkCurrent,
@@ -1332,10 +1347,11 @@ export function withClaudePlugins(
   return { ...meta, claudeCode: { ...cc, options: { ...cc.options, plugins } } };
 }
 
-function identityMeta(spec: HarnessSpec, identity: string): Record<string, unknown> | undefined {
+function identityMeta(delivery: IdentityDelivery, identity: string): Record<string, unknown> | undefined {
   if (!identity.trim()) return undefined;
-  if (spec.identity === "claude-meta") return { systemPrompt: { append: identity } };
-  if (spec.identity === "grok-meta") return { rules: identity };
+  if (delivery === "antigravity-meta") return { antigravity: { systemPrompt: { append: identity } } };
+  if (delivery === "claude-meta") return { systemPrompt: { append: identity } };
+  if (delivery === "grok-meta") return { rules: identity };
   return undefined;
 }
 

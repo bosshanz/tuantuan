@@ -9,16 +9,32 @@ export const isRegistryUsageId = (id: string): id is RegistryUsageId =>
   (REGISTRY_USAGE_IDS as readonly string[]).includes(id);
 
 export interface RegistryQuota {
+  /** Native operation that actually supplied the account data. */
+  method?: "session/new" | "/usage" | "account/usage_stats";
   limits: LimitWindow[];
   plan: string | null;
   notes: string[];
   error: string | null;
 }
 export interface RegistryQuotaSnapshot extends RegistryQuota {
+  runtime?: string; // Absent on legacy snapshots.
   at: number;
 }
-export const registryUsageSource = (id: RegistryUsageId) =>
-  id === "reg:antigravity-acp" ? "Antigravity ACP /usage" : "ZCode ACP account/usage_stats";
+export function registryUsageSource(
+  id: RegistryUsageId,
+  source: string | null,
+  args: string[],
+  method: RegistryQuota["method"],
+) {
+  if (id === "reg:zcode-acp") return "ZCode ACP account/usage_stats";
+  const label =
+    source === "managed"
+      ? "Antigravity Registry ACP"
+      : args[0] === "acp"
+        ? "Antigravity CLI (agy acp)"
+        : "Antigravity ACP";
+  return method ? `${label} ${method}` : label;
+}
 export const ZCODE_070_NOTE = "社区桥接 0.70.0 尚不支持团队套餐；查询结果仅来自其个人渠道，不代表团队余额。";
 const object = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -165,7 +181,7 @@ export async function queryRegistryQuota(
 ): Promise<RegistryQuota> {
   if (id === "reg:zcode-acp") {
     const response = await withTimeout(process.agent.request("account/usage_stats", {}), 30_000, "读取 ZCode 额度超时");
-    return parseZcodeUsage(response, options.version);
+    return { ...parseZcodeUsage(response, options.version), method: "account/usage_stats" };
   }
   const created =
     options.created ??
@@ -181,6 +197,7 @@ export async function queryRegistryQuota(
     return {
       limits: [],
       plan: antigravityPlan(created._meta),
+      method: "session/new",
       notes: [],
       error: "当前 Antigravity 会话未声明 /usage，未发送任何查询提示；额度未知",
     };
@@ -193,5 +210,5 @@ export async function queryRegistryQuota(
     30_000,
     "读取 Antigravity 额度超时",
   );
-  return parseAntigravityUsage(collector.text(created.sessionId), created._meta);
+  return { ...parseAntigravityUsage(collector.text(created.sessionId), created._meta), method: "/usage" };
 }

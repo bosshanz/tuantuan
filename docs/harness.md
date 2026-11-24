@@ -10,6 +10,7 @@
 | --- | --- | --- | --- |
 | Claude Code | **内置**：`@agentclientprotocol/claude-agent-acp` 是团团的依赖，用团团自己的 bun 启动；它依赖的 Claude Agent SDK 按平台自带 Claude Code 可执行文件（macOS arm64/x64、Linux x64/arm64，含 musl） | 不需要另装 Claude Code 或 Node | 本机有 `claude` 就运行它完成 `/login`；没有时「Harness」页给出内置 Claude Code 的路径来登录；或设置 `ANTHROPIC_API_KEY`（CC Switch 写入的 `~/.claude/settings.json` 照常生效） |
 | Codex | **内置**：`@agentclientprotocol/codex-acp`，它依赖的 `@openai/codex` 按平台自带 codex 可执行文件（macOS arm64/x64、Linux x64/arm64） | 不需要另装 Codex 或 Node | ACP 登录（ChatGPT）；或 `codex login`（没有全局 `codex` 时页面给出内置命令）；或 `OPENAI_API_KEY`。`~/.codex/config.toml` 照常生效 |
+| Google Antigravity | 检测本机 Antigravity CLI，直接启动 `agy acp`。初次安装可用 Google 官方安装命令 | 支持 `agy acp --help` 的 CLI | 沿用 CLI 登录，也可运行 `agy acp --login` |
 | DeepSeek | **按需安装**：团团补充的官方 npm 包 `@deepseek-ai/dsh@0.2.1-rc.2`，使用原生 `dsh --profile acp`，当前标为实验性 | Node ≥ 22.19；符合版本的本机 Node 优先，否则团团下载托管版本；本机 `dsh` 仍优先 | Harness 页填写 `DEEPSEEK_API_KEY`，或沿用本机 DeepSeek 凭据；握手不验证 Key，详见下节 |
 | Grok Build | **一键安装**：官方脚本 `curl -fsSL https://x.ai/cli/install.sh \| bash`（装到 `~/.grok/bin`，不需要 sudo） | curl、bash | `grok login`，或 `XAI_API_KEY` |
 | OpenCode | **一键安装**：官方脚本（`~/.opencode/bin`）、`bun add -g opencode-ai`（`~/.bun/bin`）、Homebrew，或 npm（仅当全局目录可写） | 对应工具 | `opencode auth login`（自带免费模型时可不登录） |
@@ -17,6 +18,12 @@
 ![Harness 页：内置适配器与一键安装](screenshots/harness.png)
 
 一键安装只在你点按钮后运行官方安装命令：后台执行，日志实时显示，可取消，失败时显示最后一行错误，完成后自动重新检测。取消或超时会回收安装命令及其子进程组。不会用 sudo；某种方式在这台机器上不可用（没有 curl / brew，npm 全局目录需要 sudo）时按钮置灰并说明原因。都不可用时显示手动安装命令。
+
+### Google Antigravity
+
+新安装在「新手引导」选 Google Antigravity，或在「Harness 管理」打开同名卡片。卡片显示实际的可执行文件和参数。已有 Registry 安装或自定义 ACP 启动器会继续使用原来的来源。检测到本机 CLI 后点「使用本机 agy acp」即可切换，原有 Agent、房间和团团聊天记录继续可用。已安装的 Registry 版本还可切回。手动指定路径时填 `agy` 可执行文件本身，团团会追加 `acp`；原先以其他名称保存的 ACP 启动器仍以无参数方式运行。[Google 官方安装说明](https://antigravity.google/docs/getting-started?tab=cli) · [官方 ACP 说明](https://antigravity.google/docs/cli/acp)
+
+模型、思考等级和执行模式来自所选来源的原生会话。项目根目录的 `AGENTS.md` 由 CLI 加载，项目里的 `.agents/skills/<名称>/SKILL.md` 可在对话中按需读取。审批卡只在 CLI 发来权限请求时出现，原生 `toolPermission` 会影响哪些操作需要确认。同一来源重启后，团团会尝试恢复原生会话，并重新应用仍受支持的会话模型与思考等级；切换来源时，如果新来源无法恢复该会话，团团会新建原生会话。[Google 权限设置](https://antigravity.google/docs/permissions)
 
 ### DeepSeek 官方 Harness（预发布）
 
@@ -34,10 +41,10 @@ DeepSeek Harness 与「服务商」页的 DeepSeek 是独立入口：后者仍�
 
 团团直接读取官方 [ACP Registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)：启动时用本地缓存（没有缓存时用随包的快照，离线也能看），后台每 6 小时更新一次，「刷新」按钮立即更新；数据先过 schema 校验，坏条目跳过，更新失败保留旧数据并显示原因。图标从 Registry 下载后缓存在本地。
 
-- 常用列表：Claude Code、Codex、DeepSeek、Grok Build、OpenCode、Pi、MiniMax Code。「更多 Agent」列出 Registry 与团团补充的条目（图标、名称、简介、版本、协议、平台），可搜索；补充来源会单独说明。
+- 常用列表：Claude Code、Codex、Google Antigravity、DeepSeek、Grok Build、OpenCode、Pi、MiniMax Code。「更多 Agent」列出 Registry 与团团补充的条目（图标、名称、简介、版本、协议、平台），可搜索；补充来源会单独说明。
 - 一键安装只在点按钮后执行，装到团团自己的目录（`<数据目录>/harnesses/agents/<id>/<版本>`，可用 `TUANTUAN_HARNESS_DIR` 改），固定版本，不用 sudo，不装全局：npx 包用团团自带的 Bun 安装运行；需要 Node ≥ 22 的（如 MiniMax Code）自动下载团团专用的 Node 22（校验 SHASUMS256）；uvx 包用你的 uv，没有就下载一份；二进制包按平台下载，带 sha256 时校验。
 - Registry 的 Agent id、版本必须是安全的单个目录段；拒绝路径穿越和保留名称。二进制 / npx 安装先写入独立随机暂存目录，成功后更新版本目录与 manifest，失败或取消时清理暂存；uvx 因 venv 固定路径仍直接写目标版本目录，失败时清理该目录。
-- Registry 版本变了显示「更新到 x」；可卸载团团装的版本。你自己装的版本始终优先（`TUANTUAN_PREFER_MANAGED=1` 反过来）。
+- Registry 版本变了显示「更新到 x」；可卸载团团装的版本。其他 Harness 通常优先使用本机版本（可配置 `TUANTUAN_PREFER_MANAGED`）；Antigravity 会保留已有的 Registry 来源，直到用户主动切换。
 - ACP / CLI 更新后，团团按实际启动文件及其配套引擎的身份重新读取能力，同一路径覆盖安装也会使旧选项缓存失效。运行中的任务继续完成，下次空闲接入时更换进程并重新握手；已保存的模型与 Think 选择仍按新版实际支持的选项恢复。Registry 刷新只发现更新，安装仍由用户触发。
 - 装好的 Agent 可在新建 Agent 时选择；安装完成自动握手，已有安装可点「握手」重新检查。卡片按 Harness 声明提供登录按钮、终端命令或 Key 输入框；登录期间显示等待状态，失败保留入口供重试，无法确认登录状态时明确显示未知。
 - **API Key 登录**：Agent 通过 ACP 声明 `env_var` 登录方式（如 glm-acp-agent 的 `Z_AI_API_KEY`）时，握手结果里直接出现输入框；普通登录方式在错误中明确指出缺少的 Key 变量名时，也会出现对应输入框。Key 保存在团团的数据库里（和服务商 Key 一样只在服务端、打码显示），只注入这个 Harness 的进程环境（Agent 自己的环境变量优先），保存后自动重新握手，可修改、清除。回复因为缺 Key 失败时，会话里显示「需要 API Key」并可当场填写。
@@ -59,13 +66,14 @@ Registry 中的登录选项来自各 Harness 自己的认证方式。第三方�
 
 ## 原生提示词与团团身份
 
-Claude Code、OpenCode、Pi、Codex 的基础提示词由实际启动的 CLI / SDK 提供，团团不维护固定版本的正文副本。每个 Agent 的身份文档保存在团团里，不写进你的仓库；它与会话身份、可选个人资料一起按下表传递。
+Claude Code、Codex、Google Antigravity、OpenCode、Pi 的基础提示词由实际启动的 CLI / SDK 提供，团团不维护固定版本的正文副本。每个 Agent 的身份文档保存在团团里，不写进你的仓库；它与会话身份、可选个人资料一起按下表传递。
 
 | Harness | 原生提示词来源 | 团团身份如何传入 |
 | --- | --- | --- |
 | Claude Code | 当前 SDK / CLI 的 `claude_code` preset | `_meta.systemPrompt.append`，保留原生 preset |
 | OpenCode | 当前 CLI 及其原生 Agent 配置 | 新会话首条普通消息中的 `<tuantuan-identity>` |
 | Pi | 当前 Pi 引擎及其原生资源、配置 | 新会话首条普通消息中的 `<tuantuan-identity>`；服务商扩展只配置模型与思考参数 |
+| Google Antigravity | 所选 CLI 的原生指令与项目规则 | 握手声明支持时通过 `_meta.antigravity.systemPrompt.append` 追加身份。旧运行时沿用首条普通消息 |
 | Codex | 当前 CLI 的模型目录及原生指令 | 合并 `CODEX_CONFIG.developer_instructions`；需要补充目录外自定义模型时，通用指令从当前 CLI 的隔离临时会话读取 |
 
 Grok 通过 `_meta.rules` 传递身份；其他 Harness 使用首条普通消息。每轮额外选择的 Skills 索引、群聊转述、原始任务与本轮协作职责通过普通消息传递。首条是原生命令时，采用首条消息方式的身份注入会延后到普通对话，避免改变命令路由。

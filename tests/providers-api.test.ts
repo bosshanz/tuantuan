@@ -131,7 +131,9 @@ test("usage API: per-turn ACP usage is logged; OpenCode has no quota placeholder
   }>("GET", "/api/usage");
   expect(u.data.tuantuan).toContainEqual(expect.objectContaining({ harness: "mock", turns: 1, total: 1494 }));
   expect(u.data.harnesses.find((x) => x.harness === "grok")?.notes).toContain("额度：点刷新向 Grok 查询");
-  expect(u.data.harnesses.map((x) => x.harness)).toEqual(["claude-code", "codex", "grok"]);
+  const cards = u.data.harnesses.map((x) => x.harness);
+  expect(cards).toEqual(expect.arrayContaining(["claude-code", "codex", "grok"]));
+  expect(cards).not.toContain("opencode");
 });
 
 test("Grok live quota uses only initialize and the read-only billing extension; failures stay unknown", async () => {

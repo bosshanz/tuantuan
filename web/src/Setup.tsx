@@ -28,6 +28,10 @@ interface TestResult {
   authError?: string | null;
 }
 
+function testKey(h: HarnessStatus) {
+  return JSON.stringify([h.id, h.source, h.override, h.command, h.args, h.version]);
+}
+
 /**
  * 新手引导 (first launch, with onFinish) and Harness 管理 (afterwards): find the harness CLIs on this machine, show how to install / log in, check the ACP
  * handshake, and bind harnesses to agents. Installers run only when the user clicks one (InstallPanel).
@@ -55,9 +59,11 @@ export function SetupPage(props: {
   useEffect(() => void refresh(), [refresh]);
 
   const [authing, setAuthing] = useState<string | null>(null);
-  const test = async (id: string, methodId?: string) => {
-    setTests((result) => ({ ...result, [id]: "running" }));
-    if (methodId) setAuthing(id);
+  const test = async (h: HarnessStatus, methodId?: string) => {
+    const { id } = h;
+    const key = testKey(h);
+    setTests((result) => ({ ...result, [key]: "running" }));
+    if (methodId) setAuthing(key);
     const r = await (methodId
       ? api<TestResult>("POST", `/api/harnesses/${id}/authenticate`, { methodId })
       : api<TestResult>("POST", `/api/harnesses/${id}/test`)
@@ -65,8 +71,8 @@ export function SetupPage(props: {
       ok: false,
       error: (e as Error).message,
     }));
-    setAuthing(null);
-    setTests((result) => ({ ...result, [id]: r }));
+    if (methodId) setAuthing((active) => (active === key ? null : active));
+    setTests((result) => ({ ...result, [key]: r }));
   };
 
   const bind = async (agent: Agent, harness: string) => {
@@ -124,7 +130,7 @@ export function SetupPage(props: {
             <div className="card-body harness-list">
               {!list && <Loader2 size={16} className="spin" />}
               {curated.map((h) => {
-                const result = tests[h.id];
+                const result = tests[testKey(h)];
                 return (
                   <div key={h.id} className="harness-row" data-ok={h.path ? "" : undefined}>
                     <div className="harness-main">
@@ -150,7 +156,11 @@ export function SetupPage(props: {
                                   : undefined
                             }
                           >
-                            {t(SOURCE_LABEL[h.source])}
+                            {t(
+                              h.nativeCliPath !== undefined && h.source === "managed"
+                                ? "Registry 兼容版本"
+                                : SOURCE_LABEL[h.source],
+                            )}
                           </span>
                         )}
                         {h.docs && (
@@ -165,9 +175,17 @@ export function SetupPage(props: {
                           </a>
                         )}
                       </div>
-                      <div className="harness-sub muted">{h.path ?? translateError(h.error ?? "")}</div>
-                      {(!h.command || h.installers.length > 0) && <InstallPanel h={h} onInstalled={changed} />}
-                      {(h.updateAvailable || h.source === "managed") && <ManagedActions h={h} onChanged={changed} />}
+                      <div className="harness-sub muted">
+                        {h.command && h.nativeCliPath !== undefined
+                          ? [h.command, ...h.args].join(" ")
+                          : (h.path ?? translateError(h.error ?? ""))}
+                      </div>
+                      {(!h.command || h.installers.length > 0 || h.nativeCliPath === null) && (
+                        <InstallPanel h={h} onInstalled={changed} />
+                      )}
+                      {(h.source === "managed" || (h.updateAvailable && h.nativeCliPath === undefined)) && (
+                        <ManagedActions h={h} onChanged={changed} />
+                      )}
                       {h.command &&
                         (h.id === "deepseek" ||
                           (result && result !== "running" && (result.loggedIn !== true || result.needsKey))) && (
@@ -180,22 +198,22 @@ export function SetupPage(props: {
                         secretEnv={result && result !== "running" ? (result.secretEnv ?? h.secretEnv) : h.secretEnv}
                         onChanged={async () => {
                           await refresh();
-                          await test(h.id);
+                          await test(h);
                         }}
                       />
-                      <PathOverride h={h} onSaved={setList} />
+                      <PathOverride key={h.override ?? ""} h={h} onSaved={setList} />
                     </div>
                     <div className="harness-side">
                       <button
                         type="button"
                         className="btn sm"
                         disabled={!h.command || result === "running"}
-                        onClick={() => void test(h.id)}
+                        onClick={() => void test(h)}
                       >
                         {result === "running" ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
                         {result && result !== "running" ? t("重新检测") : t("握手测试")}
                       </button>
-                      {authing === h.id && (
+                      {authing === testKey(h) && (
                         <div className="muted harness-test" role="status">
                           {t("等待登录完成…（可能会打开浏览器）")}
                         </div>
@@ -233,7 +251,7 @@ export function SetupPage(props: {
                                 type="button"
                                 className="btn sm primary"
                                 title={m.description ? t(m.description) : undefined}
-                                onClick={() => void test(h.id, m.id)}
+                                onClick={() => void test(h, m.id)}
                               >
                                 {t("用「{name}」登录", { name: t(m.name) })}
                               </button>
@@ -383,38 +401,68 @@ function PathOverride({ h, onSaved }: { h: HarnessStatus; onSaved: (l: HarnessSt
   const { t } = useI18n();
   const [open, setOpen] = useState(!!h.override);
   const [value, setValue] = useState(h.override ?? "");
-  if (!open)
-    return (
-      <button type="button" className="quiet-link" onClick={() => setOpen(true)}>
-        {t("自定义路径")}
-      </button>
-    );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (path: string | null) => {
+    setSaving(true);
+    setError(null);
+    try {
+      onSaved(await api<HarnessStatus[]>("PUT", `/api/harnesses/${h.id}/path`, { path }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
-    <form
-      className="row"
-      style={{ gap: 6 }}
-      onSubmit={(e) => {
-        e.preventDefault();
-        void api<HarnessStatus[]>("PUT", `/api/harnesses/${h.id}/path`, { path: value.trim() || null }).then(onSaved);
-      }}
-    >
-      <input
-        className="input mono grow"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder={t("/opt/homebrew/bin/…（留空则按 PATH 查找）")}
-        aria-label={t("{name} 路径", { name: t(h.name) })}
-        spellCheck={false}
-      />
-      <button type="submit" className="btn sm">
-        {t("保存")}
-      </button>
-      {!h.override && (
-        <button type="button" className="btn ghost sm" onClick={() => setOpen(false)}>
-          {t("取消")}
+    <>
+      {h.nativeCliPath && (h.source === "managed" || (h.override && h.override !== h.nativeCliPath)) && (
+        <button type="button" className="btn sm" disabled={saving} onClick={() => void save(h.nativeCliPath ?? null)}>
+          {t("使用本机 agy acp")}
         </button>
       )}
-    </form>
+      {h.nativeCliPath !== undefined && h.override && h.managedVersion && (
+        <button type="button" className="quiet-link" disabled={saving} onClick={() => void save(null)}>
+          {t("切回 Registry 兼容版本")}
+        </button>
+      )}
+      {!open ? (
+        <button type="button" className="quiet-link" onClick={() => setOpen(true)}>
+          {t("自定义路径")}
+        </button>
+      ) : (
+        <form
+          className="row"
+          style={{ gap: 6 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save(value.trim() || null);
+          }}
+        >
+          <input
+            className="input mono grow"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={t(
+              h.nativeCliPath !== undefined
+                ? "agy 或 ACP 启动器的绝对路径"
+                : "/opt/homebrew/bin/…（留空则按 PATH 查找）",
+            )}
+            aria-label={t("{name} 路径", { name: t(h.name) })}
+            spellCheck={false}
+          />
+          <button type="submit" className="btn sm" disabled={saving}>
+            {t("保存")}
+          </button>
+          {!h.override && (
+            <button type="button" className="btn ghost sm" onClick={() => setOpen(false)}>
+              {t("取消")}
+            </button>
+          )}
+        </form>
+      )}
+      {error && <div className="error-text">{translateError(error)}</div>}
+    </>
   );
 }
 
@@ -492,14 +540,19 @@ export function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled
   };
   const cancel = () => void api("DELETE", `/api/harnesses/${h.id}/install`).then(() => poll());
 
-  const usable = h.installers.filter((i) => i.available);
-  // Installed: keep showing the finished job's log, otherwise nothing to offer.
-  if (h.command && !job) return null;
+  // A working compatibility server can stay selected while the user installs the native CLI.
+  const needsNative = h.nativeCliPath === null && h.args[0] !== "acp";
+  const showInstallers = !h.command || needsNative;
+  const installers = h.command ? h.installers.filter((i) => i.id === "script" && needsNative) : h.installers;
+  const usable = installers.filter((i) => i.available);
+  const manualNative = h.nativeCliPath !== undefined && !installers.some((i) => i.id === "script");
+  if (!showInstallers && !job) return null;
   return (
     <div className="install-panel">
-      {h.installers.length > 0 && !running && !h.command && (
+      {manualNative && showInstallers && !running && <CopyLine label="Antigravity CLI" text={h.install} />}
+      {installers.length > 0 && !running && showInstallers && (
         <div className="install-actions">
-          {h.installers.map((i, n) => (
+          {installers.map((i, n) => (
             <button
               key={i.id}
               type="button"
@@ -543,10 +596,8 @@ export function InstallPanel({ h, onInstalled }: { h: HarnessStatus; onInstalled
       )}
       {job?.state === "cancelled" && <div className="muted harness-sub">{t("已取消")}</div>}
       {error && <div className="error-text harness-sub">{translateError(error)}</div>}
-      {h.command ? null : h.installers.length === 0 ? (
-        <CopyLine label={t("安装")} text={t(h.install)} />
-      ) : (
-        !running && usable.length === 0 && <CopyLine label={t("手动安装")} text={t(h.install)} />
+      {showInstallers && !running && !manualNative && usable.length === 0 && (
+        <CopyLine label={t(installers.length ? "手动安装" : "安装")} text={t(h.install)} />
       )}
     </div>
   );

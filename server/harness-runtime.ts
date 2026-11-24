@@ -139,11 +139,14 @@ function codexEngineFiles(command: string[]): string[] {
   }
 }
 
-/** File observations, not an assumption that adapter/Registry versions are engine versions. */
-export function harnessRuntimeIdentity(
-  status: Pick<HarnessStatus, "id" | "command" | "args" | "version" | "source" | "registryId">,
-  env: Record<string, string>,
-): string {
+type RuntimeStatus = Pick<HarnessStatus, "id" | "command" | "args" | "version" | "source" | "registryId">;
+
+export function harnessRuntimeIdentity(status: RuntimeStatus, env: Record<string, string>): string {
+  return `${generations.get(status.id) ?? 0}|${harnessRuntimeFingerprint(status, env)}`;
+}
+
+/** Stable across process restarts, changes when the selected executable or engine changes. */
+export function harnessRuntimeFingerprint(status: RuntimeStatus, env: Record<string, string>): string {
   let engine: string[] | null = null;
   try {
     if (status.id === "codex" && status.command)
@@ -162,7 +165,6 @@ export function harnessRuntimeIdentity(
   const managed = status.source === "managed" && status.registryId ? readManifest(status.registryId) : null;
   return JSON.stringify([
     status.id,
-    generations.get(status.id) ?? 0,
     status.source,
     status.version,
     status.command

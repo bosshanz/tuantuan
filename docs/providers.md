@@ -100,7 +100,7 @@ OpenCode V2 的原生 provider 策略可能高于进程配置。如果它禁止�
 | Grok：官方 `grok usage <session-id>` | 今天 / 7 天 token、今天花费（有价格时） | 只查最近 7 天动过的会话 |
 | Grok ACP `x.ai/billing` 扩展（点刷新） | 周期额度、重置时间、套餐、预付余额 | 沿用 Grok 自己的登录；只握手和查询，不创建会话、不发模型请求；旧版本不支持时提示更新 |
 | Grok 每轮 ACP 返回的 `_meta.usage` | 计入「团团今天」 | |
-| Antigravity 原生 `/usage` | 各模型组的额度窗口、重置时间、套餐 | 只在 Harness 声明该命令后查询，命令由 ACP 服务直接处理；API Key 等认证方式可能没有订阅额度 |
+| Antigravity CLI 或 Registry ACP | 建会话时可返回套餐；原生 `/usage` 可返回各模型组额度窗口和重置时间 | 只在当前会话声明该命令后查询。仅返回套餐时，百分比显示未知。切换来源后单独查询 |
 | ZCode ACP `account/usage_stats` 扩展 | 桥接返回的个人套餐额度与状态 | 只握手和查询，不发模型请求；0.70.0 不支持团队套餐，该结果不能代表原生 ZCode 的团队余额 |
 | 余额：xAI `GET /v1/api-key`（检查 Key / 团队是否被停用，拿 team_id）+ Management API `GET /v1/billing/teams/{team_id}/prepaid/balance`（需另填 Management Key） | 预付余额（美元） | 没填 Management Key 时只显示 Key 状态 |
 | 余额：DeepSeek `/user/balance`、OpenRouter `/api/v1/credits`、Kimi `/v1/users/me/balance`、硅基流动 `/v1/user/info` | 余额 | 其它服务商显示「没有公开的余额接口」 |

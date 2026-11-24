@@ -6,7 +6,7 @@
 
 **A local workspace for multi-agent collaboration.**
 
-Bring Claude Code, Codex, DeepSeek, OpenCode, Pi, Grok Build, MiniMax Code, and other coding agents into project-based conversations. Tuantuan connects their coding runtimes (harnesses) through the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
+Bring Claude Code, Codex, Google Antigravity, DeepSeek, OpenCode, Pi, Grok Build, MiniMax Code, and other coding agents into project-based conversations. Tuantuan connects their coding runtimes (harnesses) through the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
 
 Run it as an Electron desktop app on macOS, Windows, or Linux, or use a browser with the local server. Bring your own harness account or API provider; Tuantuan does not include a model service.
 

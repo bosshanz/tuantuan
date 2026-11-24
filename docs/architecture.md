@@ -32,7 +32,7 @@
 | `server/library.ts` | 「Skills 与插件」：只读扫描 ~/.claude / ~/.agents / ~/.codex / 项目目录，解析 Claude 插件（plugin.json），导入到 `<data>/library`（更新 / 删除），算各 Harness 支持；按 Agent 勾选的插件在建会话时变成 Claude `_meta.claudeCode.options.plugins` 或 Skill 索引 + stdio MCP |
 | `web/src/brands.ts` | 模型 id → 厂商（含 `openrouter/…`、`anthropic/…` 前缀），未知一律中性图标；Logo 来自 @lobehub/icons（MIT） |
 | `server/usage.ts` | 用量：读 `~/.claude/projects` / `~/.codex/sessions` 的 JSONL，解析 Claude Code `/usage`、Codex `/status`、Grok CLI 会话用量及 ACP billing 额度；未知值保留为空 |
-| `server/registry-usage.ts` | Registry Harness 的原生额度查询与解析；Antigravity `/usage`、ZCode `account/usage_stats`；不读取凭据或改变登录渠道 |
+| `server/registry-usage.ts` | Registry Harness 的原生额度查询与解析；Antigravity 原生或 Registry 会话的套餐与可选 `/usage`、ZCode `account/usage_stats`；不读取凭据或改变登录渠道 |
 | `server/dirpicker.ts` | 选择文件夹：系统对话框（osascript / zenity / kdialog，可由桌面壳替换）+ 应用内浏览器的目录列表与常用位置 |
 | `server/host.ts` | `HarnessHost`：按「房间 + Agent + 工作目录」隔离进程；会话 ↔ ACP session 映射（`acp_sessions` 表，重启后 resume / load）；prompt、cancel、配置项 / 模式、会话列表与切换；同房间同 Agent 防重入，权限请求挂起直到用户回答 |
 | `shared/attachments.ts` / `server/attachments.ts` | 附件数量、大小、编码契约；UTF-8 文本内联、二进制原件托管与精确只读路径授权 |
@@ -184,7 +184,7 @@ Skills 的原生来源与 Agent 选择由 `skills.ts` 统一解析：真实路�
 
 Grok 额度沿用 `AcpProcess`，初始化后只发送 `_x.ai/billing`，不建立模型会话；解析当前周期百分比及旧版 credits schema，缓存最新查询和错误。此处是 Grok 的只读扩展，不引入原生 provider 适配层。
 
-`server/registry-usage.ts` 负责 Antigravity / ZCode 的额度解析和只读 ACP 查询。Antigravity 等待当前会话声明 `/usage` 后发送原生命令；ZCode 直接发 `account/usage_stats`，不建会话或调用模型。`app.ts` 在成功登录 / 握手的同一进程查询并保存公开额度快照，手动刷新单飞；页面读取缓存，不启动登录。失败保留未知与错误，不用旧数值冒充新结果。ZCode 0.70.0 仅覆盖个人渠道，团队套餐明确标注未支持。
+`server/registry-usage.ts` 负责 Antigravity / ZCode 的额度解析和只读 ACP 查询。Antigravity 等待当前会话声明 `/usage` 后发送原生命令；ZCode 直接发 `account/usage_stats`，不建会话或调用模型。`app.ts` 在成功登录或握手的同一进程查询并保存公开额度快照。快照与进行中的查询按所选可执行文件、启动参数和 Harness 环境区分；来源切换时忽略旧查询的迟到结果。打开页面只读匹配当前来源的缓存，不启动 CLI。未声明 `/usage` 的 Antigravity 可显示 `session/new` 返回的套餐，额度窗口保留未知。失败保留未知与错误，不用旧数值冒充新结果。ZCode 0.70.0 仅覆盖个人渠道，团队套餐明确标注未支持。
 
 额度刷新、Harness 检测与登录请求在入口校验后关闭 HTTP 的默认空闲超时，实际等待仍受各 ACP 操作的超时限制。`process-tree.ts` 统一隔离进程清理错误：进程组信号失败保留日志，仅对尚未退出的原始子进程尝试回退；延迟强制终止同样不抛出未捕获异常，显式强制终止会撤销旧计时器。主进程先退出时仍回收其组内后代；清理失败不能覆盖查询结果或终止团团服务。
 
@@ -243,6 +243,7 @@ Host slot 记录完整有效 MCP 配置签名（用户服务器、插件 stdio M
 ## Harness 来源与一键安装
 
 - `detectHarness` 顺序：「Harness 页填的路径」→ 登录 shell 的 PATH → 团团内置（`bundled`，从团团自己的 `node_modules` 解析 ACP 适配器，用 `process.execPath` 的 Bun 启动）→ 团团安装（`managed`）。`TUANTUAN_PREFER_MANAGED=1` 时团团安装的优先。
+- Google Antigravity 复用原 ID `reg:antigravity-acp`。支持 `_meta.antigravity.systemPrompt.append` 的会话在 ACP 会话元数据中接收身份，旧实现回退到首条普通消息。新装选择本机 `agy acp`，旧 Registry manifest 或显式 ACP 启动器保留优先级。用户在 Harness 页切换来源后，运行时身份变化会使模型及配置重新握手；已有 Agent 和房间沿用原绑定。
 - DeepSeek 常用定义为 `deepseek` / `dsh --profile acp`，身份走首条普通消息；托管安装复用 Registry 安装器，但条目由团团补充，固定官方 npm `@deepseek-ai/dsh@0.2.1-rc.2`，需要 Node ≥ 22.19，符合版本的本机 Node 优先，否则下载托管版本，不加到桌面依赖。登录入口补充 `DEEPSEEK_API_KEY`，沿用 `settings.harnessEnv` 的保存与进程注入；原生 `$DSH_HOME/.credentials.yaml`（默认 `~/.dsh/.credentials.yaml`）优先级归 CLI，不改写本机文件。该版本不声明认证方法且 `authenticate` 不校验凭据，成功握手 / 建会话时的 `loggedIn` 为未知，只表示连接可用；可识别的真实认证失败仍返回未登录及错误。安装版本来自 npm / CLI，不采用固定为 `0.0.1` 的 ACP `agentInfo.version`。会话复用走原生 list / resume，不伪造 `session/load` 回放；DeepSeek 服务商的兼容规则保持独立。
 - 桌面包默认不带 Claude Code / Codex 适配器（引擎各 250–400 MB）：首次使用时走 Registry 安装（`claude-acp` / `codex-acp`，npx 包，Bun 运行）。`TUANTUAN_BUNDLE_ADAPTERS=1` 打包时改为内置。登录命令按「内置 → 团团安装」两处找 Claude / Codex 可执行文件。
 - Registry 安装：schema 与 `installManaged` 的直接入口均校验 id / 版本为安全目录段（版本不得与 manifest 保留名称冲突），并确认安装路径在 Agent 目录内、关键目录不是符号链接。二进制与 npx 先安装到带随机后缀的独立 `.partial` 目录；发布前检查取消信号，成功后替换版本目录并写 manifest，失败 / 取消清理暂存。Registry 版本变了提示更新；卸载只删团团目录。需要 Node ≥ 22 的包（`engines.node` 或常用定义里 `runtime: "node"`，如 MiniMax 的 better-sqlite3）用托管 Node（nodejs.org，校验 SHASUMS256）。uv 工具直接装到最终目录（venv 写死路径）。

@@ -1,7 +1,8 @@
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { shellQuote } from "./acp";
 import { readManifest } from "./managed";
 import { platformKey, type Registry, type RegistryAgent } from "./registry";
 
@@ -13,6 +14,8 @@ import { platformKey, type Registry, type RegistryAgent } from "./registry";
 export type IdentityDelivery =
   /** claude-agent-acp: session/new `_meta.systemPrompt = { append }`. */
   | "claude-meta"
+  /** Antigravity: native systemPrompt.append when advertised, otherwise first-prompt. */
+  | "antigravity-meta"
   /** grok agent stdio: session/new `_meta.rules`. */
   | "grok-meta"
   /** codex-acp: process env CODEX_CONFIG={"developer_instructions": …}. */
@@ -61,6 +64,9 @@ export const MOCK_INSTALLER_PATH = resolve(import.meta.dir, "mock-installer.ts")
 
 export const MOCK_AGENT_PATH = resolve(import.meta.dir, "mock-agent.ts");
 
+export const ANTIGRAVITY_ID = "reg:antigravity-acp";
+const agyInstall = "curl -fsSL https://antigravity.google/cli/install.sh | bash";
+
 export const HARNESSES: HarnessSpec[] = [
   {
     id: "claude-code",
@@ -91,6 +97,24 @@ export const HARNESSES: HarnessSpec[] = [
     auth: "运行 codex login（ChatGPT 账号）；或设置 OPENAI_API_KEY / CODEX_API_KEY",
     docs: "https://github.com/agentclientprotocol/codex-acp",
     identity: "codex-env",
+  },
+  {
+    id: ANTIGRAVITY_ID,
+    name: "Google Antigravity",
+    bin: process.platform === "win32" ? "agy.exe" : "agy",
+    args: ["acp"],
+    versionArgs: ["--version"],
+    install: process.platform === "win32" ? "irm https://antigravity.google/cli/install.ps1 | iex" : agyInstall,
+    installers:
+      process.platform === "win32"
+        ? []
+        : [{ id: "script", label: "Antigravity CLI", tool: "curl", command: agyInstall }],
+    registry: "antigravity-acp",
+    curated: true,
+    auth: "使用 Antigravity CLI 已登录的账号，或运行 agy acp --login",
+    login: "agy acp --login",
+    docs: "https://antigravity.google/docs/cli/acp",
+    identity: "antigravity-meta",
   },
   {
     id: "grok",
@@ -363,6 +387,8 @@ export interface HarnessStatus {
   bundledVersion: string | null;
   version: string | null;
   override: string | null;
+  /** Detected native CLI, also offered to existing Registry/wrapper users as an explicit switch. */
+  nativeCliPath?: string | null;
   error: string | null;
   installers: InstallerStatus[];
   /** Extra env the registry entry asks for (managed installs). */
@@ -427,7 +453,7 @@ export async function installerStatuses(spec: HarnessSpec, env: Record<string, s
       : (d.npx?.package ?? (d.uvx ? `uvx ${d.uvx.package}` : ""));
     out.push({
       id: "registry",
-      label: "团团安装",
+      label: spec.id === ANTIGRAVITY_ID ? "Registry 兼容版本" : "团团安装",
       command: `${reg.origin === "tuantuan" ? "团团补充目录" : "ACP Registry"}：${reg.name} ${reg.version}（${what}）`,
       available: registryInstallable(reg),
       reason: registryInstallable(reg) ? null : `没有适合 ${platformKey()} 的安装包`,
@@ -462,15 +488,28 @@ export async function installerStatuses(spec: HarnessSpec, env: Record<string, s
       reason,
     });
   }
+  if (spec.id === ANTIGRAVITY_ID) out.sort((a, b) => Number(a.id === "registry") - Number(b.id === "registry"));
   return out;
 }
 
-export async function detectHarness(spec: HarnessSpec, override: string | null): Promise<HarnessStatus> {
-  const env = await loginShellEnv();
+/** Resolve the active launch without executing a CLI (also used by the read-only usage overview). */
+export function resolveHarness(
+  spec: HarnessSpec,
+  override: string | null,
+  env: Record<string, string>,
+): Omit<HarnessStatus, "installers"> {
   const bundled = bundledAdapter(spec);
   const reg = spec.registry ? (registry?.agent(spec.registry) ?? null) : null;
   const managed = spec.registry ? readManifest(spec.registry) : null;
+  const antigravity = spec.id === ANTIGRAVITY_ID;
+  const nativeCliPath = antigravity
+    ? (Bun.which(spec.bin, { PATH: env.PATH }) ??
+      (process.platform === "win32" && env.LOCALAPPDATA
+        ? Bun.which(join(env.LOCALAPPDATA, "agy", "bin", "agy.exe"))
+        : null))
+    : null;
   const base = {
+    ...(antigravity ? { nativeCliPath } : {}),
     env: {} as Record<string, string>,
     registryId: spec.registry ?? null,
     managedVersion: managed?.version ?? null,
@@ -488,19 +527,17 @@ export async function detectHarness(spec: HarnessSpec, override: string | null):
     docs: spec.docs,
     override,
     bundledVersion: bundled?.version ?? null,
-    installers: await installerStatuses(spec, env),
   };
-  const onPath = override
-    ? existsSync(override)
-      ? override
-      : null
-    : spec.bin
-      ? which(spec.bin, env.PATH ?? "")
-      : null;
-  // The user's own install wins; then the copy shipped inside Tuantuan; then one Tuantuan installed.
-  if (!onPath && !override && managed && !(bundled && process.env.TUANTUAN_PREFER_MANAGED !== "1"))
+  const localPath = antigravity ? nativeCliPath : spec.bin ? which(spec.bin, env.PATH ?? "") : null;
+  const onPath = override ? (existsSync(override) ? override : null) : localPath;
+  // A managed Antigravity install predates native discovery or was explicitly chosen.
+  // Preserve its sign-in until the user selects the CLI. Other harnesses prefer PATH.
+  const preferManaged =
+    !override && managed && (antigravity || (!onPath && (!bundled || process.env.TUANTUAN_PREFER_MANAGED === "1")));
+  if (preferManaged)
     return {
       ...base,
+      ...(antigravity ? { login: "", auth: "按握手结果里 Agent 自己声明的方式登录" } : {}),
       env: managed.env,
       path: managed.args[0] && managed.kind === "npx" ? managed.args[0] : managed.command,
       command: managed.command,
@@ -529,22 +566,71 @@ export async function detectHarness(spec: HarnessSpec, override: string | null):
       version: null,
       error: override ? `找不到 ${override}` : spec.bin ? `PATH 中没有 ${spec.bin}` : "未安装",
     };
-  const found = {
+  // Existing custom ACP launchers already speak stdio. Only the agy CLI takes the subcommand.
+  const native = antigravity && (!override || /^(?:agy|agy\.exe)$/i.test(basename(onPath)));
+  return {
     ...base,
+    ...(native
+      ? {
+          login:
+            process.platform === "win32"
+              ? `& '${onPath.replaceAll("'", "''")}' acp --login`
+              : `${shellQuote(onPath)} acp --login`,
+        }
+      : {}),
+    ...(antigravity && !native ? { login: "", auth: "按握手结果里 Agent 自己声明的方式登录" } : {}),
     path: onPath,
     command: onPath,
-    args: spec.args,
-    source: (override ? "override" : "path") as HarnessSource,
+    args: antigravity && !native ? [] : spec.args,
+    source: override ? "override" : "path",
+    version: spec.dev ? "mock" : null,
+    error: null,
   };
-  if (spec.dev) return { ...found, version: "mock", error: null };
+}
+
+export async function detectHarness(spec: HarnessSpec, override: string | null): Promise<HarnessStatus> {
+  const env = await loginShellEnv();
+  const found = { ...resolveHarness(spec, override, env), installers: await installerStatuses(spec, env) };
+  if (!found.command || found.version || found.source === "managed" || found.source === "bundled") return found;
+  // An arbitrary ACP wrapper has no version/help contract. Starting it here could open a session.
+  if (spec.id === ANTIGRAVITY_ID && found.args.length === 0) return found;
   try {
-    const p = Bun.spawn([onPath, ...spec.versionArgs], { env, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-    const timer = setTimeout(() => p.kill(), 8000);
+    if (spec.id === ANTIGRAVITY_ID) {
+      const help = Bun.spawn([found.command, "acp", "--help"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+        stdin: "ignore",
+        timeout: 5000,
+      });
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(help.stdout).text(),
+        new Response(help.stderr).text(),
+        help.exited,
+      ]);
+      if (code !== 0 || !/\bagy(?:\.exe)? acp\b/i.test(stdout + stderr))
+        return {
+          ...found,
+          path: null,
+          command: null,
+          error: "当前 agy 未提供可用的 acp 子命令，请更新 Antigravity CLI",
+        };
+    }
+    const p = Bun.spawn([found.command, ...spec.versionArgs], {
+      env,
+      stdout: "pipe",
+      stderr: "ignore",
+      stdin: "ignore",
+      timeout: 8000,
+    });
     const out = (await new Response(p.stdout).text()).trim();
-    clearTimeout(timer);
-    return { ...found, version: out.split("\n")[0]?.slice(0, 80) || null, error: null };
+    return { ...found, version: out.split("\n")[0]?.slice(0, 80) || null };
   } catch (e) {
-    return { ...found, version: null, error: (e as Error).message };
+    return {
+      ...found,
+      ...(spec.id === ANTIGRAVITY_ID ? { path: null, command: null } : {}),
+      error: (e as Error).message,
+    };
   }
 }
 

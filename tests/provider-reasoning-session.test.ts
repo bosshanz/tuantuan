@@ -1,5 +1,14 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
@@ -28,6 +37,7 @@ interface Call {
   pid: number;
   method: string;
   sessionId?: string;
+  _meta?: Record<string, unknown>;
   configId?: string;
   value?: string;
 }
@@ -56,6 +66,7 @@ beforeAll(() => {
     `#!${process.execPath}
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+if (process.argv.includes("--help")) { console.log("Usage: agy acp [flags]"); process.exit(0); }
 if (process.argv.includes("--version")) { console.log("1.19.0"); process.exit(0); }
 const callsFile = ${JSON.stringify(callsFile)};
 const sessionsFile = ${JSON.stringify(sessionsFile)};
@@ -80,7 +91,8 @@ function request(method, params) {
   appendFileSync(callsFile, JSON.stringify({ pid: process.pid, method, ...params }) + "\\n");
   if (method === "initialize") return {
     protocolVersion: 1,
-    agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } }, authMethods: [],
+    agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} },
+      ...(process.env.FIXTURE_AGY_META ? { _meta: { antigravity: { systemPrompt: { append: true } } } } : {}) }, authMethods: [],
   };
   if (method === "providers/set") return {};
   if (method === "session/new") {
@@ -95,6 +107,7 @@ function request(method, params) {
   const session = sessions[params.sessionId];
   if (!session) throw new Error("Unknown session");
   if (method === "session/resume" || method === "session/load") {
+    if (session.resumeModel) session.model = session.resumeModel;
     if (session.resumeLevel) { session.level = session.resumeLevel; save(); }
     return { configOptions: options(session) };
   }
@@ -199,6 +212,57 @@ function fixture(
 function level(view: Pick<SessionView, "configOptions">, id: string) {
   return view.configOptions.find((option) => option.id === id)?.currentValue;
 }
+
+test.skipIf(process.platform === "win32")(
+  "native agy restores the selected model before its reasoning level",
+  async () => {
+    const id = "reg:antigravity-acp";
+    const agy = join(scratch, "agy");
+    symlinkSync(executable, agy);
+    app.store.setSetting("harnessPaths", { ...app.store.getSetting("harnessPaths", {}), [id]: agy });
+    const cwd = join(scratch, "native-project");
+    mkdirSync(cwd);
+    writeFileSync(
+      join(cwd, "reasoning-fixture.json"),
+      JSON.stringify({
+        model: "default",
+        extraModels: ["default", "selected"],
+        configId: "thought_level",
+        resumeModel: "default",
+        resumeLevel: "high",
+        resetLevelOnModel: true,
+      }),
+    );
+    const project = app.store.createProject("Native model restoration", cwd);
+    const agent = app.store.createAgent(agentInput("Antigravity", { harness: id }));
+    const room = app.store.createRoom("Resume native settings", [agent.id], { projectId: project.id });
+    const first = await app.host.session(room, agent, "legacy fixture role");
+    expect(first.slot.identityPending).toBe(true);
+    expect(calls().findLast((call) => call.method === "session/new")?._meta?.antigravity).toBeUndefined();
+    await app.host.setConfig(room, agent, "legacy fixture role", "model", "selected");
+    await app.host.setConfig(room, agent, "legacy fixture role", "thought_level", "low");
+    app.host.dropHarness(id);
+    await first.proc.acp.exited;
+    const before = calls().length;
+    const { slot } = await app.host.session(room, agent, "legacy fixture role");
+    expect(slot.view.sessionId).toBe(first.slot.view.sessionId);
+    expect(level(slot.view, "model")).toBe("selected");
+    expect(level(slot.view, "thought_level")).toBe("low");
+    expect(
+      calls()
+        .slice(before)
+        .filter((c) => c.method === "session/set_config_option")
+        .map((c) => c.configId),
+    ).toEqual(["model", "thought_level"]);
+    const withMeta = app.store.createAgent(agentInput("NativeRole", { harness: id, env: { FIXTURE_AGY_META: "1" } }));
+    const secondRoom = app.store.createRoom("Native identity", [withMeta.id], { projectId: project.id });
+    const native = await app.host.session(secondRoom, withMeta, "Native reviewer identity");
+    expect(native.slot.identityPending).toBe(false);
+    expect(calls().findLast((call) => call.method === "session/new")?._meta).toMatchObject({
+      antigravity: { systemPrompt: { append: "Native reviewer identity" } },
+    });
+  },
+);
 
 for (const harness of harnesses) {
   const id = reasoningId(harness);

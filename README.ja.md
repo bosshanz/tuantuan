@@ -6,7 +6,7 @@
 
 **複数のエージェントがローカルで協力するためのワークスペース。**
 
-Claude Code、Codex、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code などのコーディングエージェントを、プロジェクトごとの会話で利用できます。Tuantuan は [Agent Client Protocol（ACP）](https://agentclientprotocol.com) を通じて、各エージェントの実行環境（ハーネス）に接続します。
+Claude Code、Codex、Google Antigravity、DeepSeek、OpenCode、Pi、Grok Build、MiniMax Code などのコーディングエージェントを、プロジェクトごとの会話で利用できます。Tuantuan は [Agent Client Protocol（ACP）](https://agentclientprotocol.com) を通じて、各エージェントの実行環境（ハーネス）に接続します。
 
 macOS、Windows、Linux 向けの Electron デスクトップアプリ、またはブラウザーとローカルサーバーの組み合わせで動作します。モデルの利用には、ご自身のハーネス用アカウントや API プロバイダーを使います。Tuantuan 自体にモデルサービスは含まれていません。
 

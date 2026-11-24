@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -24,18 +25,21 @@ import { CUSTOM_FORMATS, CUSTOM_HARNESS, maskKey, testConnection } from "./custo
 import { listDirs, pickFolderNative, places } from "./dirpicker";
 import { handleGitStatus, handleGitStatusDetail } from "./git-status";
 import {
+  ANTIGRAVITY_ID,
   detectHarness,
+  type HarnessStatus,
   harnessSpec,
   installerStatuses,
   loginShellEnv,
   REG_PREFIX,
   registryInstallable,
   resetLoginShellEnv,
+  resolveHarness,
   setRegistry,
   specForRegistryAgent,
   visibleHarnesses,
 } from "./harness";
-import { harnessRuntimeIdentity, invalidateHarnessRuntime } from "./harness-runtime";
+import { harnessRuntimeFingerprint, harnessRuntimeIdentity, invalidateHarnessRuntime } from "./harness-runtime";
 import { ENV_NAME, harnessSecretEnv, openTerminal, publicHarnessEnv, setHarnessEnv } from "./harness-secrets";
 import { HarnessHost, nativeReasoningPreferences, withProviderMeta } from "./host";
 import { Installer } from "./installer";
@@ -425,7 +429,14 @@ export function createApp(deps: AppDeps) {
       for (const key of pe.unset) delete env[key];
       Object.assign(env, pe.set);
     }
-    return { spec, status, env, provider: prov, identity: harnessRuntimeIdentity(status, env) };
+    return {
+      spec,
+      status,
+      env,
+      provider: prov,
+      identity: harnessRuntimeIdentity(status, env),
+      quotaRuntime: isRegistryUsageId(id) ? quotaFingerprint(id, status, env) : "",
+    };
   }
   async function harnessOptionsFor(id: string, refresh: boolean, providerId: string | null = null) {
     const launch = await harnessProbeLaunch(id, providerId);
@@ -555,15 +566,39 @@ export function createApp(deps: AppDeps) {
     }
   }
 
-  const registryLimits = new Map<RegistryUsageId, RegistryQuotaSnapshot | null>();
-  const registryLimitsInflight = new Map<RegistryUsageId, Promise<RegistryQuotaSnapshot>>();
+  const registryLimitsInflight = new Map<string, Promise<RegistryQuotaSnapshot>>();
   const registryQuotaKey = (id: RegistryUsageId) => `registryQuota:${id}`;
-  const registryVersion = (id: RegistryUsageId) =>
-    readManifest(id.slice(REG_PREFIX.length))?.version ?? registry.agent(id.slice(REG_PREFIX.length))?.version ?? null;
-  function cachedRegistryLimits(id: RegistryUsageId) {
-    if (!registryLimits.has(id))
-      registryLimits.set(id, store.getSetting<RegistryQuotaSnapshot | null>(registryQuotaKey(id), null));
-    return registryLimits.get(id) ?? null;
+
+  function quotaFingerprint(
+    id: RegistryUsageId,
+    status: Omit<HarnessStatus, "installers">,
+    env: Record<string, string>,
+  ) {
+    // A cache-only read must not run --version or start an ACP session. The executable and
+    // managed install's file identities already distinguish upgrades. Never persist credentials.
+    // Even an outdated agy that fails its ACP check is still the selected executable.
+    const command =
+      status.command ??
+      (id === ANTIGRAVITY_ID && status.args[0] === "acp" ? (status.override ?? status.nativeCliPath) : null);
+    const runtime = harnessRuntimeFingerprint({ ...status, command: command ?? null, version: null }, env);
+    return createHash("sha256")
+      .update(JSON.stringify([runtime, env.HOME, env.GEMINI_HOME, harnessSecretEnv(store, id)]))
+      .digest("hex");
+  }
+
+  function quotaSelection(id: RegistryUsageId, env: Record<string, string>) {
+    const spec = harnessSpec(id);
+    if (!spec) return null;
+    const paths = store.getSetting<Record<string, string>>("harnessPaths", {});
+    const status = resolveHarness(spec, paths[id] ?? null, env);
+    return { status, runtime: quotaFingerprint(id, status, { ...env, ...status.env, ...harnessSecretEnv(store, id) }) };
+  }
+
+  function cachedRegistryLimits(id: RegistryUsageId, runtime: string) {
+    const hit = store.getSetting<RegistryQuotaSnapshot | null>(registryQuotaKey(id), null);
+    if (!hit) return null;
+    // Antigravity used the same id for managed servers and custom executables before this change.
+    return hit.runtime === runtime || (!hit.runtime && id !== ANTIGRAVITY_ID) ? hit : null;
   }
   function registryQuotaFailure(error: unknown): RegistryQuota {
     const message = error instanceof Error ? error.message : String(error);
@@ -579,8 +614,14 @@ export function createApp(deps: AppDeps) {
             : "额度查询失败，请重试或检查 Harness 的原生状态";
     return { limits: [], plan: null, notes: [], error: detail };
   }
-  function syncRegistryLimits(id: RegistryUsageId, read: () => Promise<RegistryQuota>, freshAfterPending = false) {
-    const pending = registryLimitsInflight.get(id);
+  function syncRegistryLimits(
+    id: RegistryUsageId,
+    runtime: string,
+    read: () => Promise<RegistryQuota>,
+    freshAfterPending = false,
+  ) {
+    const key = `${id}|${runtime}`;
+    const pending = registryLimitsInflight.get(key);
     if (pending && !freshAfterPending) return pending;
     // A successful login changes the account state. Reserve a fresh read behind any older one;
     // manual refreshes can join this reservation, and the old snapshot cannot finish after it.
@@ -588,34 +629,31 @@ export function createApp(deps: AppDeps) {
     const job = ready
       .then(read)
       .catch(registryQuotaFailure)
-      .then((result) => {
-        const snapshot = { ...result, at: Date.now() };
-        registryLimits.set(id, snapshot);
-        store.setSetting(registryQuotaKey(id), snapshot);
+      .then(async (result) => {
+        const snapshot = { ...result, runtime, at: Date.now() };
+        // A refresh on an old source may finish after switching to and querying another one.
+        if (quotaSelection(id, await loginShellEnv())?.runtime === runtime)
+          store.setSetting(registryQuotaKey(id), snapshot);
         return snapshot;
       })
       .finally(() => {
-        if (registryLimitsInflight.get(id) === job) registryLimitsInflight.delete(id);
+        if (registryLimitsInflight.get(key) === job) registryLimitsInflight.delete(key);
       });
-    registryLimitsInflight.set(id, job);
+    registryLimitsInflight.set(key, job);
     return job;
   }
   async function registryLiveLimits(id: RegistryUsageId) {
-    return syncRegistryLimits(id, async () => {
-      const spec = harnessSpec(id);
-      if (!spec) throw new ValidationError(`未知 Harness：${id}`, 404);
-      const status = await detectHarness(
-        spec,
-        store.getSetting<Record<string, string>>("harnessPaths", {})[id] ?? null,
-      );
-      if (!status.command) return { limits: [], plan: null, notes: [], error: "Harness 未安装或配置的路径不可用" };
+    const { status, env, quotaRuntime } = await harnessProbeLaunch(id);
+    return syncRegistryLimits(id, quotaRuntime, async () => {
+      if (!status.command)
+        return { limits: [], plan: null, notes: [], error: status.error ?? "Harness 未安装或配置的路径不可用" };
       const scratch = mkdtempSync(join(tmpdir(), "tuantuan-registry-usage-"));
       const collector = new RegistryUsageCollector();
       const process = new AcpProcess(
         {
           command: status.command,
           args: status.args,
-          env: { ...(await loginShellEnv()), ...status.env, ...harnessSecretEnv(store, id) },
+          env,
           cwd: scratch,
         },
         {
@@ -625,7 +663,7 @@ export function createApp(deps: AppDeps) {
       );
       try {
         await process.initialize(30_000);
-        return await queryRegistryQuota(id, process, collector, { version: registryVersion(id) });
+        return await queryRegistryQuota(id, process, collector, { version: status.version });
       } finally {
         process.kill();
         rmSync(scratch, { recursive: true, force: true });
@@ -702,14 +740,17 @@ export function createApp(deps: AppDeps) {
       ],
     });
     const configured = new Set(store.listAgents().map((agent) => agent.harness));
-    const paths = store.getSetting<Record<string, string>>("harnessPaths", {});
+    const env = await loginShellEnv();
     for (const id of REGISTRY_USAGE_IDS) {
-      if (!readManifest(id.slice(REG_PREFIX.length)) && !paths[id] && !configured.has(id)) continue;
-      const hit = cachedRegistryLimits(id);
+      const selected = quotaSelection(id, env);
+      if (!selected) continue;
+      const { status, runtime } = selected;
+      if (!status.command && !status.override && !configured.has(id)) continue;
+      const hit = cachedRegistryLimits(id, runtime);
       const notes = [
         ...(hit?.notes ?? []),
         ...(hit?.error ? [hit.error] : hit ? [] : ["额度尚未查询；请点刷新，或在 Harness 登录/测试成功后同步"]),
-        ...(id === "reg:zcode-acp" && registryVersion(id) === "0.70.0" ? [ZCODE_070_NOTE] : []),
+        ...(id === "reg:zcode-acp" && status.version === "0.70.0" ? [ZCODE_070_NOTE] : []),
       ];
       out.push({
         harness: id,
@@ -719,7 +760,7 @@ export function createApp(deps: AppDeps) {
         week: null,
         limits: hit?.limits ?? [],
         limitsAt: hit?.at ?? null,
-        limitsSource: hit ? registryUsageSource(id) : null,
+        limitsSource: hit ? registryUsageSource(id, status.source, status.args, hit.method) : null,
         plan: hit?.plan ?? null,
         notes: [...new Set(notes)],
       });
@@ -734,16 +775,16 @@ export function createApp(deps: AppDeps) {
     launch?: Awaited<ReturnType<typeof harnessProbeLaunch>>,
   ) {
     const context = launch ?? (await harnessProbeLaunch(id, providerId));
-    const { spec, status, env, provider: useProv, identity } = context;
+    const { spec, status, env, provider: useProv, identity, quotaRuntime } = context;
     const current = () => harnessRuntimeIdentity(status, env) === identity;
     const command = status.command;
     if (!command) {
       if (isRegistryUsageId(id))
-        await syncRegistryLimits(id, async () => ({
+        await syncRegistryLimits(id, quotaRuntime, async () => ({
           limits: [],
           plan: null,
           notes: [],
-          error: "Harness 未安装或配置的路径不可用",
+          error: status.error ?? "Harness 未安装或配置的路径不可用",
         }));
       return { ok: false, error: status.error, install: spec.install, login: status.login };
     }
@@ -977,11 +1018,12 @@ export function createApp(deps: AppDeps) {
         if (loggedIn === true && !authError && created)
           await syncRegistryLimits(
             id,
-            () => queryRegistryQuota(id, p, usageCollector, { created, version: registryVersion(id) }),
+            quotaRuntime,
+            () => queryRegistryQuota(id, p, usageCollector, { created, version: status.version }),
             true,
           );
         else if (loggedIn === false || authError || sessionError)
-          await syncRegistryLimits(id, async () =>
+          await syncRegistryLimits(id, quotaRuntime, async () =>
             registryQuotaFailure(new Error(authError ?? sessionError ?? "authentication required")),
           );
       }
@@ -992,8 +1034,8 @@ export function createApp(deps: AppDeps) {
         agentInfo: init.agentInfo ?? null,
         authMethods,
         capabilities: init.agentCapabilities ?? {},
-        auth: spec.auth,
-        login: spec.login,
+        auth: status.auth,
+        login: status.login,
         loggedIn,
         needsKey,
         secretEnv: publicHarnessEnv(store, id),
@@ -1003,8 +1045,9 @@ export function createApp(deps: AppDeps) {
       };
     } catch (e) {
       if (e instanceof ValidationError) throw e;
-      if (isRegistryUsageId(id) && !useProv) await syncRegistryLimits(id, async () => registryQuotaFailure(e));
-      return { ok: false, error: (e as Error).message, login: spec.login };
+      if (isRegistryUsageId(id) && !useProv)
+        await syncRegistryLimits(id, quotaRuntime, async () => registryQuotaFailure(e));
+      return { ok: false, error: (e as Error).message, login: status.login };
     } finally {
       p.kill();
       rmSync(scratch, { recursive: true, force: true });
