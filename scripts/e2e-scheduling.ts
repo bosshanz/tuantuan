@@ -382,32 +382,33 @@ export async function schedulingSmoke(browser: Browser, base: string, roomId: st
       await page.screenshot({ path: join(shotsDir, "group-scheduling-narrow.png"), animations: "disabled" });
     await page.setViewportSize({ width: 1440, height: 1000 });
 
+    const retractEndpoint = `${base}/api/rooms/${roomId}/retract/${queuedTask.id}`;
     let failedAttempts = 0;
-    await page.route(cancelEndpoint, async (route) => {
+    await page.route(retractEndpoint, async (route) => {
       failedAttempts++;
-      if (route.request().postDataJSON().taskId !== queuedTask.id)
-        throw new Error("cancel omitted the selected taskId");
       await new Promise((resolve) => setTimeout(resolve, 150));
       await route.fulfill({
         status: 503,
         contentType: "application/json",
-        body: JSON.stringify({ error: "定向取消暂时失败" }),
+        body: JSON.stringify({ error: "撤回排队消息暂时失败" }),
       });
     });
-    await taskRow(queuedTask.id).getByRole("button", { name: "取消排队", exact: true }).click();
+    await taskRow(queuedTask.id).getByRole("button", { name: "编辑消息", exact: true }).click();
     await page.keyboard.press("Enter");
-    await taskRow(queuedTask.id).getByRole("alert").filter({ hasText: "定向取消暂时失败" }).waitFor();
-    if (failedAttempts !== 1) throw new Error("cancel task was submitted twice while pending");
-    await page.unroute(cancelEndpoint);
-    await taskRow(queuedTask.id).getByRole("button", { name: "取消排队", exact: true }).click();
-    const afterQueueCancel = await waitState(
+    await page.getByRole("alert").filter({ hasText: "撤回排队消息暂时失败" }).waitFor();
+    if (failedAttempts !== 1) throw new Error("queued edit was submitted twice while pending");
+    await page.unroute(retractEndpoint);
+    await taskRow(queuedTask.id).getByRole("button", { name: "编辑消息", exact: true }).click();
+    const afterQueueEdit = await waitState(
       (s) => s.state.tasks.length === 2 && !s.state.tasks.some((t) => t.id === queuedTask.id),
-      "queued cancel preserves running tasks",
+      "editing a queued message preserves running tasks",
     );
-    if (!afterQueueCancel.state.tasks.every((t) => t.id === a.id || t.id === b.id))
-      throw new Error("queued cancel replaced an unrelated task");
+    if (!afterQueueEdit.state.tasks.every((t) => t.id === a.id || t.id === b.id))
+      throw new Error("queued edit replaced an unrelated task");
     await taskRow(queuedTask.id).waitFor({ state: "hidden" });
-    console.log("scheduling: queued cancellation retry preserved both running tasks");
+    if ((await input.inputValue()) !== `@${a.agentName} 排队请求待取消`)
+      throw new Error("queued edit did not restore the original draft");
+    console.log("scheduling: queued edit retry restored the draft and preserved both running tasks");
 
     await send(`@${a.agentName} 独立排队请求第二轮`);
     const second = (
